@@ -465,7 +465,7 @@ class GlobalAllocationCountLimitsTests(unittest.TestCase):
         while sys.issandboxsuspended():
             sys.resumesandboxlimits()
         sys.setsandboxlimits(**self.original_limits)
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
 
     def test_set_and_get_global_max_allocations(self):
         """Setting and getting global_max_allocations should work."""
@@ -475,7 +475,7 @@ class GlobalAllocationCountLimitsTests(unittest.TestCase):
 
     def test_global_allocation_count_tracked(self):
         """Global allocation count should be tracked."""
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
         initial = sys.getsandboxcounts()['global_allocation_count']
         self.assertEqual(initial, 0)
 
@@ -494,7 +494,7 @@ class GlobalAllocationCountLimitsTests(unittest.TestCase):
         code = '''
 import sys
 sys.setsandboxlimits(global_max_allocations=1000)
-sys.resetsandboxglobalallocationcount()
+sys.resetsandboxcounters()
 a = []
 try:
     for i in range(2000):
@@ -521,7 +521,7 @@ except MemoryError:
                       f"Expected MemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_reset_global_allocation_count(self):
-        """resetsandboxglobalallocationcount should reset counter to 0."""
+        """resetsandboxcounters should reset global allocation counter to 0."""
         sys.setsandboxlimits(global_max_allocations=1000)
 
         # Create some objects
@@ -531,14 +531,14 @@ except MemoryError:
         count_before = sys.getsandboxcounts()['global_allocation_count']
         self.assertGreater(count_before, 0)
 
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
         count_after = sys.getsandboxcounts()['global_allocation_count']
         self.assertEqual(count_after, 0)
 
     def test_allocations_while_suspended_dont_count(self):
         """Allocations while suspended should not count toward limit."""
         sys.setsandboxlimits(global_max_allocations=100)
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
 
         # Suspend and create lots of objects
         sys.suspendsandboxlimits()
@@ -554,7 +554,7 @@ except MemoryError:
     def test_no_limit_allows_many_allocations(self):
         """With no limit (0), many allocations should be allowed."""
         sys.setsandboxlimits(global_max_allocations=0)
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
 
         # Create many objects - should not raise
         for _ in range(1000):
@@ -696,7 +696,7 @@ except RuntimeError as e:
                         f"Statement limit not enforced: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_reset_scope_statement_count(self):
-        """resetsandboxscopestatementcount should reset counter."""
+        """resetsandboxcounters should reset scope statement counter."""
         sys.setsandboxlimits(scope_max_statements=1000000)
         sys.entersandboxscope()
 
@@ -709,7 +709,7 @@ except RuntimeError as e:
         # (the actual count depends on tracing implementation)
         self.assertGreater(counts_before['scope_statement_count'], 50)
 
-        sys.resetsandboxscopestatementcount()
+        sys.resetsandboxcounters()
         # A few more statements may execute before we exit scope, so count
         # won't be exactly 0 but should be significantly less than before
         sys.exitsandboxscope()
@@ -727,9 +727,7 @@ class ScopedAllocationCountTests(unittest.TestCase):
         except:
             pass
         # Reset all counters for clean test state
-        sys.resetsandboxscopeallocationcount()
-        sys.resetsandboxscopestatementcount()
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
@@ -740,7 +738,7 @@ class ScopedAllocationCountTests(unittest.TestCase):
         except:
             pass
         sys.setsandboxlimits(**self.original_limits)
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
 
     def test_set_and_get_scope_max_allocations(self):
         """Setting and getting scope_max_allocations should work."""
@@ -794,7 +792,7 @@ except MemoryError:
                       f"Expected MemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_reset_scope_allocation_count(self):
-        """resetsandboxscopeallocationcount should reset counter."""
+        """resetsandboxcounters should reset scope allocation counter."""
         sys.setsandboxlimits(scope_max_allocations=10000)
         sys.entersandboxscope()
 
@@ -806,7 +804,7 @@ except MemoryError:
         counts_before = sys.getsandboxcounts()
         self.assertGreater(counts_before['scope_allocation_count'], 20)
 
-        sys.resetsandboxscopeallocationcount()
+        sys.resetsandboxcounters()
         counts_after = sys.getsandboxcounts()
         # Count may not be exactly 0 due to dict allocation in getsandboxcounts
         self.assertLess(counts_after['scope_allocation_count'], 10)
@@ -814,7 +812,7 @@ except MemoryError:
     def test_allocations_outside_scope_dont_count_scoped(self):
         """Allocations outside scope should not count toward scoped limit."""
         sys.setsandboxlimits(scope_max_allocations=10000)
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
 
         # Not in scope - create many objects and KEEP REFERENCES
         result = []
@@ -830,7 +828,7 @@ except MemoryError:
     def test_global_and_scoped_counts_independent(self):
         """Global and scoped allocation counts should be tracked independently."""
         sys.setsandboxlimits(global_max_allocations=100000, scope_max_allocations=10000)
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
 
         # Create many objects outside scope and KEEP REFERENCES
         result = []
@@ -886,7 +884,7 @@ sys.setsandboxlimits(
     scope_max_statements=10000,
     scope_max_allocations=5000,
 )
-sys.resetsandboxglobalallocationcount()
+sys.resetsandboxcounters()
 sys.entersandboxscope()
 try:
     exec("""
@@ -927,9 +925,7 @@ class SelectedFramesScopeTests(unittest.TestCase):
         except:
             pass
         # Reset all counters for clean test state
-        sys.resetsandboxscopeallocationcount()
-        sys.resetsandboxscopestatementcount()
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
@@ -940,7 +936,7 @@ class SelectedFramesScopeTests(unittest.TestCase):
         except:
             pass
         sys.setsandboxlimits(**self.original_limits)
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
 
     def test_addsandboxframe_basic(self):
         """addsandboxframe should add the current frame's filename to the set."""
@@ -1259,9 +1255,7 @@ class FilenameBasedScopeTests(unittest.TestCase):
         except:
             pass
         # Reset all counters for clean test state
-        sys.resetsandboxscopeallocationcount()
-        sys.resetsandboxscopestatementcount()
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
@@ -1272,7 +1266,7 @@ class FilenameBasedScopeTests(unittest.TestCase):
         except:
             pass
         sys.setsandboxlimits(**self.original_limits)
-        sys.resetsandboxglobalallocationcount()
+        sys.resetsandboxcounters()
 
     def test_addsandboxfilename_basic(self):
         """addsandboxfilename should register a filename for scope tracking."""

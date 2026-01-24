@@ -884,9 +884,7 @@ finalize_interp_clear(...)
 
 | Function | Description |
 |----------|-------------|
-| `sys.resetsandboxglobalallocationcount()` | Reset global allocation counter |
-| `sys.resetsandboxscopestatementcount()` | Reset scope statement counter |
-| `sys.resetsandboxscopeallocationcount()` | Reset scope allocation counter |
+| `sys.resetsandboxcounters()` | Reset all counters (global and scope) |
 
 ### Scope Management
 
@@ -949,9 +947,7 @@ PyAPI_FUNC(void) _PySandbox_ClearFilenames(void);
 ### Counter Reset
 
 ```c
-PyAPI_FUNC(void) _PySandbox_ResetScopeStatementCount(void);
-PyAPI_FUNC(void) _PySandbox_ResetScopeAllocationCount(void);
-PyAPI_FUNC(void) _PySandbox_ResetGlobalAllocationCount(void);
+PyAPI_FUNC(void) _PySandbox_ResetCounters(void);
 ```
 
 ### Initialization

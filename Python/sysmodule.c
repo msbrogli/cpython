@@ -2155,43 +2155,18 @@ Contains:\n\
 );
 
 static PyObject *
-sys_resetsandboxglobalallocationcount(PyObject *self, PyObject *Py_UNUSED(args))
+sys_resetsandboxcounters(PyObject *self, PyObject *Py_UNUSED(args))
 {
-    _PySandbox_ResetGlobalAllocationCount();
+    _PySandbox_ResetCounters();
     Py_RETURN_NONE;
 }
 
-PyDoc_STRVAR(resetsandboxglobalallocationcount_doc,
-"resetsandboxglobalallocationcount()\n\
+PyDoc_STRVAR(resetsandboxcounters_doc,
+"resetsandboxcounters()\n\
 \n\
-Reset the global sandbox allocation counter to 0.\n\
-Use this before running untrusted code to track total allocations."
-);
-
-static PyObject *
-sys_resetsandboxscopestatementcount(PyObject *self, PyObject *Py_UNUSED(args))
-{
-    _PySandbox_ResetScopeStatementCount();
-    Py_RETURN_NONE;
-}
-
-PyDoc_STRVAR(resetsandboxscopestatementcount_doc,
-"resetsandboxscopestatementcount()\n\
-\n\
-Reset the scoped statement counter to 0."
-);
-
-static PyObject *
-sys_resetsandboxscopeallocationcount(PyObject *self, PyObject *Py_UNUSED(args))
-{
-    _PySandbox_ResetScopeAllocationCount();
-    Py_RETURN_NONE;
-}
-
-PyDoc_STRVAR(resetsandboxscopeallocationcount_doc,
-"resetsandboxscopeallocationcount()\n\
-\n\
-Reset the scoped allocation counter to 0."
+Reset all sandbox counters to 0.\n\
+This resets: global_allocation_count, scope_statement_count, scope_allocation_count.\n\
+Use this before running untrusted code to track allocations and statements."
 );
 
 static PyObject *
@@ -2485,12 +2460,8 @@ static PyMethodDef sys_methods[] = {
     {"setsandboxlimits", _PyCFunction_CAST(sys_setsandboxlimits),
      METH_VARARGS | METH_KEYWORDS, setsandboxlimits_doc},
     {"getsandboxcounts", sys_getsandboxcounts, METH_NOARGS, getsandboxcounts_doc},
-    {"resetsandboxglobalallocationcount", sys_resetsandboxglobalallocationcount, METH_NOARGS,
-     resetsandboxglobalallocationcount_doc},
-    {"resetsandboxscopestatementcount", sys_resetsandboxscopestatementcount, METH_NOARGS,
-     resetsandboxscopestatementcount_doc},
-    {"resetsandboxscopeallocationcount", sys_resetsandboxscopeallocationcount, METH_NOARGS,
-     resetsandboxscopeallocationcount_doc},
+    {"resetsandboxcounters", sys_resetsandboxcounters, METH_NOARGS,
+     resetsandboxcounters_doc},
     {"entersandboxscope", sys_entersandboxscope, METH_NOARGS,
      entersandboxscope_doc},
     {"exitsandboxscope", sys_exitsandboxscope, METH_NOARGS,

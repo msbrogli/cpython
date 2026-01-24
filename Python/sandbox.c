@@ -659,29 +659,13 @@ _PySandbox_AddFrameToScope(void)
 /* ============ Counter Resetters ============ */
 
 void
-_PySandbox_ResetScopeStatementCount(void)
-{
-    PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp != NULL) {
-        interp->sandbox.limits.scope_statement_count = 0;
-    }
-}
-
-void
-_PySandbox_ResetScopeAllocationCount(void)
-{
-    PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp != NULL) {
-        interp->sandbox.limits.scope_allocation_count = 0;
-    }
-}
-
-void
-_PySandbox_ResetGlobalAllocationCount(void)
+_PySandbox_ResetCounters(void)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp != NULL) {
         interp->sandbox.limits.global_allocation_count = 0;
+        interp->sandbox.limits.scope_statement_count = 0;
+        interp->sandbox.limits.scope_allocation_count = 0;
     }
 }
 

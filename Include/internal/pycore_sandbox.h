@@ -199,10 +199,8 @@ PyAPI_FUNC(int) _PySandbox_AddFilename(PyObject *filename);      /* Add a filena
 PyAPI_FUNC(int) _PySandbox_RemoveFilename(PyObject *filename);   /* Remove a filename from the set */
 PyAPI_FUNC(void) _PySandbox_ClearFilenames(void);                /* Clear all registered filenames */
 
-/* Counter resetters */
-PyAPI_FUNC(void) _PySandbox_ResetScopeStatementCount(void);
-PyAPI_FUNC(void) _PySandbox_ResetScopeAllocationCount(void);
-PyAPI_FUNC(void) _PySandbox_ResetGlobalAllocationCount(void);
+/* Counter resetter - resets all counters (global and scope) */
+PyAPI_FUNC(void) _PySandbox_ResetCounters(void);
 
 /* Call object creation hook. Returns new object (may be replacement) or NULL on error */
 PyAPI_FUNC(PyObject *) _PySandbox_CallCreationHook(

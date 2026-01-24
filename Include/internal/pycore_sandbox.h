@@ -29,6 +29,19 @@ struct _frame;
 /* Forward declaration for interpreter frame */
 struct _PyInterpreterFrame;
 
+/* Entry for selected frames hash set - stores frame + code for disambiguation */
+typedef struct {
+    void *frame;             /* _PyInterpreterFrame pointer */
+    void *code;              /* PyCodeObject pointer for this frame */
+} _PySandboxFrameEntry;
+
+/* Selected frames hash set - stores frame+code pairs for O(1) lookup */
+typedef struct {
+    _PySandboxFrameEntry *entries;  /* Array of frame entries */
+    size_t capacity;         /* Capacity (power of 2) */
+    size_t count;            /* Number of selected frames */
+} _PySandboxFrameSet;
+
 /* Sandbox limits structure - stored in PyInterpreterState */
 typedef struct {
     /* Integer limits: max number of internal digits (each ~30 bits) */
@@ -49,14 +62,17 @@ typedef struct {
     uint64_t global_max_allocations;   /* 0 = no limit */
     uint64_t global_allocation_count;  /* Current count */
 
-    /* Scoped limits - only enforced within sandbox scope (frame ancestry) */
+    /* Scoped limits - only enforced within sandbox scope (selected frames) */
     uint64_t scope_max_statements;      /* 0 = no limit */
     uint64_t scope_statement_count;     /* Line executions in scope */
     uint64_t scope_max_allocations;     /* 0 = no limit */
     uint64_t scope_allocation_count;    /* Allocations in scope */
 
-    /* Sandbox scope tracking - frame that started the sandbox scope */
-    struct _PyInterpreterFrame *sandbox_entry_frame;
+    /* Sandbox scope tracking - set of selected frames
+     * Only code executing directly in these frames counts toward scope limits.
+     * When a selected frame calls non-selected code, the call counts but
+     * execution in the non-selected frame does not. */
+    _PySandboxFrameSet selected_frames;
 
     /* Type restrictions */
     int allow_float;         /* 0 = forbidden, 1 = allowed (default) */
@@ -86,7 +102,7 @@ typedef struct {
     .scope_statement_count = 0,     \
     .scope_max_allocations = 0,     \
     .scope_allocation_count = 0,    \
-    .sandbox_entry_frame = NULL,    \
+    .selected_frames = {.entries = NULL, .capacity = 0, .count = 0}, \
     .allow_float = 1,               \
     .allow_complex = 1,             \
     .in_check = 0,                  \
@@ -178,8 +194,9 @@ PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
 
 /* Sandbox scope management */
 PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */
-PyAPI_FUNC(int) _PySandbox_ExitScope(void);    /* Clear entry frame */
+PyAPI_FUNC(int) _PySandbox_ExitScope(void);    /* Clear entry frame and selected frames */
 PyAPI_FUNC(int) _PySandbox_IsInScope(void);    /* Check if currently in sandbox scope */
+PyAPI_FUNC(int) _PySandbox_AddFrameToScope(void);  /* Add current frame to selected frames set */
 
 /* Counter resetters */
 PyAPI_FUNC(void) _PySandbox_ResetScopeStatementCount(void);

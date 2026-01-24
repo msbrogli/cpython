@@ -7,6 +7,9 @@
 #include "pycore_sandbox.h"
 #include "frameobject.h"
 
+/* Forward declarations */
+static void free_selected_frames(_PySandboxFrameSet *set);
+
 /* ============ Initialization ============ */
 
 void
@@ -30,7 +33,11 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.limits.scope_statement_count = 0;
     interp->sandbox.limits.scope_max_allocations = 0;
     interp->sandbox.limits.scope_allocation_count = 0;
-    interp->sandbox.limits.sandbox_entry_frame = NULL;
+
+    /* Selected frames set (lazy-initialized) */
+    interp->sandbox.limits.selected_frames.entries = NULL;
+    interp->sandbox.limits.selected_frames.capacity = 0;
+    interp->sandbox.limits.selected_frames.count = 0;
 
     interp->sandbox.limits.allow_float = 1;
     interp->sandbox.limits.allow_complex = 1;
@@ -46,6 +53,9 @@ _PySandbox_Init(PyInterpreterState *interp)
 void
 _PySandbox_Fini(PyInterpreterState *interp)
 {
+    /* Free selected frames hash set */
+    free_selected_frames(&interp->sandbox.limits.selected_frames);
+
     Py_CLEAR(interp->sandbox.creation_hook.hook_callback);
     interp->sandbox.creation_hook.hook_func = NULL;
     interp->sandbox.creation_hook.hook_userdata = NULL;
@@ -234,18 +244,150 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
  * This allows Python to format and print MemoryError without cascading failures. */
 #define ALLOCATION_GRACE_HEADROOM 1000
 
-/* Helper to check if a frame is an ancestor of the sandbox entry frame.
- * Walks up the frame chain to see if sandbox_entry_frame is reachable. */
-static int
-frame_in_sandbox_scope(_PyInterpreterFrame *current, _PyInterpreterFrame *entry_frame)
+/* Initial capacity for selected frames hash set */
+#define SELECTED_FRAMES_INITIAL_CAPACITY 8
+
+/* ============ Selected Frames Hash Set ============ */
+
+/* Hash function for frame pointers - uses pointer value with alignment shift */
+static inline size_t
+hash_frame_ptr(void *frame, size_t capacity)
 {
-    while (current != NULL) {
-        if (current == entry_frame) {
-            return 1;
+    uintptr_t addr = (uintptr_t)frame;
+    /* Shift off alignment bits (typically 8 bytes) and mask to capacity */
+    return (addr >> 3) & (capacity - 1);
+}
+
+/* Check if a frame is in the selected frames set. O(1) average case.
+ * We store frame+code pairs to guard against frame pointer reuse:
+ * when a function returns and its memory is reused for a new frame,
+ * the code object will be different, so we won't get false positives. */
+static int
+frame_is_selected(_PySandboxFrameSet *set, _PyInterpreterFrame *frame)
+{
+    if (set->entries == NULL || set->count == 0) {
+        return 0;
+    }
+
+    size_t capacity = set->capacity;
+    size_t index = hash_frame_ptr(frame, capacity);
+
+    /* Linear probe for match */
+    for (size_t i = 0; i < capacity; i++) {
+        _PySandboxFrameEntry *entry = &set->entries[index];
+        if (entry->frame == NULL) {
+            return 0;  /* Not found - empty slot means not in set */
         }
-        current = current->previous;
+        if (entry->frame == (void *)frame &&
+            entry->code == (void *)frame->f_code) {
+            return 1;  /* Found - both frame pointer AND code object match */
+        }
+        index = (index + 1) & (capacity - 1);
+    }
+    return 0;  /* Table full without finding - shouldn't happen */
+}
+
+/* Initialize the selected frames hash set */
+static int
+init_selected_frames(_PySandboxFrameSet *set)
+{
+    if (set->entries == NULL) {
+        set->entries = PyMem_RawCalloc(SELECTED_FRAMES_INITIAL_CAPACITY,
+                                       sizeof(_PySandboxFrameEntry));
+        if (set->entries == NULL) {
+            PyErr_NoMemory();
+            return -1;
+        }
+        set->capacity = SELECTED_FRAMES_INITIAL_CAPACITY;
+        set->count = 0;
     }
     return 0;
+}
+
+/* Grow the selected frames hash set when load factor exceeds threshold */
+static int
+grow_selected_frames(_PySandboxFrameSet *set)
+{
+    size_t old_capacity = set->capacity;
+    size_t new_capacity = old_capacity * 2;
+    _PySandboxFrameEntry *new_entries = PyMem_RawCalloc(new_capacity,
+                                                         sizeof(_PySandboxFrameEntry));
+    if (new_entries == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+
+    /* Rehash existing entries */
+    for (size_t i = 0; i < old_capacity; i++) {
+        _PySandboxFrameEntry *old_entry = &set->entries[i];
+        if (old_entry->frame != NULL) {
+            size_t index = hash_frame_ptr(old_entry->frame, new_capacity);
+            while (new_entries[index].frame != NULL) {
+                index = (index + 1) & (new_capacity - 1);
+            }
+            new_entries[index] = *old_entry;
+        }
+    }
+
+    PyMem_RawFree(set->entries);
+    set->entries = new_entries;
+    set->capacity = new_capacity;
+    return 0;
+}
+
+/* Add a frame to the selected frames set */
+static int
+add_frame_to_set(_PySandboxFrameSet *set, _PyInterpreterFrame *frame)
+{
+    if (init_selected_frames(set) < 0) {
+        return -1;
+    }
+
+    /* Check if already in set (idempotent) */
+    if (frame_is_selected(set, frame)) {
+        return 0;
+    }
+
+    /* Grow if load factor would exceed 0.7 */
+    if ((set->count + 1) * 10 > set->capacity * 7) {
+        if (grow_selected_frames(set) < 0) {
+            return -1;
+        }
+    }
+
+    /* Insert frame+code pair using linear probing */
+    size_t capacity = set->capacity;
+    size_t index = hash_frame_ptr(frame, capacity);
+    while (set->entries[index].frame != NULL) {
+        index = (index + 1) & (capacity - 1);
+    }
+    set->entries[index].frame = (void *)frame;
+    set->entries[index].code = (void *)frame->f_code;
+    set->count++;
+
+    return 0;
+}
+
+/* Clear all frames from the set (for exit scope) */
+static void
+clear_selected_frames(_PySandboxFrameSet *set)
+{
+    if (set->entries != NULL) {
+        memset(set->entries, 0, set->capacity * sizeof(_PySandboxFrameEntry));
+        set->count = 0;
+    }
+}
+
+/* Free the selected frames set (for finalization) */
+static void
+free_selected_frames(_PySandboxFrameSet *set)
+{
+    if (set->entries != NULL) {
+        PyMem_RawFree(set->entries);
+        set->entries = NULL;
+        set->capacity = 0;
+        set->count = 0;
+    }
 }
 
 /* Get the current interpreter frame */
@@ -288,11 +430,14 @@ _PySandbox_CheckAllocation(void)
     /* Always increment global allocation count (for monitoring) */
     limits->global_allocation_count++;
 
-    /* Check if in sandbox scope for scoped counting */
+    /* Check if in sandbox scope for scoped counting.
+     * Current frame must be in the selected_frames set. */
     int in_scope = 0;
-    if (limits->sandbox_entry_frame != NULL) {
+    if (limits->selected_frames.count > 0) {
         _PyInterpreterFrame *current = get_current_interpreter_frame();
-        in_scope = frame_in_sandbox_scope(current, limits->sandbox_entry_frame);
+        if (current != NULL) {
+            in_scope = frame_is_selected(&limits->selected_frames, current);
+        }
     }
 
     /* Increment scoped count if in scope */
@@ -362,14 +507,14 @@ _PySandbox_CheckScopeStatement(void)
         return 0;
     }
 
-    /* Skip if not in sandbox scope */
-    if (limits->sandbox_entry_frame == NULL) {
+    /* Skip if no selected frames */
+    if (limits->selected_frames.count == 0) {
         return 0;
     }
 
-    /* Check if current frame is within sandbox scope */
+    /* Check if current frame is in the selected frames set */
     _PyInterpreterFrame *current = get_current_interpreter_frame();
-    if (!frame_in_sandbox_scope(current, limits->sandbox_entry_frame)) {
+    if (current == NULL || !frame_is_selected(&limits->selected_frames, current)) {
         return 0;
     }
 
@@ -407,9 +552,16 @@ _PySandbox_EnterScope(void)
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    /* Store current frame as the sandbox entry frame */
+    /* Get current frame and add to selected frames set */
     _PyInterpreterFrame *frame = get_current_interpreter_frame();
-    limits->sandbox_entry_frame = frame;
+    if (frame == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No current frame");
+        return -1;
+    }
+
+    if (add_frame_to_set(&limits->selected_frames, frame) < 0) {
+        return -1;
+    }
 
     /* Reset scope counters */
     limits->scope_statement_count = 0;
@@ -429,8 +581,8 @@ _PySandbox_ExitScope(void)
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    /* Clear the sandbox entry frame */
-    limits->sandbox_entry_frame = NULL;
+    /* Clear selected frames set */
+    clear_selected_frames(&limits->selected_frames);
 
     return 0;
 }
@@ -445,12 +597,45 @@ _PySandbox_IsInScope(void)
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    if (limits->sandbox_entry_frame == NULL) {
+    /* Check if any frames are selected */
+    if (limits->selected_frames.count == 0) {
         return 0;
     }
 
     _PyInterpreterFrame *current = get_current_interpreter_frame();
-    return frame_in_sandbox_scope(current, limits->sandbox_entry_frame);
+    if (current == NULL) {
+        return 0;
+    }
+
+    return frame_is_selected(&limits->selected_frames, current);
+}
+
+int
+_PySandbox_AddFrameToScope(void)
+{
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No thread state");
+        return -1;
+    }
+
+    PyInterpreterState *interp = tstate->interp;
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return -1;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    /* Get current frame */
+    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    if (frame == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No current frame");
+        return -1;
+    }
+
+    /* Add frame to the selected frames set */
+    return add_frame_to_set(&limits->selected_frames, frame);
 }
 
 /* ============ Counter Resetters ============ */

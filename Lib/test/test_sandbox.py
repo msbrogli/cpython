@@ -668,12 +668,16 @@ sys.exit(0 if counts['scope_statement_count'] > 0 else 1)
     def test_exceeding_statement_limit_raises_runtime_error(self):
         """Exceeding statement limit should raise RuntimeError."""
         import subprocess
+        # Note: The loop runs directly in the selected frame (not via exec)
+        # because with selected frames model, only code in selected frames counts
         code = '''
 import sys
 sys.setsandboxlimits(scope_max_statements=10)
 sys.entersandboxscope()
 try:
-    exec("for _ in range(100):\\n    x = 1")
+    # Run the loop directly in the selected frame
+    for _ in range(100):
+        x = 1
     sys.exit(2)  # Should not reach here
 except RuntimeError as e:
     if "statement limit" in str(e):
@@ -904,6 +908,322 @@ finally:
         )
         self.assertEqual(result.returncode, 0,
                         f"Sandboxed exec failed: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+
+class SelectedFramesScopeTests(unittest.TestCase):
+    """Test selected frames mode for sandbox scope.
+
+    This tests the new addsandboxframe() API where only code executing directly
+    in selected frames counts toward scope limits. When a selected frame calls
+    non-selected code, the call counts but execution in the non-selected frame
+    does not. When non-selected code calls back into a selected frame, execution
+    counts again.
+    """
+
+    def setUp(self):
+        # Ensure clean scope state from any previous tests
+        try:
+            sys.exitsandboxscope()
+        except:
+            pass
+        # Reset all counters for clean test state
+        sys.resetsandboxscopeallocationcount()
+        sys.resetsandboxscopestatementcount()
+        sys.resetsandboxglobalallocationcount()
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        while sys.issandboxsuspended():
+            sys.resumesandboxlimits()
+        try:
+            sys.exitsandboxscope()
+        except:
+            pass
+        sys.setsandboxlimits(**self.original_limits)
+        sys.resetsandboxglobalallocationcount()
+
+    def test_addsandboxframe_basic(self):
+        """addsandboxframe should add the current frame to the selected set."""
+        self.assertFalse(sys.issandboxinscope())
+
+        sys.addsandboxframe()
+        self.assertTrue(sys.issandboxinscope())
+
+        sys.exitsandboxscope()
+        self.assertFalse(sys.issandboxinscope())
+
+    def test_selected_frame_counts_statements(self):
+        """Code in selected frame should count toward statement limit."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=1000000)
+
+def selected_frame():
+    sys.addsandboxframe()
+    # These statements should count
+    x = 1
+    for _ in range(100):
+        x += 1
+    return sys.getsandboxcounts()['scope_statement_count']
+
+count = selected_frame()
+sys.exitsandboxscope()
+print(count)
+sys.exit(0 if count > 50 else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Statement counting failed: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_non_selected_frame_does_not_count(self):
+        """Code in non-selected frames should NOT count toward statement limit."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=1000000)
+
+def non_selected_helper():
+    """This frame is NOT selected, so statements here should not count."""
+    x = 1
+    for _ in range(100):
+        x += 1
+    return x
+
+def selected_frame():
+    sys.addsandboxframe()
+    count_before = sys.getsandboxcounts()['scope_statement_count']
+
+    # Call non-selected frame - the CALL counts but execution inside does not
+    result = non_selected_helper()
+
+    count_after = sys.getsandboxcounts()['scope_statement_count']
+    return count_before, count_after, result
+
+before, after, _ = selected_frame()
+sys.exitsandboxscope()
+
+# The count should increase only slightly (for the call and return statements
+# in selected_frame, not for the 100+ statements in non_selected_helper)
+increase = after - before
+print(f"Increase: {increase}")
+sys.exit(0 if increase < 20 else 1)  # Should be much less than 100
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Non-selected frame wrongly counted: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_callback_to_selected_frame_counts(self):
+        """When non-selected code calls back into selected frame, execution counts."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=1000000)
+
+call_count = 0
+
+def callback():
+    """This will be called from non-selected code but IS a selected frame."""
+    global call_count
+    sys.addsandboxframe()  # Mark this frame as selected too
+    call_count += 1
+
+def non_selected_runner(callback_fn, n):
+    """Non-selected frame that calls back into selected code."""
+    for _ in range(n):
+        callback_fn()
+
+def selected_main():
+    sys.addsandboxframe()
+    count_before = sys.getsandboxcounts()['scope_statement_count']
+
+    # Call non-selected code that will call back to selected callback
+    non_selected_runner(callback, 10)
+
+    count_after = sys.getsandboxcounts()['scope_statement_count']
+    return count_before, count_after
+
+before, after = selected_main()
+sys.exitsandboxscope()
+
+# The callback frame is selected, so its statements should count
+increase = after - before
+print(f"Increase: {increase}, call_count: {call_count}")
+# Should have counted statements from the callback (at least 10 calls)
+sys.exit(0 if increase > 10 else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Callback to selected frame not counted: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_multiple_selected_frames(self):
+        """Multiple frames can be added to the selected set."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=1000000)
+
+# Track work done in each context
+selected_work_done = 0
+non_selected_work_done = 0
+
+def frame_a():
+    global selected_work_done
+    sys.addsandboxframe()
+    count_before = sys.getsandboxcounts()['scope_statement_count']
+    x = 1
+    for _ in range(50):
+        x += 1
+    count_after = sys.getsandboxcounts()['scope_statement_count']
+    selected_work_done += count_after - count_before
+
+def frame_b():
+    global selected_work_done
+    sys.addsandboxframe()
+    count_before = sys.getsandboxcounts()['scope_statement_count']
+    y = 1
+    for _ in range(50):
+        y += 1
+    count_after = sys.getsandboxcounts()['scope_statement_count']
+    selected_work_done += count_after - count_before
+
+def non_selected():
+    global non_selected_work_done
+    count_before = sys.getsandboxcounts()['scope_statement_count']
+    z = 1
+    for _ in range(100):
+        z += 1
+    count_after = sys.getsandboxcounts()['scope_statement_count']
+    non_selected_work_done += count_after - count_before
+
+# Run all three
+frame_a()
+frame_b()
+non_selected()
+
+sys.exitsandboxscope()
+
+print(f"Selected work: {selected_work_done}, Non-selected work: {non_selected_work_done}")
+
+# frame_a and frame_b should count significant work
+# non_selected should count very little (only the getsandboxcounts calls from outside)
+selected_counted = selected_work_done > 80  # ~50 + ~50 iterations
+non_not_counted = non_selected_work_done < 20  # Should be very small
+
+sys.exit(0 if (selected_counted and non_not_counted) else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Multiple selected frames test failed: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_selected_frames_with_allocation_limit(self):
+        """Selected frames mode should also work with allocation limits."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_allocations=100000)
+
+selected_allocs = 0
+non_selected_allocs = 0
+
+def selected_frame():
+    global selected_allocs
+    sys.addsandboxframe()
+    count_before = sys.getsandboxcounts()['scope_allocation_count']
+    result = []
+    for _ in range(100):
+        result.append([1, 2, 3])
+    count_after = sys.getsandboxcounts()['scope_allocation_count']
+    selected_allocs = count_after - count_before
+    return result
+
+def non_selected_frame():
+    global non_selected_allocs
+    count_before = sys.getsandboxcounts()['scope_allocation_count']
+    result = []
+    for _ in range(100):
+        result.append([1, 2, 3])
+    count_after = sys.getsandboxcounts()['scope_allocation_count']
+    non_selected_allocs = count_after - count_before
+    return result
+
+# Run selected frame
+_ = selected_frame()
+
+# Run non-selected frame
+_ = non_selected_frame()
+
+sys.exitsandboxscope()
+
+print(f"Selected allocs: {selected_allocs}, Non-selected allocs: {non_selected_allocs}")
+
+# Selected frame should have counted many allocations (100 lists + 100 sublists = 200+)
+# Non-selected frame should have counted very few (only from getsandboxcounts call)
+selected_counted = selected_allocs > 50
+non_not_counted = non_selected_allocs < 20
+
+sys.exit(0 if (selected_counted and non_not_counted) else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Allocation limit with selected frames failed: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_exitsandboxscope_clears_all_selected_frames(self):
+        """exitsandboxscope should clear all selected frames."""
+        # Add current frame to scope
+        sys.addsandboxframe()
+        self.assertTrue(sys.issandboxinscope())
+
+        sys.exitsandboxscope()
+        self.assertFalse(sys.issandboxinscope())
+
+        # Add again - should work after exit
+        sys.addsandboxframe()
+        self.assertTrue(sys.issandboxinscope())
+        sys.exitsandboxscope()
+
+    def test_entersandboxscope_adds_current_frame(self):
+        """entersandboxscope should add the current frame to the selected set."""
+        sys.setsandboxlimits(scope_max_statements=1000000)
+
+        sys.entersandboxscope()
+        self.assertTrue(sys.issandboxinscope())
+
+        # Do some work - statements should count since we're in the selected frame
+        x = 0
+        for _ in range(100):
+            x += 1
+
+        count = sys.getsandboxcounts()['scope_statement_count']
+        sys.exitsandboxscope()
+
+        # Should have counted statements
+        self.assertGreater(count, 50)
 
 
 if __name__ == '__main__':

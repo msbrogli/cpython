@@ -2241,6 +2241,26 @@ Return True if currently executing within a sandbox scope."
 );
 
 static PyObject *
+sys_addsandboxframe(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    if (_PySandbox_AddFrameToScope() < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(addsandboxframe_doc,
+"addsandboxframe()\n\
+\n\
+Add the CURRENT frame to the set of selected frames for sandbox scope.\n\
+Only code executing directly in selected frames counts toward scope limits.\n\
+When a selected frame calls non-selected code, the call itself counts but\n\
+execution within the non-selected frame does not. When non-selected code\n\
+calls back into a selected frame, execution counts again.\n\
+Frames persist in the set until exitsandboxscope() is called."
+);
+
+static PyObject *
 sys_setobjectcreationhook(PyObject *self, PyObject *arg)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
@@ -2418,6 +2438,8 @@ static PyMethodDef sys_methods[] = {
      exitsandboxscope_doc},
     {"issandboxinscope", sys_issandboxinscope, METH_NOARGS,
      issandboxinscope_doc},
+    {"addsandboxframe", sys_addsandboxframe, METH_NOARGS,
+     addsandboxframe_doc},
     {"getobjectcreationhook", sys_getobjectcreationhook, METH_NOARGS,
      getobjectcreationhook_doc},
     {"setobjectcreationhook", sys_setobjectcreationhook, METH_O,

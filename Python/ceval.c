@@ -23,6 +23,7 @@
 #include "pycore_sysmodule.h"     // _PySys_Audit()
 #include "pycore_tuple.h"         // _PyTuple_ITEMS()
 #include "pycore_emscripten_signal.h"  // _Py_CHECK_EMSCRIPTEN_SIGNALS
+#include "pycore_sandbox.h"            // _PySandbox_CheckScopeStatement()
 
 #include "pycore_dict.h"
 #include "dictobject.h"
@@ -5633,6 +5634,23 @@ handle_eval_breaker:
             }
             else {
                 /* line-by-line tracing support */
+
+                /* Sandbox scoped statement counting - only count on line changes or backward jumps */
+                if (_PyCode_InitLineArray(frame->f_code) == 0) {
+                    int lastline = (instr_prev <= frame->f_code->_co_firsttraceable)
+                        ? -1
+                        : _PyCode_LineNumberFromArray(frame->f_code, instr_prev);
+                    int line = _PyCode_LineNumberFromArray(frame->f_code, _PyInterpreterFrame_LASTI(frame));
+
+                    /* Count if: line changed OR backward jump/self-loop (loop iteration) */
+                    if (line != -1 && (line != lastline || _PyInterpreterFrame_LASTI(frame) <= instr_prev)) {
+                        if (_PySandbox_CheckScopeStatement() < 0) {
+                            frame->prev_instr = next_instr + 1;
+                            goto error;
+                        }
+                    }
+                }
+
                 if (PyDTrace_LINE_ENABLED()) {
                     maybe_dtrace_line(frame, &tstate->trace_info, instr_prev);
                 }

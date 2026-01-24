@@ -20,8 +20,18 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.limits.max_dict_size = 0;
     interp->sandbox.limits.max_set_size = 0;
     interp->sandbox.limits.max_tuple_size = 0;
-    interp->sandbox.limits.max_allocations = 0;
-    interp->sandbox.limits.allocation_count = 0;
+
+    /* Global allocation limits */
+    interp->sandbox.limits.global_max_allocations = 0;
+    interp->sandbox.limits.global_allocation_count = 0;
+
+    /* Scoped limits */
+    interp->sandbox.limits.scope_max_statements = 0;
+    interp->sandbox.limits.scope_statement_count = 0;
+    interp->sandbox.limits.scope_max_allocations = 0;
+    interp->sandbox.limits.scope_allocation_count = 0;
+    interp->sandbox.limits.sandbox_entry_frame = NULL;
+
     interp->sandbox.limits.allow_float = 1;
     interp->sandbox.limits.allow_complex = 1;
     interp->sandbox.limits.in_check = 0;
@@ -224,6 +234,35 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
  * This allows Python to format and print MemoryError without cascading failures. */
 #define ALLOCATION_GRACE_HEADROOM 1000
 
+/* Helper to check if a frame is an ancestor of the sandbox entry frame.
+ * Walks up the frame chain to see if sandbox_entry_frame is reachable. */
+static int
+frame_in_sandbox_scope(_PyInterpreterFrame *current, _PyInterpreterFrame *entry_frame)
+{
+    while (current != NULL) {
+        if (current == entry_frame) {
+            return 1;
+        }
+        current = current->previous;
+    }
+    return 0;
+}
+
+/* Get the current interpreter frame */
+static _PyInterpreterFrame *
+get_current_interpreter_frame(void)
+{
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        return NULL;
+    }
+    _PyInterpreterFrame *frame = tstate->cframe->current_frame;
+    while (frame && _PyFrame_IsIncomplete(frame)) {
+        frame = frame->previous;
+    }
+    return frame;
+}
+
 int
 _PySandbox_CheckAllocation(void)
 {
@@ -246,12 +285,19 @@ _PySandbox_CheckAllocation(void)
         return 0;
     }
 
-    /* Always increment allocation count (for monitoring) */
-    limits->allocation_count++;
+    /* Always increment global allocation count (for monitoring) */
+    limits->global_allocation_count++;
 
-    /* If no limit is set, just count and return */
-    if (limits->max_allocations == 0) {
-        return 0;
+    /* Check if in sandbox scope for scoped counting */
+    int in_scope = 0;
+    if (limits->sandbox_entry_frame != NULL) {
+        _PyInterpreterFrame *current = get_current_interpreter_frame();
+        in_scope = frame_in_sandbox_scope(current, limits->sandbox_entry_frame);
+    }
+
+    /* Increment scoped count if in scope */
+    if (in_scope) {
+        limits->scope_allocation_count++;
     }
 
     /* If there's already an error set, don't raise another one.
@@ -260,20 +306,180 @@ _PySandbox_CheckAllocation(void)
         return 0;
     }
 
-    /* Hard limit: grace allocations exhausted, fail unconditionally */
-    if (limits->allocation_count > limits->max_allocations + ALLOCATION_GRACE_HEADROOM) {
-        PyErr_NoMemory();
-        return -1;
+    /* Check global limit (if set) */
+    if (limits->global_max_allocations > 0) {
+        /* Hard limit: grace allocations exhausted, fail unconditionally */
+        if (limits->global_allocation_count > limits->global_max_allocations + ALLOCATION_GRACE_HEADROOM) {
+            PyErr_NoMemory();
+            return -1;
+        }
+        /* Soft limit: raise MemoryError only on the first allocation past the limit */
+        if (limits->global_allocation_count == limits->global_max_allocations + 1) {
+            PyErr_NoMemory();
+            return -1;
+        }
     }
 
-    /* Soft limit: raise MemoryError only on the first allocation past the limit.
-     * This allows error handling code to allocate within the grace headroom. */
-    if (limits->allocation_count == limits->max_allocations + 1) {
-        PyErr_NoMemory();
+    /* Check scoped limit (if in scope and limit set) */
+    if (in_scope && limits->scope_max_allocations > 0) {
+        /* Hard limit: grace allocations exhausted, fail unconditionally */
+        if (limits->scope_allocation_count > limits->scope_max_allocations + ALLOCATION_GRACE_HEADROOM) {
+            PyErr_NoMemory();
+            return -1;
+        }
+        /* Soft limit: raise MemoryError only on the first allocation past the limit */
+        if (limits->scope_allocation_count == limits->scope_max_allocations + 1) {
+            PyErr_NoMemory();
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+/* ============ Scoped Statement Checking ============ */
+
+int
+_PySandbox_CheckScopeStatement(void)
+{
+    /* Get thread state first - if not available, skip check */
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        return 0;
+    }
+
+    /* Get interpreter state - if not available, skip check */
+    PyInterpreterState *interp = tstate->interp;
+    if (interp == NULL) {
+        return 0;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    /* Skip if no statement limit set, or if suspended/in_check */
+    if (limits->scope_max_statements == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;
+    }
+
+    /* Skip if not in sandbox scope */
+    if (limits->sandbox_entry_frame == NULL) {
+        return 0;
+    }
+
+    /* Check if current frame is within sandbox scope */
+    _PyInterpreterFrame *current = get_current_interpreter_frame();
+    if (!frame_in_sandbox_scope(current, limits->sandbox_entry_frame)) {
+        return 0;
+    }
+
+    /* Increment statement count */
+    limits->scope_statement_count++;
+
+    /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
+    if (limits->scope_statement_count == limits->scope_max_statements + 1) {
+        limits->in_check = 1;
+        PyErr_SetString(PyExc_RuntimeError,
+                        "Sandbox statement limit exceeded");
+        limits->in_check = 0;
         return -1;
     }
 
     return 0;
+}
+
+/* ============ Sandbox Scope Management ============ */
+
+int
+_PySandbox_EnterScope(void)
+{
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No thread state");
+        return -1;
+    }
+
+    PyInterpreterState *interp = tstate->interp;
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return -1;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    /* Store current frame as the sandbox entry frame */
+    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    limits->sandbox_entry_frame = frame;
+
+    /* Reset scope counters */
+    limits->scope_statement_count = 0;
+    limits->scope_allocation_count = 0;
+
+    return 0;
+}
+
+int
+_PySandbox_ExitScope(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return -1;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    /* Clear the sandbox entry frame */
+    limits->sandbox_entry_frame = NULL;
+
+    return 0;
+}
+
+int
+_PySandbox_IsInScope(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return 0;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    if (limits->sandbox_entry_frame == NULL) {
+        return 0;
+    }
+
+    _PyInterpreterFrame *current = get_current_interpreter_frame();
+    return frame_in_sandbox_scope(current, limits->sandbox_entry_frame);
+}
+
+/* ============ Counter Resetters ============ */
+
+void
+_PySandbox_ResetScopeStatementCount(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp != NULL) {
+        interp->sandbox.limits.scope_statement_count = 0;
+    }
+}
+
+void
+_PySandbox_ResetScopeAllocationCount(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp != NULL) {
+        interp->sandbox.limits.scope_allocation_count = 0;
+    }
+}
+
+void
+_PySandbox_ResetGlobalAllocationCount(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp != NULL) {
+        interp->sandbox.limits.global_allocation_count = 0;
+    }
 }
 
 /* ============ Object Creation Hook ============ */

@@ -26,6 +26,9 @@ struct _frame;
  * 3. Type restrictions (e.g., forbid float creation)
  */
 
+/* Forward declaration for interpreter frame */
+struct _PyInterpreterFrame;
+
 /* Sandbox limits structure - stored in PyInterpreterState */
 typedef struct {
     /* Integer limits: max number of internal digits (each ~30 bits) */
@@ -42,9 +45,18 @@ typedef struct {
     Py_ssize_t max_set_size;
     Py_ssize_t max_tuple_size;
 
-    /* Allocation limits: count of GC-tracked object allocations */
-    uint64_t max_allocations;   /* 0 = no limit */
-    uint64_t allocation_count;  /* Current count */
+    /* Global allocation limits (apply to all allocations regardless of scope) */
+    uint64_t global_max_allocations;   /* 0 = no limit */
+    uint64_t global_allocation_count;  /* Current count */
+
+    /* Scoped limits - only enforced within sandbox scope (frame ancestry) */
+    uint64_t scope_max_statements;      /* 0 = no limit */
+    uint64_t scope_statement_count;     /* Line executions in scope */
+    uint64_t scope_max_allocations;     /* 0 = no limit */
+    uint64_t scope_allocation_count;    /* Allocations in scope */
+
+    /* Sandbox scope tracking - frame that started the sandbox scope */
+    struct _PyInterpreterFrame *sandbox_entry_frame;
 
     /* Type restrictions */
     int allow_float;         /* 0 = forbidden, 1 = allowed (default) */
@@ -61,19 +73,24 @@ typedef struct {
 
 /* Default values (no limits) */
 #define _PySandboxLimits_INIT { \
-    .max_int_digits = 0,        \
-    .max_str_length = 0,        \
-    .max_bytes_length = 0,      \
-    .max_list_size = 0,         \
-    .max_dict_size = 0,         \
-    .max_set_size = 0,          \
-    .max_tuple_size = 0,        \
-    .max_allocations = 0,       \
-    .allocation_count = 0,      \
-    .allow_float = 1,           \
-    .allow_complex = 1,         \
-    .in_check = 0,              \
-    .suspended = 0,             \
+    .max_int_digits = 0,            \
+    .max_str_length = 0,            \
+    .max_bytes_length = 0,          \
+    .max_list_size = 0,             \
+    .max_dict_size = 0,             \
+    .max_set_size = 0,              \
+    .max_tuple_size = 0,            \
+    .global_max_allocations = 0,    \
+    .global_allocation_count = 0,   \
+    .scope_max_statements = 0,      \
+    .scope_statement_count = 0,     \
+    .scope_max_allocations = 0,     \
+    .scope_allocation_count = 0,    \
+    .sandbox_entry_frame = NULL,    \
+    .allow_float = 1,               \
+    .allow_complex = 1,             \
+    .in_check = 0,                  \
+    .suspended = 0,                 \
 }
 
 /* Object creation hook flags */
@@ -155,6 +172,19 @@ PyAPI_FUNC(int) _PySandbox_CheckTypeAllowed(PyTypeObject *type);
 
 /* Check allocation count against limits. Returns 0 if OK, -1 if exceeded (sets exception) */
 PyAPI_FUNC(int) _PySandbox_CheckAllocation(void);
+
+/* Scoped statement checking - returns -1 and sets exception when limit exceeded */
+PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
+
+/* Sandbox scope management */
+PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */
+PyAPI_FUNC(int) _PySandbox_ExitScope(void);    /* Clear entry frame */
+PyAPI_FUNC(int) _PySandbox_IsInScope(void);    /* Check if currently in sandbox scope */
+
+/* Counter resetters */
+PyAPI_FUNC(void) _PySandbox_ResetScopeStatementCount(void);
+PyAPI_FUNC(void) _PySandbox_ResetScopeAllocationCount(void);
+PyAPI_FUNC(void) _PySandbox_ResetGlobalAllocationCount(void);
 
 /* Call object creation hook. Returns new object (may be replacement) or NULL on error */
 PyAPI_FUNC(PyObject *) _PySandbox_CallCreationHook(

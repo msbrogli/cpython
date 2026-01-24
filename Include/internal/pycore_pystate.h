@@ -137,9 +137,19 @@ PyAPI_FUNC(void) _PyThreadState_DeleteExcept(
 static inline void
 _PyThreadState_UpdateTracingState(PyThreadState *tstate)
 {
+    /* Enable tracing if:
+     * 1. Not currently in tracing mode, AND
+     * 2. A trace/profile function is set, OR
+     * 3. Sandbox scoped statement limit is active (not suspended) */
+    PyInterpreterState *interp = tstate->interp;
+    int sandbox_needs_tracing = (interp != NULL &&
+                                  interp->sandbox.limits.scope_max_statements > 0 &&
+                                  !interp->sandbox.limits.suspended);
     bool use_tracing =
         (tstate->tracing == 0) &&
-        (tstate->c_tracefunc != NULL || tstate->c_profilefunc != NULL);
+        (tstate->c_tracefunc != NULL ||
+         tstate->c_profilefunc != NULL ||
+         sandbox_needs_tracing);
     tstate->cframe->use_tracing = (use_tracing ? 255 : 0);
 }
 

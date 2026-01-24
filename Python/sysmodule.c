@@ -2002,7 +2002,8 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     static char *kwlist[] = {
         "max_int_digits", "max_str_length", "max_bytes_length",
         "max_list_size", "max_dict_size", "max_set_size", "max_tuple_size",
-        "max_allocations", "allow_float", "allow_complex", NULL
+        "global_max_allocations", "scope_max_statements", "scope_max_allocations",
+        "allow_float", "allow_complex", NULL
     };
 
     Py_ssize_t max_int_digits = 0;
@@ -2012,20 +2013,29 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     Py_ssize_t max_dict_size = 0;
     Py_ssize_t max_set_size = 0;
     Py_ssize_t max_tuple_size = 0;
-    unsigned long long max_allocations = 0;
+    unsigned long long global_max_allocations = 0;
+    unsigned long long scope_max_statements = 0;
+    unsigned long long scope_max_allocations = 0;
     int allow_float = 1;
     int allow_complex = 1;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKpp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKpp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
-                                     &max_tuple_size, &max_allocations,
+                                     &max_tuple_size, &global_max_allocations,
+                                     &scope_max_statements, &scope_max_allocations,
                                      &allow_float, &allow_complex)) {
         return NULL;
     }
 
-    PyInterpreterState *interp = _PyInterpreterState_GET();
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No thread state");
+        return NULL;
+    }
+
+    PyInterpreterState *interp = tstate->interp;
     if (interp == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
         return NULL;
@@ -2039,9 +2049,14 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     limits->max_dict_size = max_dict_size;
     limits->max_set_size = max_set_size;
     limits->max_tuple_size = max_tuple_size;
-    limits->max_allocations = max_allocations;
+    limits->global_max_allocations = global_max_allocations;
+    limits->scope_max_statements = scope_max_statements;
+    limits->scope_max_allocations = scope_max_allocations;
     limits->allow_float = allow_float;
     limits->allow_complex = allow_complex;
+
+    /* Update tracing state since scope_max_statements may have changed */
+    _PyThreadState_UpdateTracingState(tstate);
 
     Py_RETURN_NONE;
 }
@@ -2049,26 +2064,35 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
 PyDoc_STRVAR(setsandboxlimits_doc,
 "setsandboxlimits(*, max_int_digits=0, max_str_length=0, max_bytes_length=0,\n\
                  max_list_size=0, max_dict_size=0, max_set_size=0,\n\
-                 max_tuple_size=0, max_allocations=0,\n\
+                 max_tuple_size=0, global_max_allocations=0,\n\
+                 scope_max_statements=0, scope_max_allocations=0,\n\
                  allow_float=True, allow_complex=True)\n\
 \n\
 Set sandbox limits for the current interpreter.\n\
 A value of 0 means no limit. Set allow_float/allow_complex to False to\n\
 forbid creation of those types.\n\
 \n\
-max_allocations limits the number of GC-tracked object allocations\n\
-(lists, tuples, dicts, sets, user classes). Use resetsandboxallocationcount()\n\
-to reset the counter.\n\
+Global limits (apply to all operations):\n\
+  global_max_allocations: Max GC-tracked object allocations total.\n\
+                          Use resetsandboxglobalallocationcount() to reset.\n\
 \n\
-Recommended minimal limits that don't interfere with normal Python operation:\n\
-  max_int_digits=100         # allows integers up to ~10^900\n\
-  max_str_length=100000      # 100KB strings\n\
-  max_bytes_length=100000    # 100KB bytes\n\
-  max_list_size=1000000      # 1M list items\n\
-  max_dict_size=1000000      # 1M dict entries\n\
-  max_set_size=1000000       # 1M set members\n\
-  max_tuple_size=1000000     # 1M tuple items\n\
-  max_allocations=1000000    # 1M GC-tracked allocations"
+Scoped limits (only apply within sandbox scope - see entersandboxscope()):\n\
+  scope_max_statements:   Max source line executions. Prevents infinite loops.\n\
+                          Raises RuntimeError when exceeded.\n\
+  scope_max_allocations:  Max allocations from sandboxed code only.\n\
+                          Does NOT count allocations from stdlib/builtins.\n\
+\n\
+Recommended minimal limits:\n\
+  max_int_digits=100              # allows integers up to ~10^900\n\
+  max_str_length=100000           # 100KB strings\n\
+  max_bytes_length=100000         # 100KB bytes\n\
+  max_list_size=1000000           # 1M list items\n\
+  max_dict_size=1000000           # 1M dict entries\n\
+  max_set_size=1000000            # 1M set members\n\
+  max_tuple_size=1000000          # 1M tuple items\n\
+  global_max_allocations=1000000  # 1M GC-tracked allocations total\n\
+  scope_max_statements=100000     # 100K statements per exec()\n\
+  scope_max_allocations=10000     # 10K allocations per exec()"
 );
 
 static PyObject *
@@ -2082,7 +2106,7 @@ sys_getsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    return Py_BuildValue("{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:O, s:O}",
+    return Py_BuildValue("{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:O, s:O}",
                          "max_int_digits", limits->max_int_digits,
                          "max_str_length", limits->max_str_length,
                          "max_bytes_length", limits->max_bytes_length,
@@ -2090,7 +2114,9 @@ sys_getsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
                          "max_dict_size", limits->max_dict_size,
                          "max_set_size", limits->max_set_size,
                          "max_tuple_size", limits->max_tuple_size,
-                         "max_allocations", (unsigned long long)limits->max_allocations,
+                         "global_max_allocations", (unsigned long long)limits->global_max_allocations,
+                         "scope_max_statements", (unsigned long long)limits->scope_max_statements,
+                         "scope_max_allocations", (unsigned long long)limits->scope_max_allocations,
                          "allow_float", limits->allow_float ? Py_True : Py_False,
                          "allow_complex", limits->allow_complex ? Py_True : Py_False);
 }
@@ -2112,35 +2138,106 @@ sys_getsandboxcounts(PyObject *self, PyObject *Py_UNUSED(args))
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    return Py_BuildValue("{s:K}",
-                         "allocation_count", (unsigned long long)limits->allocation_count);
+    return Py_BuildValue("{s:K, s:K, s:K}",
+                         "global_allocation_count", (unsigned long long)limits->global_allocation_count,
+                         "scope_allocation_count", (unsigned long long)limits->scope_allocation_count,
+                         "scope_statement_count", (unsigned long long)limits->scope_statement_count);
 }
 
 PyDoc_STRVAR(getsandboxcounts_doc,
 "getsandboxcounts() -> dict\n\
 \n\
 Return the current sandbox counters as a dictionary.\n\
-Contains allocation_count which tracks GC-tracked object allocations."
+Contains:\n\
+  global_allocation_count: Total GC-tracked object allocations.\n\
+  scope_allocation_count:  Allocations within sandbox scope only.\n\
+  scope_statement_count:   Line executions within sandbox scope."
 );
 
 static PyObject *
-sys_resetsandboxallocationcount(PyObject *self, PyObject *Py_UNUSED(args))
+sys_resetsandboxglobalallocationcount(PyObject *self, PyObject *Py_UNUSED(args))
 {
-    PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp == NULL) {
-        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
-        return NULL;
-    }
-
-    interp->sandbox.limits.allocation_count = 0;
+    _PySandbox_ResetGlobalAllocationCount();
     Py_RETURN_NONE;
 }
 
-PyDoc_STRVAR(resetsandboxallocationcount_doc,
-"resetsandboxallocationcount()\n\
+PyDoc_STRVAR(resetsandboxglobalallocationcount_doc,
+"resetsandboxglobalallocationcount()\n\
 \n\
-Reset the sandbox allocation counter to 0.\n\
-Use this before running untrusted code to track its allocations."
+Reset the global sandbox allocation counter to 0.\n\
+Use this before running untrusted code to track total allocations."
+);
+
+static PyObject *
+sys_resetsandboxscopestatementcount(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    _PySandbox_ResetScopeStatementCount();
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(resetsandboxscopestatementcount_doc,
+"resetsandboxscopestatementcount()\n\
+\n\
+Reset the scoped statement counter to 0."
+);
+
+static PyObject *
+sys_resetsandboxscopeallocationcount(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    _PySandbox_ResetScopeAllocationCount();
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(resetsandboxscopeallocationcount_doc,
+"resetsandboxscopeallocationcount()\n\
+\n\
+Reset the scoped allocation counter to 0."
+);
+
+static PyObject *
+sys_entersandboxscope(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    if (_PySandbox_EnterScope() < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(entersandboxscope_doc,
+"entersandboxscope()\n\
+\n\
+Mark the current frame as the sandbox entry point.\n\
+Scoped limits (scope_max_statements, scope_max_allocations) only apply\n\
+to code executed from within this frame's call stack.\n\
+Automatically resets scope counters. Use exitsandboxscope() when done."
+);
+
+static PyObject *
+sys_exitsandboxscope(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    if (_PySandbox_ExitScope() < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(exitsandboxscope_doc,
+"exitsandboxscope()\n\
+\n\
+Clear the sandbox entry frame, disabling scoped limits.\n\
+Call this after running sandboxed code."
+);
+
+static PyObject *
+sys_issandboxinscope(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    return PyBool_FromLong(_PySandbox_IsInScope());
+}
+
+PyDoc_STRVAR(issandboxinscope_doc,
+"issandboxinscope() -> bool\n\
+\n\
+Return True if currently executing within a sandbox scope."
 );
 
 static PyObject *
@@ -2309,8 +2406,18 @@ static PyMethodDef sys_methods[] = {
     {"setsandboxlimits", _PyCFunction_CAST(sys_setsandboxlimits),
      METH_VARARGS | METH_KEYWORDS, setsandboxlimits_doc},
     {"getsandboxcounts", sys_getsandboxcounts, METH_NOARGS, getsandboxcounts_doc},
-    {"resetsandboxallocationcount", sys_resetsandboxallocationcount, METH_NOARGS,
-     resetsandboxallocationcount_doc},
+    {"resetsandboxglobalallocationcount", sys_resetsandboxglobalallocationcount, METH_NOARGS,
+     resetsandboxglobalallocationcount_doc},
+    {"resetsandboxscopestatementcount", sys_resetsandboxscopestatementcount, METH_NOARGS,
+     resetsandboxscopestatementcount_doc},
+    {"resetsandboxscopeallocationcount", sys_resetsandboxscopeallocationcount, METH_NOARGS,
+     resetsandboxscopeallocationcount_doc},
+    {"entersandboxscope", sys_entersandboxscope, METH_NOARGS,
+     entersandboxscope_doc},
+    {"exitsandboxscope", sys_exitsandboxscope, METH_NOARGS,
+     exitsandboxscope_doc},
+    {"issandboxinscope", sys_issandboxinscope, METH_NOARGS,
+     issandboxinscope_doc},
     {"getobjectcreationhook", sys_getobjectcreationhook, METH_NOARGS,
      getobjectcreationhook_doc},
     {"setobjectcreationhook", sys_setobjectcreationhook, METH_O,

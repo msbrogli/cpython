@@ -49,6 +49,10 @@ typedef struct {
     /* Recursion prevention - nonzero during limit check (to avoid recursive
        checks when error handling creates strings/integers) */
     int in_check;
+
+    /* Suspend counter - when > 0, all limits are bypassed.
+       Use PySandbox_Suspend/Resume for nested suspend/resume. */
+    int suspended;
 } _PySandboxLimits;
 
 /* Default values (no limits) */
@@ -63,6 +67,7 @@ typedef struct {
     .allow_float = 1,           \
     .allow_complex = 1,         \
     .in_check = 0,              \
+    .suspended = 0,             \
 }
 
 /* Object creation hook flags */
@@ -185,6 +190,16 @@ PyAPI_FUNC(int) PySandbox_SetCreationHook(
 
 /* Get current object creation hook */
 PyAPI_FUNC(Py_ObjectCreationHookFunc) PySandbox_GetCreationHook(void **userdata);
+
+/* Suspend/resume sandbox limits.
+ * Use these in trusted code (e.g., syscalls) to temporarily bypass limits.
+ * Calls can be nested - limits are only active when suspend count is 0.
+ * Returns the new suspend count, or -1 on error. */
+PyAPI_FUNC(int) PySandbox_Suspend(void);
+PyAPI_FUNC(int) PySandbox_Resume(void);
+
+/* Check if sandbox limits are currently suspended */
+PyAPI_FUNC(int) PySandbox_IsSuspended(void);
 
 #ifdef __cplusplus
 }

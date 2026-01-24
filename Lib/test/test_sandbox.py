@@ -356,5 +356,82 @@ class MinimalSafeLimitsTests(unittest.TestCase):
             s = ''.join(['x' for _ in range(200000)])
 
 
+class SuspendResumeLimitsTests(unittest.TestCase):
+    """Test suspend/resume functionality for syscalls."""
+
+    def setUp(self):
+        self.original_limits = sys.getsandboxlimits()
+
+    def tearDown(self):
+        # Ensure limits are resumed
+        while sys.issandboxsuspended():
+            sys.resumesandboxlimits()
+        sys.setsandboxlimits(**self.original_limits)
+
+    def test_suspend_bypasses_limits(self):
+        """Suspended limits should allow exceeding normal limits."""
+        sys.setsandboxlimits(max_list_size=10)
+
+        # Should fail with limits active
+        with self.assertRaises(OverflowError):
+            list(range(20))
+
+        # Suspend and try again
+        sys.suspendsandboxlimits()
+        self.assertTrue(sys.issandboxsuspended())
+
+        # Should succeed while suspended
+        lst = list(range(20))
+        self.assertEqual(len(lst), 20)
+
+    def test_resume_reactivates_limits(self):
+        """Resumed limits should block operations again."""
+        sys.setsandboxlimits(max_list_size=10)
+        sys.suspendsandboxlimits()
+
+        # Works while suspended
+        lst = list(range(20))
+        self.assertEqual(len(lst), 20)
+
+        # Resume limits
+        sys.resumesandboxlimits()
+        self.assertFalse(sys.issandboxsuspended())
+
+        # Should fail again
+        with self.assertRaises(OverflowError):
+            list(range(20))
+
+    def test_nested_suspend_resume(self):
+        """Nested suspend/resume should work correctly."""
+        sys.setsandboxlimits(max_list_size=10)
+
+        # First suspend
+        count1 = sys.suspendsandboxlimits()
+        self.assertEqual(count1, 1)
+        self.assertTrue(sys.issandboxsuspended())
+
+        # Nested suspend
+        count2 = sys.suspendsandboxlimits()
+        self.assertEqual(count2, 2)
+
+        # First resume - still suspended
+        count3 = sys.resumesandboxlimits()
+        self.assertEqual(count3, 1)
+        self.assertTrue(sys.issandboxsuspended())
+
+        # Should still work
+        lst = list(range(20))
+        self.assertEqual(len(lst), 20)
+
+        # Second resume - now active
+        count4 = sys.resumesandboxlimits()
+        self.assertEqual(count4, 0)
+        self.assertFalse(sys.issandboxsuspended())
+
+        # Should fail now
+        with self.assertRaises(OverflowError):
+            list(range(20))
+
+
 if __name__ == '__main__':
     unittest.main()

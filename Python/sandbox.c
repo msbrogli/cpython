@@ -23,6 +23,7 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.limits.allow_float = 1;
     interp->sandbox.limits.allow_complex = 1;
     interp->sandbox.limits.in_check = 0;
+    interp->sandbox.limits.suspended = 0;
 
     interp->sandbox.creation_hook.hook_func = NULL;
     interp->sandbox.creation_hook.hook_userdata = NULL;
@@ -55,8 +56,9 @@ int
 _PySandbox_CheckIntSize(Py_ssize_t ndigits)
 {
     _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_int_digits == 0 || limits->in_check) {
-        return 0;  /* No limit or already checking */
+    if (limits == NULL || limits->max_int_digits == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;  /* No limit, already checking, or suspended */
     }
 
     if (ndigits > limits->max_int_digits) {
@@ -75,8 +77,9 @@ int
 _PySandbox_CheckStrLength(Py_ssize_t length)
 {
     _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_str_length == 0 || limits->in_check) {
-        return 0;  /* No limit or already checking */
+    if (limits == NULL || limits->max_str_length == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;  /* No limit, already checking, or suspended */
     }
 
     if (length > limits->max_str_length) {
@@ -94,8 +97,9 @@ int
 _PySandbox_CheckBytesLength(Py_ssize_t length)
 {
     _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_bytes_length == 0 || limits->in_check) {
-        return 0;  /* No limit or already checking */
+    if (limits == NULL || limits->max_bytes_length == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;  /* No limit, already checking, or suspended */
     }
 
     if (length > limits->max_bytes_length) {
@@ -113,8 +117,9 @@ int
 _PySandbox_CheckListSize(Py_ssize_t size)
 {
     _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_list_size == 0 || limits->in_check) {
-        return 0;  /* No limit or already checking */
+    if (limits == NULL || limits->max_list_size == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;  /* No limit, already checking, or suspended */
     }
 
     if (size > limits->max_list_size) {
@@ -132,8 +137,9 @@ int
 _PySandbox_CheckDictSize(Py_ssize_t size)
 {
     _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_dict_size == 0 || limits->in_check) {
-        return 0;  /* No limit or already checking */
+    if (limits == NULL || limits->max_dict_size == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;  /* No limit, already checking, or suspended */
     }
 
     if (size > limits->max_dict_size) {
@@ -151,8 +157,9 @@ int
 _PySandbox_CheckSetSize(Py_ssize_t size)
 {
     _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_set_size == 0 || limits->in_check) {
-        return 0;  /* No limit or already checking */
+    if (limits == NULL || limits->max_set_size == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;  /* No limit, already checking, or suspended */
     }
 
     if (size > limits->max_set_size) {
@@ -170,8 +177,9 @@ int
 _PySandbox_CheckTupleSize(Py_ssize_t size)
 {
     _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_tuple_size == 0 || limits->in_check) {
-        return 0;  /* No limit or already checking */
+    if (limits == NULL || limits->max_tuple_size == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;  /* No limit, already checking, or suspended */
     }
 
     if (size > limits->max_tuple_size) {
@@ -189,8 +197,8 @@ int
 _PySandbox_CheckTypeAllowed(PyTypeObject *type)
 {
     _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL) {
-        return 0;  /* No limits active */
+    if (limits == NULL || limits->suspended) {
+        return 0;  /* No limits active or suspended */
     }
 
     /* Check float */
@@ -421,4 +429,47 @@ PySandbox_GetCreationHook(void **userdata)
     _PyObjectCreationHook *hook_state = &interp->sandbox.creation_hook;
     if (userdata) *userdata = hook_state->hook_userdata;
     return hook_state->hook_func;
+}
+
+/* ============ Suspend/Resume ============ */
+
+int
+PySandbox_Suspend(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return -1;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+    limits->suspended++;
+    return limits->suspended;
+}
+
+int
+PySandbox_Resume(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return -1;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+    if (limits->suspended > 0) {
+        limits->suspended--;
+    }
+    return limits->suspended;
+}
+
+int
+PySandbox_IsSuspended(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return 0;  /* No interpreter means no limits anyway */
+    }
+
+    return interp->sandbox.limits.suspended > 0;
 }

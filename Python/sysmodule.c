@@ -2150,6 +2150,54 @@ PyDoc_STRVAR(getobjectcreationhook_doc,
 Return the current object creation hook, or None if not set."
 );
 
+static PyObject *
+sys_suspendsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    int result = PySandbox_Suspend();
+    if (result < 0) {
+        return NULL;
+    }
+    return PyLong_FromLong(result);
+}
+
+PyDoc_STRVAR(suspendsandboxlimits_doc,
+"suspendsandboxlimits() -> int\n\
+\n\
+Temporarily suspend sandbox limits. Returns the new suspend count.\n\
+Use this in trusted code (syscalls) to bypass limits.\n\
+Calls can be nested - limits are only active when suspend count is 0."
+);
+
+static PyObject *
+sys_resumesandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    int result = PySandbox_Resume();
+    if (result < 0) {
+        return NULL;
+    }
+    return PyLong_FromLong(result);
+}
+
+PyDoc_STRVAR(resumesandboxlimits_doc,
+"resumesandboxlimits() -> int\n\
+\n\
+Resume sandbox limits after a suspend. Returns the new suspend count.\n\
+Limits are only active when suspend count reaches 0."
+);
+
+static PyObject *
+sys_issandboxsuspended(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    int result = PySandbox_IsSuspended();
+    return PyBool_FromLong(result);
+}
+
+PyDoc_STRVAR(issandboxsuspended_doc,
+"issandboxsuspended() -> bool\n\
+\n\
+Return True if sandbox limits are currently suspended."
+);
+
 static PyMethodDef sys_methods[] = {
     /* Might as well keep this in alphabetic order */
     SYS_ADDAUDITHOOK_METHODDEF
@@ -2213,6 +2261,12 @@ static PyMethodDef sys_methods[] = {
      getobjectcreationhook_doc},
     {"setobjectcreationhook", sys_setobjectcreationhook, METH_O,
      setobjectcreationhook_doc},
+    {"suspendsandboxlimits", sys_suspendsandboxlimits, METH_NOARGS,
+     suspendsandboxlimits_doc},
+    {"resumesandboxlimits", sys_resumesandboxlimits, METH_NOARGS,
+     resumesandboxlimits_doc},
+    {"issandboxsuspended", sys_issandboxsuspended, METH_NOARGS,
+     issandboxsuspended_doc},
     {NULL, NULL}  // sentinel
 };
 

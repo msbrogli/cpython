@@ -1429,6 +1429,209 @@ always available.
 
    .. versionadded:: 3.11
 
+
+.. _sandbox-limits:
+
+Sandbox Resource Limits
+-----------------------
+
+The sandbox resource limits API provides a mechanism to limit resource usage
+during code execution. This is useful for preventing resource exhaustion
+attacks when executing untrusted code or limiting resource usage in
+multi-tenant environments.
+
+.. warning::
+
+   Sandbox limits are not a security boundary. They are intended to prevent
+   accidental resource exhaustion, not to provide security against malicious
+   code. Malicious code with access to C extensions, :mod:`ctypes`, or other
+   low-level APIs can bypass these limits.
+
+
+.. function:: setsandboxlimits(*, max_int_digits=0, max_str_length=0, max_bytes_length=0, max_list_size=0, max_dict_size=0, max_set_size=0, max_tuple_size=0, max_allocations=0, allow_float=True, allow_complex=True)
+
+   Set sandbox limits for the current interpreter. A value of ``0`` means
+   no limit for that resource. The limits apply to new object creation only;
+   existing objects are not affected.
+
+   *max_int_digits*
+      Maximum number of digits allowed when creating a new integer.
+      This prevents attacks that create extremely large integers which
+      consume excessive memory and CPU time during operations.
+
+   *max_str_length*
+      Maximum length (in characters) allowed when creating a new string.
+
+   *max_bytes_length*
+      Maximum length (in bytes) allowed when creating a new bytes object.
+
+   *max_list_size*
+      Maximum number of items allowed when creating or extending a list.
+
+   *max_dict_size*
+      Maximum number of entries allowed when creating or updating a dict.
+
+   *max_set_size*
+      Maximum number of members allowed when creating or updating a set.
+
+   *max_tuple_size*
+      Maximum number of items allowed when creating a tuple.
+
+   *max_allocations*
+      Maximum number of GC-tracked object allocations allowed. This limits
+      the total number of objects (lists, dicts, sets, tuples, user-defined
+      class instances, etc.) that can be created. Use
+      :func:`resetsandboxallocationcount` to reset the counter before
+      executing untrusted code.
+
+   *allow_float*
+      If ``False``, prevents creation of new float objects. Defaults to
+      ``True``.
+
+   *allow_complex*
+      If ``False``, prevents creation of new complex objects. Defaults to
+      ``True``.
+
+   When a limit is exceeded, a :exc:`MemoryError` is raised.
+
+   Example of setting basic limits::
+
+      >>> import sys
+      >>> sys.setsandboxlimits(
+      ...     max_int_digits=100,
+      ...     max_str_length=100000,
+      ...     max_list_size=1000000,
+      ...     max_allocations=1000000
+      ... )
+
+   .. impl-detail::
+
+      This function is specific to CPython and may not be available in
+      other Python implementations.
+
+   .. versionadded:: 3.12
+
+
+.. function:: getsandboxlimits()
+
+   Return the current sandbox limits as a dictionary. The dictionary contains
+   the same keys as the parameters to :func:`setsandboxlimits`.
+
+   Example::
+
+      >>> import sys
+      >>> sys.getsandboxlimits()
+      {'max_int_digits': 0, 'max_str_length': 0, 'max_bytes_length': 0,
+       'max_list_size': 0, 'max_dict_size': 0, 'max_set_size': 0,
+       'max_tuple_size': 0, 'max_allocations': 0, 'allow_float': True,
+       'allow_complex': True}
+
+   .. versionadded:: 3.12
+
+
+.. function:: getsandboxcounts()
+
+   Return the current sandbox counters as a dictionary. Currently contains
+   only ``allocation_count`` which tracks the number of GC-tracked object
+   allocations since the last reset.
+
+   Example::
+
+      >>> import sys
+      >>> sys.getsandboxcounts()
+      {'allocation_count': 12345}
+
+   .. versionadded:: 3.12
+
+
+.. function:: resetsandboxallocationcount()
+
+   Reset the sandbox allocation counter to ``0``. Call this before executing
+   untrusted code to track only allocations from that code.
+
+   Example::
+
+      >>> import sys
+      >>> sys.setsandboxlimits(max_allocations=1000)
+      >>> sys.resetsandboxallocationcount()
+      >>> # Now execute untrusted code with a fresh allocation count
+
+   .. versionadded:: 3.12
+
+
+.. function:: suspendsandboxlimits()
+
+   Temporarily suspend sandbox limits. Returns the new suspend count.
+   Limits are only active when the suspend count is ``0``.
+
+   This function is useful when trusted code needs to perform operations
+   that might exceed the sandbox limits. Calls can be nested; each call
+   to :func:`suspendsandboxlimits` must be balanced by a call to
+   :func:`resumesandboxlimits`.
+
+   Example::
+
+      >>> import sys
+      >>> sys.setsandboxlimits(max_list_size=10)
+      >>> count = sys.suspendsandboxlimits()  # Returns 1
+      >>> large_list = list(range(1000))  # Works because limits are suspended
+      >>> sys.resumesandboxlimits()  # Limits are active again
+
+   .. versionadded:: 3.12
+
+
+.. function:: resumesandboxlimits()
+
+   Resume sandbox limits after a suspend. Returns the new suspend count.
+   Limits become active again when the suspend count reaches ``0``.
+
+   .. versionadded:: 3.12
+
+
+.. function:: issandboxsuspended()
+
+   Return ``True`` if sandbox limits are currently suspended, ``False``
+   otherwise.
+
+   .. versionadded:: 3.12
+
+
+.. function:: setobjectcreationhook(hook)
+
+   Set a callback to be called when objects are created via :meth:`type.__call__`.
+   The hook receives four arguments: ``(obj, type, frame, context)`` where:
+
+   *obj*
+      The newly created object.
+
+   *type*
+      The type of the object.
+
+   *frame*
+      The current execution frame, or ``None``.
+
+   *context*
+      Reserved for future use, currently ``None``.
+
+   The hook should return the object (either the original or a replacement)
+   or raise an exception to block object creation. Pass ``None`` to remove
+   the hook.
+
+   .. warning::
+
+      The hook is called for every object created via :meth:`type.__call__`,
+      which can have significant performance impact. Use sparingly.
+
+   .. versionadded:: 3.12
+
+
+.. function:: getobjectcreationhook()
+
+   Return the current object creation hook, or ``None`` if no hook is set.
+
+   .. versionadded:: 3.12
+
+
 .. function:: setprofile(profilefunc)
 
    .. index::

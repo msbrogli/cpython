@@ -1,0 +1,14 @@
+.. date: 2026-01-24-10-18-12
+.. gh-issue: 0
+.. nonce: QwOgIv07
+.. section: Core and Builtins
+
+Add sandbox resource limits to the :mod:`sys` module. New functions
+:func:`sys.setsandboxlimits`, :func:`sys.getsandboxlimits`,
+:func:`sys.getsandboxcounts`, :func:`sys.resetsandboxallocationcount`,
+:func:`sys.suspendsandboxlimits`, :func:`sys.resumesandboxlimits`,
+:func:`sys.issandboxsuspended`, :func:`sys.setobjectcreationhook`, and
+:func:`sys.getobjectcreationhook` allow setting limits on object creation
+to prevent resource exhaustion attacks. Limits can be set for integer digit
+count, string/bytes length, collection sizes (list, dict, set, tuple), and
+total GC-tracked allocations.

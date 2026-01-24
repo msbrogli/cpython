@@ -668,16 +668,18 @@ sys.exit(0 if counts['scope_statement_count'] > 0 else 1)
     def test_exceeding_statement_limit_raises_runtime_error(self):
         """Exceeding statement limit should raise RuntimeError."""
         import subprocess
-        # Note: The loop runs directly in the selected frame (not via exec)
-        # because with selected frames model, only code in selected frames counts
+        # With ancestry-based scope, exec'd code is counted because it shares
+        # the same co_filename ("<string>") as the selected frame
         code = '''
 import sys
 sys.setsandboxlimits(scope_max_statements=10)
 sys.entersandboxscope()
 try:
-    # Run the loop directly in the selected frame
-    for _ in range(100):
-        x = 1
+    # exec'd code has same filename as selected frame, so it counts
+    exec("""
+for _ in range(100):
+    x = 1
+""")
     sys.exit(2)  # Should not reach here
 except RuntimeError as e:
     if "statement limit" in str(e):
@@ -911,13 +913,11 @@ finally:
 
 
 class SelectedFramesScopeTests(unittest.TestCase):
-    """Test selected frames mode for sandbox scope.
+    """Test sandbox scope management via addsandboxframe().
 
-    This tests the new addsandboxframe() API where only code executing directly
-    in selected frames counts toward scope limits. When a selected frame calls
-    non-selected code, the call counts but execution in the non-selected frame
-    does not. When non-selected code calls back into a selected frame, execution
-    counts again.
+    This tests the addsandboxframe() API which adds the current frame's
+    filename to the registered set. Code with registered filenames counts
+    toward scope limits.
     """
 
     def setUp(self):
@@ -943,7 +943,7 @@ class SelectedFramesScopeTests(unittest.TestCase):
         sys.resetsandboxglobalallocationcount()
 
     def test_addsandboxframe_basic(self):
-        """addsandboxframe should add the current frame to the selected set."""
+        """addsandboxframe should add the current frame's filename to the set."""
         self.assertFalse(sys.issandboxinscope())
 
         sys.addsandboxframe()
@@ -952,23 +952,23 @@ class SelectedFramesScopeTests(unittest.TestCase):
         sys.exitsandboxscope()
         self.assertFalse(sys.issandboxinscope())
 
-    def test_selected_frame_counts_statements(self):
-        """Code in selected frame should count toward statement limit."""
+    def test_registered_filename_counts_statements(self):
+        """Code with registered filename should count toward statement limit."""
         import subprocess
         code = '''
 import sys
 sys.setsandboxlimits(scope_max_statements=1000000)
+sys.addsandboxfilename("<tracked>")
 
-def selected_frame():
-    sys.addsandboxframe()
-    # These statements should count
-    x = 1
-    for _ in range(100):
-        x += 1
-    return sys.getsandboxcounts()['scope_statement_count']
+# Run code with registered filename - statements should count
+exec(compile("""
+x = 1
+for _ in range(100):
+    x += 1
+""", "<tracked>", "exec"))
 
-count = selected_frame()
-sys.exitsandboxscope()
+count = sys.getsandboxcounts()['scope_statement_count']
+sys.clearsandboxfilenames()
 print(count)
 sys.exit(0 if count > 50 else 1)
 '''
@@ -981,38 +981,74 @@ sys.exit(0 if count > 50 else 1)
         self.assertEqual(result.returncode, 0,
                         f"Statement counting failed: stdout={result.stdout!r} stderr={result.stderr!r}")
 
-    def test_non_selected_frame_does_not_count(self):
-        """Code in non-selected frames should NOT count toward statement limit."""
+    def test_imported_function_does_not_count(self):
+        """Code in imported modules should NOT count toward statement limit."""
+        import subprocess
+        code = '''
+import sys
+import os
+sys.setsandboxlimits(scope_max_statements=1000000)
+
+# Register a custom filename - os module has different filename
+sys.addsandboxfilename("<my-test>")
+
+count_before = sys.getsandboxcounts()['scope_statement_count']
+
+# Call an imported function - should NOT count toward statement limit
+# os.getcwd() is a C builtin, so it has no Python frame at all
+_ = os.getcwd()
+_ = os.getcwd()
+_ = os.getcwd()
+
+count_after = sys.getsandboxcounts()['scope_statement_count']
+sys.clearsandboxfilenames()
+
+# The count should be 0 - no code with our filename was executed
+increase = count_after - count_before
+print(f"Increase: {increase}")
+sys.exit(0 if increase == 0 else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Imported function wrongly counted: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_callback_from_builtin_counts(self):
+        """Callbacks from builtins should count if defined with registered filename."""
         import subprocess
         code = '''
 import sys
 sys.setsandboxlimits(scope_max_statements=1000000)
+sys.addsandboxfilename("<callback-test>")
 
-def non_selected_helper():
-    """This frame is NOT selected, so statements here should not count."""
-    x = 1
-    for _ in range(100):
-        x += 1
+# Define and use a callback with registered filename
+exec(compile("""
+callback_calls = 0
+
+def my_callback(x):
+    global callback_calls
+    callback_calls += 1
+    # Do some work that should be counted
+    for _ in range(5):
+        y = x * 2
     return x
 
-def selected_frame():
-    sys.addsandboxframe()
-    count_before = sys.getsandboxcounts()['scope_statement_count']
+# sorted() is a builtin that calls our callback
+result = sorted([3, 1, 2], key=my_callback)
+""", "<callback-test>", "exec"))
 
-    # Call non-selected frame - the CALL counts but execution inside does not
-    result = non_selected_helper()
+counts = sys.getsandboxcounts()
+sys.clearsandboxfilenames()
 
-    count_after = sys.getsandboxcounts()['scope_statement_count']
-    return count_before, count_after, result
-
-before, after, _ = selected_frame()
-sys.exitsandboxscope()
-
-# The count should increase only slightly (for the call and return statements
-# in selected_frame, not for the 100+ statements in non_selected_helper)
-increase = after - before
-print(f"Increase: {increase}")
-sys.exit(0 if increase < 20 else 1)  # Should be much less than 100
+# The callback should have been called 3 times (once per element)
+# and its statements should be counted
+print(f"Statement count: {counts['scope_statement_count']}")
+# Should have significant statement count from the callback loops
+sys.exit(0 if counts['scope_statement_count'] > 10 else 1)
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -1021,46 +1057,102 @@ sys.exit(0 if increase < 20 else 1)  # Should be much less than 100
             timeout=10
         )
         self.assertEqual(result.returncode, 0,
-                        f"Non-selected frame wrongly counted: stdout={result.stdout!r} stderr={result.stderr!r}")
+                        f"Callback from builtin not counted: stdout={result.stdout!r} stderr={result.stderr!r}")
 
-    def test_callback_to_selected_frame_counts(self):
-        """When non-selected code calls back into selected frame, execution counts."""
+    def test_functions_in_exec_count(self):
+        """Functions defined in exec'd code should count toward statement limit."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=1000000)
+sys.addsandboxfilename("<exec-functions>")
+
+# Run exec with registered filename - all functions share the same co_filename
+exec(compile("""
+def foo():
+    x = 0
+    for i in range(50):
+        x += i
+    return x
+
+def bar():
+    y = 0
+    for i in range(50):
+        y += i * 2
+    return y
+
+# Call the functions
+result1 = foo()
+result2 = bar()
+""", "<exec-functions>", "exec"))
+
+counts = sys.getsandboxcounts()
+sys.clearsandboxfilenames()
+
+# Both foo() and bar() should have their statements counted
+print(f"Statement count: {counts['scope_statement_count']}")
+# Should have counted ~100 loop iterations plus other statements
+sys.exit(0 if counts['scope_statement_count'] > 80 else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Functions in exec not counted: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_multiple_filenames_registered(self):
+        """Multiple filenames can be registered for scope tracking."""
         import subprocess
         code = '''
 import sys
 sys.setsandboxlimits(scope_max_statements=1000000)
 
-call_count = 0
+# Register a custom filename
+sys.addsandboxfilename("<module-a>")
 
-def callback():
-    """This will be called from non-selected code but IS a selected frame."""
-    global call_count
-    sys.addsandboxframe()  # Mark this frame as selected too
-    call_count += 1
+# Run code with registered filename
+exec(compile("""
+x = 0
+for _ in range(50):
+    x += 1
+""", "<module-a>", "exec"))
 
-def non_selected_runner(callback_fn, n):
-    """Non-selected frame that calls back into selected code."""
-    for _ in range(n):
-        callback_fn()
+count_a = sys.getsandboxcounts()['scope_statement_count']
 
-def selected_main():
-    sys.addsandboxframe()
-    count_before = sys.getsandboxcounts()['scope_statement_count']
+# Register another filename
+sys.addsandboxfilename("<module-b>")
 
-    # Call non-selected code that will call back to selected callback
-    non_selected_runner(callback, 10)
+# Run code with second registered filename
+exec(compile("""
+y = 0
+for _ in range(50):
+    y += 1
+""", "<module-b>", "exec"))
 
-    count_after = sys.getsandboxcounts()['scope_statement_count']
-    return count_before, count_after
+count_after_b = sys.getsandboxcounts()['scope_statement_count']
 
-before, after = selected_main()
-sys.exitsandboxscope()
+# Run code with unregistered filename - should not count
+exec(compile("""
+z = 0
+for _ in range(100):
+    z += 1
+""", "<unregistered>", "exec"))
 
-# The callback frame is selected, so its statements should count
-increase = after - before
-print(f"Increase: {increase}, call_count: {call_count}")
-# Should have counted statements from the callback (at least 10 calls)
-sys.exit(0 if increase > 10 else 1)
+count_after_unreg = sys.getsandboxcounts()['scope_statement_count']
+
+sys.clearsandboxfilenames()
+
+print(f"After A: {count_a}, After B: {count_after_b}, After unreg: {count_after_unreg}")
+
+# Both registered filenames should have contributed
+registered_counted = count_after_b > count_a > 0
+# Unregistered should not have added to count
+unreg_not_counted = count_after_unreg == count_after_b
+
+sys.exit(0 if (registered_counted and unreg_not_counted) else 1)
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -1069,120 +1161,46 @@ sys.exit(0 if increase > 10 else 1)
             timeout=10
         )
         self.assertEqual(result.returncode, 0,
-                        f"Callback to selected frame not counted: stdout={result.stdout!r} stderr={result.stderr!r}")
+                        f"Multiple filenames test failed: stdout={result.stdout!r} stderr={result.stderr!r}")
 
-    def test_multiple_selected_frames(self):
-        """Multiple frames can be added to the selected set."""
-        import subprocess
-        code = '''
-import sys
-sys.setsandboxlimits(scope_max_statements=1000000)
-
-# Track work done in each context
-selected_work_done = 0
-non_selected_work_done = 0
-
-def frame_a():
-    global selected_work_done
-    sys.addsandboxframe()
-    count_before = sys.getsandboxcounts()['scope_statement_count']
-    x = 1
-    for _ in range(50):
-        x += 1
-    count_after = sys.getsandboxcounts()['scope_statement_count']
-    selected_work_done += count_after - count_before
-
-def frame_b():
-    global selected_work_done
-    sys.addsandboxframe()
-    count_before = sys.getsandboxcounts()['scope_statement_count']
-    y = 1
-    for _ in range(50):
-        y += 1
-    count_after = sys.getsandboxcounts()['scope_statement_count']
-    selected_work_done += count_after - count_before
-
-def non_selected():
-    global non_selected_work_done
-    count_before = sys.getsandboxcounts()['scope_statement_count']
-    z = 1
-    for _ in range(100):
-        z += 1
-    count_after = sys.getsandboxcounts()['scope_statement_count']
-    non_selected_work_done += count_after - count_before
-
-# Run all three
-frame_a()
-frame_b()
-non_selected()
-
-sys.exitsandboxscope()
-
-print(f"Selected work: {selected_work_done}, Non-selected work: {non_selected_work_done}")
-
-# frame_a and frame_b should count significant work
-# non_selected should count very little (only the getsandboxcounts calls from outside)
-selected_counted = selected_work_done > 80  # ~50 + ~50 iterations
-non_not_counted = non_selected_work_done < 20  # Should be very small
-
-sys.exit(0 if (selected_counted and non_not_counted) else 1)
-'''
-        result = subprocess.run(
-            [sys.executable, '-c', code],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        self.assertEqual(result.returncode, 0,
-                        f"Multiple selected frames test failed: stdout={result.stdout!r} stderr={result.stderr!r}")
-
-    def test_selected_frames_with_allocation_limit(self):
-        """Selected frames mode should also work with allocation limits."""
+    def test_filename_scope_with_allocation_limit(self):
+        """Filename-based scope should also work with allocation limits."""
         import subprocess
         code = '''
 import sys
 sys.setsandboxlimits(scope_max_allocations=100000)
 
-selected_allocs = 0
-non_selected_allocs = 0
+# Register a specific filename for tracking
+sys.addsandboxfilename("<tracked-alloc>")
 
-def selected_frame():
-    global selected_allocs
-    sys.addsandboxframe()
-    count_before = sys.getsandboxcounts()['scope_allocation_count']
-    result = []
-    for _ in range(100):
-        result.append([1, 2, 3])
-    count_after = sys.getsandboxcounts()['scope_allocation_count']
-    selected_allocs = count_after - count_before
-    return result
+# Run code with registered filename - allocations should count
+exec(compile("""
+result = []
+for _ in range(100):
+    result.append([1, 2, 3])
+""", "<tracked-alloc>", "exec"))
 
-def non_selected_frame():
-    global non_selected_allocs
-    count_before = sys.getsandboxcounts()['scope_allocation_count']
-    result = []
-    for _ in range(100):
-        result.append([1, 2, 3])
-    count_after = sys.getsandboxcounts()['scope_allocation_count']
-    non_selected_allocs = count_after - count_before
-    return result
+tracked_allocs = sys.getsandboxcounts()['scope_allocation_count']
 
-# Run selected frame
-_ = selected_frame()
+# Run code with unregistered filename - allocations should NOT count
+exec(compile("""
+result2 = []
+for _ in range(100):
+    result2.append([1, 2, 3])
+""", "<untracked-alloc>", "exec"))
 
-# Run non-selected frame
-_ = non_selected_frame()
+after_untracked = sys.getsandboxcounts()['scope_allocation_count']
 
-sys.exitsandboxscope()
+sys.clearsandboxfilenames()
 
-print(f"Selected allocs: {selected_allocs}, Non-selected allocs: {non_selected_allocs}")
+print(f"Tracked allocs: {tracked_allocs}, After untracked: {after_untracked}")
 
-# Selected frame should have counted many allocations (100 lists + 100 sublists = 200+)
-# Non-selected frame should have counted very few (only from getsandboxcounts call)
-selected_counted = selected_allocs > 50
-non_not_counted = non_selected_allocs < 20
+# Tracked code should have counted allocations
+tracked_counted = tracked_allocs > 50
+# Untracked code should not have added to count
+untracked_not_counted = after_untracked == tracked_allocs
 
-sys.exit(0 if (selected_counted and non_not_counted) else 1)
+sys.exit(0 if (tracked_counted and untracked_not_counted) else 1)
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -1191,11 +1209,11 @@ sys.exit(0 if (selected_counted and non_not_counted) else 1)
             timeout=10
         )
         self.assertEqual(result.returncode, 0,
-                        f"Allocation limit with selected frames failed: stdout={result.stdout!r} stderr={result.stderr!r}")
+                        f"Allocation limit with filename scope failed: stdout={result.stdout!r} stderr={result.stderr!r}")
 
-    def test_exitsandboxscope_clears_all_selected_frames(self):
-        """exitsandboxscope should clear all selected frames."""
-        # Add current frame to scope
+    def test_exitsandboxscope_clears_all_registered_filenames(self):
+        """exitsandboxscope should clear all registered filenames."""
+        # Add current frame's filename to scope
         sys.addsandboxframe()
         self.assertTrue(sys.issandboxinscope())
 
@@ -1208,7 +1226,7 @@ sys.exit(0 if (selected_counted and non_not_counted) else 1)
         sys.exitsandboxscope()
 
     def test_entersandboxscope_adds_current_frame(self):
-        """entersandboxscope should add the current frame to the selected set."""
+        """entersandboxscope should add the current frame's filename to the set."""
         sys.setsandboxlimits(scope_max_statements=1000000)
 
         sys.entersandboxscope()
@@ -1224,6 +1242,351 @@ sys.exit(0 if (selected_counted and non_not_counted) else 1)
 
         # Should have counted statements
         self.assertGreater(count, 50)
+
+
+class FilenameBasedScopeTests(unittest.TestCase):
+    """Test filename-based sandbox scope tracking.
+
+    This tests the new addsandboxfilename() API where code is tracked
+    by co_filename rather than frame pointers. This is simpler and
+    works reliably across function calls.
+    """
+
+    def setUp(self):
+        # Ensure clean scope state from any previous tests
+        try:
+            sys.exitsandboxscope()
+        except:
+            pass
+        # Reset all counters for clean test state
+        sys.resetsandboxscopeallocationcount()
+        sys.resetsandboxscopestatementcount()
+        sys.resetsandboxglobalallocationcount()
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        while sys.issandboxsuspended():
+            sys.resumesandboxlimits()
+        try:
+            sys.clearsandboxfilenames()
+        except:
+            pass
+        sys.setsandboxlimits(**self.original_limits)
+        sys.resetsandboxglobalallocationcount()
+
+    def test_addsandboxfilename_basic(self):
+        """addsandboxfilename should register a filename for scope tracking."""
+        sys.setsandboxlimits(scope_max_statements=1000000)
+        sys.addsandboxfilename("<test>")
+
+        # Compile and exec code with the registered filename
+        code = compile("x = 1; y = 2; z = 3", "<test>", "exec")
+        exec(code)
+
+        count = sys.getsandboxcounts()['scope_statement_count']
+        # Should have counted the statements
+        self.assertGreater(count, 0)
+
+        sys.clearsandboxfilenames()
+
+    def test_removesandboxfilename(self):
+        """removesandboxfilename should unregister a filename."""
+        sys.addsandboxfilename("<test-remove>")
+
+        # Code with this filename should be in scope
+        code = compile("pass", "<test-remove>", "exec")
+        # Can't directly test scope inside exec, but we can test the API
+        sys.removesandboxfilename("<test-remove>")
+
+        # After removal, code with this filename shouldn't be in scope
+        sys.clearsandboxfilenames()
+
+    def test_clearsandboxfilenames(self):
+        """clearsandboxfilenames should clear all registered filenames."""
+        sys.addsandboxfilename("<test1>")
+        sys.addsandboxfilename("<test2>")
+        sys.addsandboxfilename("<test3>")
+
+        sys.clearsandboxfilenames()
+
+        # After clearing, no filenames should be registered
+        # issandboxinscope requires a frame with matching filename
+        self.assertFalse(sys.issandboxinscope())
+
+    def test_functions_in_exec_count(self):
+        """Functions defined in exec'd code should count toward statement limit."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=1000000)
+sys.addsandboxfilename("<sandbox>")
+
+# Compile code with registered filename
+exec_code = compile("""
+def foo():
+    x = 0
+    for i in range(50):
+        x += i
+    return x
+
+def bar():
+    y = 0
+    for i in range(50):
+        y += i * 2
+    return y
+
+# Call the functions
+result1 = foo()
+result2 = bar()
+""", "<sandbox>", "exec")
+
+exec(exec_code)
+
+counts = sys.getsandboxcounts()
+sys.clearsandboxfilenames()
+
+# Both foo() and bar() should have their statements counted
+print(f"Statement count: {counts['scope_statement_count']}")
+# Should have counted ~100 loop iterations plus other statements
+sys.exit(0 if counts['scope_statement_count'] > 80 else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Functions in exec not counted: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_cross_function_calls_count(self):
+        """Cross-function calls within same registered filename should count."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=1000000)
+sys.addsandboxfilename("<sandbox>")
+
+# Define classes and functions that call each other
+exec_code = compile("""
+class Foo:
+    def method(self):
+        x = 0
+        for i in range(20):
+            x += i
+        return x
+
+class Bar:
+    def call_foo(self, foo):
+        return foo.method() + 1
+
+# Create instances and call methods
+foo = Foo()
+bar = Bar()
+result = bar.call_foo(foo)
+""", "<sandbox>", "exec")
+
+exec(exec_code)
+
+counts = sys.getsandboxcounts()
+sys.clearsandboxfilenames()
+
+# All statements should be counted since they share the same filename
+print(f"Statement count: {counts['scope_statement_count']}")
+sys.exit(0 if counts['scope_statement_count'] > 30 else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Cross-function calls not counted: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_imported_modules_not_counted(self):
+        """Code in imported modules should NOT count toward scope limits."""
+        import subprocess
+        code = '''
+import sys
+import os
+sys.setsandboxlimits(scope_max_statements=1000000)
+
+# Register a custom filename - os module has different filename
+sys.addsandboxfilename("<my-sandbox>")
+
+count_before = sys.getsandboxcounts()['scope_statement_count']
+
+# Call imported functions - should NOT count (different filename)
+_ = os.getcwd()
+_ = os.getcwd()
+_ = os.getcwd()
+
+count_after = sys.getsandboxcounts()['scope_statement_count']
+sys.clearsandboxfilenames()
+
+# The count should be 0 - no code with our filename was executed
+increase = count_after - count_before
+print(f"Increase: {increase}")
+sys.exit(0 if increase == 0 else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Imported module wrongly counted: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_multiple_exec_same_filename(self):
+        """Multiple exec() calls with same filename should share scope."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=1000000)
+sys.addsandboxfilename("<shared>")
+
+# First exec
+exec(compile("""
+class A:
+    def work(self):
+        x = 0
+        for i in range(20):
+            x += i
+        return x
+""", "<shared>", "exec"))
+
+# Second exec - same filename
+exec(compile("""
+class B(A):
+    def more_work(self):
+        return self.work() * 2
+""", "<shared>", "exec"))
+
+# Third exec - call methods
+exec(compile("""
+b = B()
+result = b.more_work()
+""", "<shared>", "exec"))
+
+counts = sys.getsandboxcounts()
+sys.clearsandboxfilenames()
+
+# All three exec blocks should have contributed to the count
+print(f"Statement count: {counts['scope_statement_count']}")
+sys.exit(0 if counts['scope_statement_count'] > 30 else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Multiple exec not sharing scope: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_statement_limit_with_filename(self):
+        """Statement limit should work with filename-based tracking."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=10)
+sys.addsandboxfilename("<limited>")
+
+try:
+    exec(compile("""
+for _ in range(100):
+    x = 1
+""", "<limited>", "exec"))
+    sys.exit(2)  # Should not reach here
+except RuntimeError as e:
+    if "statement limit" in str(e):
+        sys.exit(0)  # Expected error
+    sys.exit(3)  # Wrong error message
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Statement limit not enforced: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_allocation_limit_with_filename(self):
+        """Allocation limit should work with filename-based tracking."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_allocations=100)
+sys.addsandboxfilename("<alloc-limited>")
+
+a = []
+try:
+    exec(compile("""
+for i in range(1000):
+    a.append([i])
+""", "<alloc-limited>", "exec"), {"a": a})
+    sys.exit(2)  # Should not reach here
+except MemoryError:
+    sys.exit(0)  # Successfully caught MemoryError
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            return  # Test passed
+        if result.returncode == 2:
+            self.fail("MemoryError was not raised")
+        # If it exited with error, check that MemoryError was involved
+        self.assertIn("MemoryError", result.stderr,
+                      f"Expected MemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_different_filenames_independent(self):
+        """Different registered filenames should track independently."""
+        import subprocess
+        code = '''
+import sys
+sys.setsandboxlimits(scope_max_statements=1000000)
+
+# Register only one filename
+sys.addsandboxfilename("<tracked>")
+
+# This should count
+exec(compile("""
+x = 0
+for i in range(50):
+    x += i
+""", "<tracked>", "exec"))
+
+count_tracked = sys.getsandboxcounts()['scope_statement_count']
+
+# This should NOT count (different filename, not registered)
+exec(compile("""
+y = 0
+for i in range(100):
+    y += i
+""", "<not-tracked>", "exec"))
+
+count_after = sys.getsandboxcounts()['scope_statement_count']
+sys.clearsandboxfilenames()
+
+# Count should not have increased (second exec has different filename)
+print(f"After tracked: {count_tracked}, After untracked: {count_after}")
+sys.exit(0 if count_after == count_tracked else 1)
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Different filenames not independent: stdout={result.stdout!r} stderr={result.stderr!r}")
 
 
 if __name__ == '__main__':

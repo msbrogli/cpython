@@ -29,18 +29,14 @@ struct _frame;
 /* Forward declaration for interpreter frame */
 struct _PyInterpreterFrame;
 
-/* Entry for selected frames hash set - stores frame + code for disambiguation */
+/* Registered filenames set for scope tracking.
+ * Tracks sandbox scope by co_filename values rather than frame pointers.
+ * Code compiled with a registered filename counts toward scope limits. */
 typedef struct {
-    void *frame;             /* _PyInterpreterFrame pointer */
-    void *code;              /* PyCodeObject pointer for this frame */
-} _PySandboxFrameEntry;
-
-/* Selected frames hash set - stores frame+code pairs for O(1) lookup */
-typedef struct {
-    _PySandboxFrameEntry *entries;  /* Array of frame entries */
-    size_t capacity;         /* Capacity (power of 2) */
-    size_t count;            /* Number of selected frames */
-} _PySandboxFrameSet;
+    PyObject **filenames;    /* Array of filename strings (strong refs) */
+    size_t capacity;         /* Array capacity */
+    size_t count;            /* Number of registered filenames */
+} _PySandboxFilenameSet;
 
 /* Sandbox limits structure - stored in PyInterpreterState */
 typedef struct {
@@ -68,11 +64,11 @@ typedef struct {
     uint64_t scope_max_allocations;     /* 0 = no limit */
     uint64_t scope_allocation_count;    /* Allocations in scope */
 
-    /* Sandbox scope tracking - set of selected frames
-     * Only code executing directly in these frames counts toward scope limits.
-     * When a selected frame calls non-selected code, the call counts but
-     * execution in the non-selected frame does not. */
-    _PySandboxFrameSet selected_frames;
+    /* Sandbox scope tracking - set of registered filenames.
+     * Code with a registered co_filename counts toward scope limits.
+     * This is simpler than frame-based tracking and works reliably
+     * across function calls within the same code context. */
+    _PySandboxFilenameSet registered_filenames;
 
     /* Type restrictions */
     int allow_float;         /* 0 = forbidden, 1 = allowed (default) */
@@ -102,7 +98,7 @@ typedef struct {
     .scope_statement_count = 0,     \
     .scope_max_allocations = 0,     \
     .scope_allocation_count = 0,    \
-    .selected_frames = {.entries = NULL, .capacity = 0, .count = 0}, \
+    .registered_filenames = {.filenames = NULL, .capacity = 0, .count = 0}, \
     .allow_float = 1,               \
     .allow_complex = 1,             \
     .in_check = 0,                  \
@@ -196,7 +192,12 @@ PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
 PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */
 PyAPI_FUNC(int) _PySandbox_ExitScope(void);    /* Clear entry frame and selected frames */
 PyAPI_FUNC(int) _PySandbox_IsInScope(void);    /* Check if currently in sandbox scope */
-PyAPI_FUNC(int) _PySandbox_AddFrameToScope(void);  /* Add current frame to selected frames set */
+PyAPI_FUNC(int) _PySandbox_AddFrameToScope(void);  /* Add current frame's filename to registered set */
+
+/* Filename-based scope management */
+PyAPI_FUNC(int) _PySandbox_AddFilename(PyObject *filename);      /* Add a filename to the scope set */
+PyAPI_FUNC(int) _PySandbox_RemoveFilename(PyObject *filename);   /* Remove a filename from the set */
+PyAPI_FUNC(void) _PySandbox_ClearFilenames(void);                /* Clear all registered filenames */
 
 /* Counter resetters */
 PyAPI_FUNC(void) _PySandbox_ResetScopeStatementCount(void);

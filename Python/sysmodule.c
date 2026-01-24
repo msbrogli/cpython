@@ -2252,12 +2252,71 @@ sys_addsandboxframe(PyObject *self, PyObject *Py_UNUSED(args))
 PyDoc_STRVAR(addsandboxframe_doc,
 "addsandboxframe()\n\
 \n\
-Add the CURRENT frame to the set of selected frames for sandbox scope.\n\
-Only code executing directly in selected frames counts toward scope limits.\n\
-When a selected frame calls non-selected code, the call itself counts but\n\
-execution within the non-selected frame does not. When non-selected code\n\
-calls back into a selected frame, execution counts again.\n\
-Frames persist in the set until exitsandboxscope() is called."
+Add the CURRENT frame's filename to the set of registered filenames for\n\
+sandbox scope. Code with a registered co_filename counts toward scope limits.\n\
+Filenames persist in the set until exitsandboxscope() or clearsandboxfilenames()\n\
+is called."
+);
+
+static PyObject *
+sys_addsandboxfilename(PyObject *self, PyObject *arg)
+{
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "filename must be a string");
+        return NULL;
+    }
+    if (_PySandbox_AddFilename(arg) < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(addsandboxfilename_doc,
+"addsandboxfilename(filename)\n\
+\n\
+Register a filename for sandbox scope tracking.\n\
+All code compiled with a registered co_filename counts toward scope limits.\n\
+Use this with compile() + exec() for explicit control over what code is tracked:\n\
+\n\
+    sys.addsandboxfilename('<my-sandbox>')\n\
+    code = compile(source, '<my-sandbox>', 'exec')\n\
+    exec(code)\n\
+\n\
+Filenames persist until exitsandboxscope() or clearsandboxfilenames() is called."
+);
+
+static PyObject *
+sys_removesandboxfilename(PyObject *self, PyObject *arg)
+{
+    if (!PyUnicode_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "filename must be a string");
+        return NULL;
+    }
+    if (_PySandbox_RemoveFilename(arg) < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(removesandboxfilename_doc,
+"removesandboxfilename(filename)\n\
+\n\
+Remove a filename from the set of registered filenames for sandbox scope.\n\
+Code with this co_filename will no longer count toward scope limits."
+);
+
+static PyObject *
+sys_clearsandboxfilenames(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    _PySandbox_ClearFilenames();
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(clearsandboxfilenames_doc,
+"clearsandboxfilenames()\n\
+\n\
+Clear all registered filenames for sandbox scope.\n\
+This is equivalent to exitsandboxscope() but does not reset counters."
 );
 
 static PyObject *
@@ -2440,6 +2499,12 @@ static PyMethodDef sys_methods[] = {
      issandboxinscope_doc},
     {"addsandboxframe", sys_addsandboxframe, METH_NOARGS,
      addsandboxframe_doc},
+    {"addsandboxfilename", sys_addsandboxfilename, METH_O,
+     addsandboxfilename_doc},
+    {"removesandboxfilename", sys_removesandboxfilename, METH_O,
+     removesandboxfilename_doc},
+    {"clearsandboxfilenames", sys_clearsandboxfilenames, METH_NOARGS,
+     clearsandboxfilenames_doc},
     {"getobjectcreationhook", sys_getobjectcreationhook, METH_NOARGS,
      getobjectcreationhook_doc},
     {"setobjectcreationhook", sys_setobjectcreationhook, METH_O,

@@ -8,7 +8,7 @@
 #include "frameobject.h"
 
 /* Forward declarations */
-static void free_selected_frames(_PySandboxFrameSet *set);
+static void free_filenames(_PySandboxFilenameSet *set);
 
 /* ============ Initialization ============ */
 
@@ -34,10 +34,10 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.limits.scope_max_allocations = 0;
     interp->sandbox.limits.scope_allocation_count = 0;
 
-    /* Selected frames set (lazy-initialized) */
-    interp->sandbox.limits.selected_frames.entries = NULL;
-    interp->sandbox.limits.selected_frames.capacity = 0;
-    interp->sandbox.limits.selected_frames.count = 0;
+    /* Registered filenames set (lazy-initialized) */
+    interp->sandbox.limits.registered_filenames.filenames = NULL;
+    interp->sandbox.limits.registered_filenames.capacity = 0;
+    interp->sandbox.limits.registered_filenames.count = 0;
 
     interp->sandbox.limits.allow_float = 1;
     interp->sandbox.limits.allow_complex = 1;
@@ -53,8 +53,8 @@ _PySandbox_Init(PyInterpreterState *interp)
 void
 _PySandbox_Fini(PyInterpreterState *interp)
 {
-    /* Free selected frames hash set */
-    free_selected_frames(&interp->sandbox.limits.selected_frames);
+    /* Free registered filenames set */
+    free_filenames(&interp->sandbox.limits.registered_filenames);
 
     Py_CLEAR(interp->sandbox.creation_hook.hook_callback);
     interp->sandbox.creation_hook.hook_func = NULL;
@@ -244,147 +244,162 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
  * This allows Python to format and print MemoryError without cascading failures. */
 #define ALLOCATION_GRACE_HEADROOM 1000
 
-/* Initial capacity for selected frames hash set */
-#define SELECTED_FRAMES_INITIAL_CAPACITY 8
+/* Initial capacity for registered filenames set */
+#define FILENAMES_INITIAL_CAPACITY 8
 
-/* ============ Selected Frames Hash Set ============ */
+/* ============ Registered Filenames Set ============ */
 
-/* Hash function for frame pointers - uses pointer value with alignment shift */
-static inline size_t
-hash_frame_ptr(void *frame, size_t capacity)
-{
-    uintptr_t addr = (uintptr_t)frame;
-    /* Shift off alignment bits (typically 8 bytes) and mask to capacity */
-    return (addr >> 3) & (capacity - 1);
-}
-
-/* Check if a frame is in the selected frames set. O(1) average case.
- * We store frame+code pairs to guard against frame pointer reuse:
- * when a function returns and its memory is reused for a new frame,
- * the code object will be different, so we won't get false positives. */
+/* Check if a filename is in the registered set. O(n) but n is small. */
 static int
-frame_is_selected(_PySandboxFrameSet *set, _PyInterpreterFrame *frame)
+filename_is_registered(_PySandboxFilenameSet *set, PyObject *filename)
 {
-    if (set->entries == NULL || set->count == 0) {
+    if (set->filenames == NULL || set->count == 0 || filename == NULL) {
         return 0;
     }
 
-    size_t capacity = set->capacity;
-    size_t index = hash_frame_ptr(frame, capacity);
-
-    /* Linear probe for match */
-    for (size_t i = 0; i < capacity; i++) {
-        _PySandboxFrameEntry *entry = &set->entries[index];
-        if (entry->frame == NULL) {
-            return 0;  /* Not found - empty slot means not in set */
+    for (size_t i = 0; i < set->count; i++) {
+        PyObject *registered = set->filenames[i];
+        if (registered == filename) {
+            return 1;  /* Same object - quick match */
         }
-        if (entry->frame == (void *)frame &&
-            entry->code == (void *)frame->f_code) {
-            return 1;  /* Found - both frame pointer AND code object match */
+        /* String comparison for interned strings with different addresses */
+        int cmp = PyUnicode_Compare(filename, registered);
+        if (cmp == 0 && !PyErr_Occurred()) {
+            return 1;
         }
-        index = (index + 1) & (capacity - 1);
+        PyErr_Clear();  /* Clear any comparison error */
     }
-    return 0;  /* Table full without finding - shouldn't happen */
+    return 0;
 }
 
-/* Initialize the selected frames hash set */
+/* Check if current frame is in sandbox scope.
+ * A frame is in scope if its co_filename is in the registered set. */
 static int
-init_selected_frames(_PySandboxFrameSet *set)
+frame_in_sandbox_scope(_PySandboxFilenameSet *set, _PyInterpreterFrame *frame)
 {
-    if (set->entries == NULL) {
-        set->entries = PyMem_RawCalloc(SELECTED_FRAMES_INITIAL_CAPACITY,
-                                       sizeof(_PySandboxFrameEntry));
-        if (set->entries == NULL) {
+    if (set->filenames == NULL || set->count == 0 || frame == NULL) {
+        return 0;
+    }
+
+    /* Skip incomplete frames to get the actual executing frame */
+    while (frame && _PyFrame_IsIncomplete(frame)) {
+        frame = frame->previous;
+    }
+    if (frame == NULL) {
+        return 0;
+    }
+
+    /* Check if current frame's filename is registered */
+    return filename_is_registered(set, frame->f_code->co_filename);
+}
+
+/* Initialize the filenames set */
+static int
+init_filenames(_PySandboxFilenameSet *set)
+{
+    if (set->filenames == NULL) {
+        set->filenames = PyMem_RawCalloc(FILENAMES_INITIAL_CAPACITY,
+                                         sizeof(PyObject *));
+        if (set->filenames == NULL) {
             PyErr_NoMemory();
             return -1;
         }
-        set->capacity = SELECTED_FRAMES_INITIAL_CAPACITY;
+        set->capacity = FILENAMES_INITIAL_CAPACITY;
         set->count = 0;
     }
     return 0;
 }
 
-/* Grow the selected frames hash set when load factor exceeds threshold */
+/* Add a filename to the registered set */
 static int
-grow_selected_frames(_PySandboxFrameSet *set)
+add_filename_to_set(_PySandboxFilenameSet *set, PyObject *filename)
 {
-    size_t old_capacity = set->capacity;
-    size_t new_capacity = old_capacity * 2;
-    _PySandboxFrameEntry *new_entries = PyMem_RawCalloc(new_capacity,
-                                                         sizeof(_PySandboxFrameEntry));
-    if (new_entries == NULL) {
-        PyErr_NoMemory();
+    if (!PyUnicode_Check(filename)) {
+        PyErr_SetString(PyExc_TypeError, "filename must be a string");
         return -1;
     }
 
-    /* Rehash existing entries */
-    for (size_t i = 0; i < old_capacity; i++) {
-        _PySandboxFrameEntry *old_entry = &set->entries[i];
-        if (old_entry->frame != NULL) {
-            size_t index = hash_frame_ptr(old_entry->frame, new_capacity);
-            while (new_entries[index].frame != NULL) {
-                index = (index + 1) & (new_capacity - 1);
-            }
-            new_entries[index] = *old_entry;
-        }
-    }
-
-    PyMem_RawFree(set->entries);
-    set->entries = new_entries;
-    set->capacity = new_capacity;
-    return 0;
-}
-
-/* Add a frame to the selected frames set */
-static int
-add_frame_to_set(_PySandboxFrameSet *set, _PyInterpreterFrame *frame)
-{
-    if (init_selected_frames(set) < 0) {
+    if (init_filenames(set) < 0) {
         return -1;
     }
 
-    /* Check if already in set (idempotent) */
-    if (frame_is_selected(set, frame)) {
+    /* Check if already registered (idempotent) */
+    if (filename_is_registered(set, filename)) {
         return 0;
     }
 
-    /* Grow if load factor would exceed 0.7 */
-    if ((set->count + 1) * 10 > set->capacity * 7) {
-        if (grow_selected_frames(set) < 0) {
+    /* Grow if needed */
+    if (set->count >= set->capacity) {
+        size_t new_capacity = set->capacity * 2;
+        PyObject **new_filenames = PyMem_RawRealloc(set->filenames,
+                                                     new_capacity * sizeof(PyObject *));
+        if (new_filenames == NULL) {
+            PyErr_NoMemory();
             return -1;
         }
+        set->filenames = new_filenames;
+        set->capacity = new_capacity;
     }
 
-    /* Insert frame+code pair using linear probing */
-    size_t capacity = set->capacity;
-    size_t index = hash_frame_ptr(frame, capacity);
-    while (set->entries[index].frame != NULL) {
-        index = (index + 1) & (capacity - 1);
-    }
-    set->entries[index].frame = (void *)frame;
-    set->entries[index].code = (void *)frame->f_code;
-    set->count++;
-
+    /* Add with strong reference */
+    Py_INCREF(filename);
+    set->filenames[set->count++] = filename;
     return 0;
 }
 
-/* Clear all frames from the set (for exit scope) */
-static void
-clear_selected_frames(_PySandboxFrameSet *set)
+/* Remove a filename from the registered set */
+static int
+remove_filename_from_set(_PySandboxFilenameSet *set, PyObject *filename)
 {
-    if (set->entries != NULL) {
-        memset(set->entries, 0, set->capacity * sizeof(_PySandboxFrameEntry));
+    if (set->filenames == NULL || set->count == 0) {
+        return 0;  /* Nothing to remove */
+    }
+
+    for (size_t i = 0; i < set->count; i++) {
+        PyObject *registered = set->filenames[i];
+        int match = (registered == filename);
+        if (!match) {
+            int cmp = PyUnicode_Compare(filename, registered);
+            match = (cmp == 0 && !PyErr_Occurred());
+            PyErr_Clear();
+        }
+        if (match) {
+            /* Found it - remove by swapping with last element */
+            Py_DECREF(registered);
+            set->count--;
+            if (i < set->count) {
+                set->filenames[i] = set->filenames[set->count];
+            }
+            set->filenames[set->count] = NULL;
+            return 1;  /* Removed */
+        }
+    }
+    return 0;  /* Not found */
+}
+
+/* Clear all registered filenames (for exit scope) */
+static void
+clear_filenames(_PySandboxFilenameSet *set)
+{
+    if (set->filenames != NULL) {
+        for (size_t i = 0; i < set->count; i++) {
+            Py_XDECREF(set->filenames[i]);
+            set->filenames[i] = NULL;
+        }
         set->count = 0;
     }
 }
 
-/* Free the selected frames set (for finalization) */
+/* Free the filenames set (for finalization) */
 static void
-free_selected_frames(_PySandboxFrameSet *set)
+free_filenames(_PySandboxFilenameSet *set)
 {
-    if (set->entries != NULL) {
-        PyMem_RawFree(set->entries);
-        set->entries = NULL;
+    if (set->filenames != NULL) {
+        for (size_t i = 0; i < set->count; i++) {
+            Py_XDECREF(set->filenames[i]);
+        }
+        PyMem_RawFree(set->filenames);
+        set->filenames = NULL;
         set->capacity = 0;
         set->count = 0;
     }
@@ -431,12 +446,12 @@ _PySandbox_CheckAllocation(void)
     limits->global_allocation_count++;
 
     /* Check if in sandbox scope for scoped counting.
-     * Current frame must be in the selected_frames set. */
+     * Frame is in scope if its co_filename is in the registered set. */
     int in_scope = 0;
-    if (limits->selected_frames.count > 0) {
+    if (limits->registered_filenames.count > 0) {
         _PyInterpreterFrame *current = get_current_interpreter_frame();
         if (current != NULL) {
-            in_scope = frame_is_selected(&limits->selected_frames, current);
+            in_scope = frame_in_sandbox_scope(&limits->registered_filenames, current);
         }
     }
 
@@ -507,14 +522,14 @@ _PySandbox_CheckScopeStatement(void)
         return 0;
     }
 
-    /* Skip if no selected frames */
-    if (limits->selected_frames.count == 0) {
+    /* Skip if no registered filenames */
+    if (limits->registered_filenames.count == 0) {
         return 0;
     }
 
-    /* Check if current frame is in the selected frames set */
+    /* Check if current frame's filename is in the registered set */
     _PyInterpreterFrame *current = get_current_interpreter_frame();
-    if (current == NULL || !frame_is_selected(&limits->selected_frames, current)) {
+    if (!frame_in_sandbox_scope(&limits->registered_filenames, current)) {
         return 0;
     }
 
@@ -552,14 +567,15 @@ _PySandbox_EnterScope(void)
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    /* Get current frame and add to selected frames set */
+    /* Get current frame and add its filename to registered set */
     _PyInterpreterFrame *frame = get_current_interpreter_frame();
     if (frame == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No current frame");
         return -1;
     }
 
-    if (add_frame_to_set(&limits->selected_frames, frame) < 0) {
+    if (add_filename_to_set(&limits->registered_filenames,
+                            frame->f_code->co_filename) < 0) {
         return -1;
     }
 
@@ -581,8 +597,8 @@ _PySandbox_ExitScope(void)
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    /* Clear selected frames set */
-    clear_selected_frames(&limits->selected_frames);
+    /* Clear all registered filenames */
+    clear_filenames(&limits->registered_filenames);
 
     return 0;
 }
@@ -597,8 +613,8 @@ _PySandbox_IsInScope(void)
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    /* Check if any frames are selected */
-    if (limits->selected_frames.count == 0) {
+    /* Check if any filenames are registered */
+    if (limits->registered_filenames.count == 0) {
         return 0;
     }
 
@@ -607,7 +623,8 @@ _PySandbox_IsInScope(void)
         return 0;
     }
 
-    return frame_is_selected(&limits->selected_frames, current);
+    /* Current frame is in scope if its filename is registered */
+    return frame_in_sandbox_scope(&limits->registered_filenames, current);
 }
 
 int
@@ -634,8 +651,9 @@ _PySandbox_AddFrameToScope(void)
         return -1;
     }
 
-    /* Add frame to the selected frames set */
-    return add_frame_to_set(&limits->selected_frames, frame);
+    /* Add current frame's filename to the registered set */
+    return add_filename_to_set(&limits->registered_filenames,
+                               frame->f_code->co_filename);
 }
 
 /* ============ Counter Resetters ============ */
@@ -665,6 +683,46 @@ _PySandbox_ResetGlobalAllocationCount(void)
     if (interp != NULL) {
         interp->sandbox.limits.global_allocation_count = 0;
     }
+}
+
+/* ============ Filename-Based Scope Management ============ */
+
+int
+_PySandbox_AddFilename(PyObject *filename)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return -1;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+    return add_filename_to_set(&limits->registered_filenames, filename);
+}
+
+int
+_PySandbox_RemoveFilename(PyObject *filename)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return -1;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+    return remove_filename_from_set(&limits->registered_filenames, filename);
+}
+
+void
+_PySandbox_ClearFilenames(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+    clear_filenames(&limits->registered_filenames);
 }
 
 /* ============ Object Creation Hook ============ */

@@ -20,6 +20,8 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.limits.max_dict_size = 0;
     interp->sandbox.limits.max_set_size = 0;
     interp->sandbox.limits.max_tuple_size = 0;
+    interp->sandbox.limits.max_allocations = 0;
+    interp->sandbox.limits.allocation_count = 0;
     interp->sandbox.limits.allow_float = 1;
     interp->sandbox.limits.allow_complex = 1;
     interp->sandbox.limits.in_check = 0;
@@ -212,6 +214,62 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
     if (!limits->allow_complex && type == &PyComplex_Type) {
         PyErr_SetString(PyExc_TypeError,
                         "complex type is forbidden in sandbox");
+        return -1;
+    }
+
+    return 0;
+}
+
+/* Grace allocation headroom to allow for error handling after limit is hit.
+ * This allows Python to format and print MemoryError without cascading failures. */
+#define ALLOCATION_GRACE_HEADROOM 1000
+
+int
+_PySandbox_CheckAllocation(void)
+{
+    /* Get thread state first - if not available, skip check */
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        return 0;
+    }
+
+    /* Get interpreter state - if not available, skip check */
+    PyInterpreterState *interp = tstate->interp;
+    if (interp == NULL) {
+        return 0;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    /* Skip counting during recursive checks or when suspended */
+    if (limits->in_check || limits->suspended) {
+        return 0;
+    }
+
+    /* Always increment allocation count (for monitoring) */
+    limits->allocation_count++;
+
+    /* If no limit is set, just count and return */
+    if (limits->max_allocations == 0) {
+        return 0;
+    }
+
+    /* If there's already an error set, don't raise another one.
+     * This prevents allocation failures during error handling. */
+    if (PyErr_Occurred()) {
+        return 0;
+    }
+
+    /* Hard limit: grace allocations exhausted, fail unconditionally */
+    if (limits->allocation_count > limits->max_allocations + ALLOCATION_GRACE_HEADROOM) {
+        PyErr_NoMemory();
+        return -1;
+    }
+
+    /* Soft limit: raise MemoryError only on the first allocation past the limit.
+     * This allows error handling code to allocate within the grace headroom. */
+    if (limits->allocation_count == limits->max_allocations + 1) {
+        PyErr_NoMemory();
         return -1;
     }
 

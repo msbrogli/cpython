@@ -42,6 +42,10 @@ typedef struct {
     Py_ssize_t max_set_size;
     Py_ssize_t max_tuple_size;
 
+    /* Allocation limits: count of GC-tracked object allocations */
+    uint64_t max_allocations;   /* 0 = no limit */
+    uint64_t allocation_count;  /* Current count */
+
     /* Type restrictions */
     int allow_float;         /* 0 = forbidden, 1 = allowed (default) */
     int allow_complex;       /* 0 = forbidden, 1 = allowed (default) */
@@ -64,6 +68,8 @@ typedef struct {
     .max_dict_size = 0,         \
     .max_set_size = 0,          \
     .max_tuple_size = 0,        \
+    .max_allocations = 0,       \
+    .allocation_count = 0,      \
     .allow_float = 1,           \
     .allow_complex = 1,         \
     .in_check = 0,              \
@@ -146,6 +152,9 @@ PyAPI_FUNC(int) _PySandbox_CheckTupleSize(Py_ssize_t size);
 
 /* Check if a type is allowed. Returns 0 if allowed, -1 if forbidden (sets exception) */
 PyAPI_FUNC(int) _PySandbox_CheckTypeAllowed(PyTypeObject *type);
+
+/* Check allocation count against limits. Returns 0 if OK, -1 if exceeded (sets exception) */
+PyAPI_FUNC(int) _PySandbox_CheckAllocation(void);
 
 /* Call object creation hook. Returns new object (may be replacement) or NULL on error */
 PyAPI_FUNC(PyObject *) _PySandbox_CallCreationHook(

@@ -2002,7 +2002,7 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     static char *kwlist[] = {
         "max_int_digits", "max_str_length", "max_bytes_length",
         "max_list_size", "max_dict_size", "max_set_size", "max_tuple_size",
-        "allow_float", "allow_complex", NULL
+        "max_allocations", "allow_float", "allow_complex", NULL
     };
 
     Py_ssize_t max_int_digits = 0;
@@ -2012,14 +2012,15 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     Py_ssize_t max_dict_size = 0;
     Py_ssize_t max_set_size = 0;
     Py_ssize_t max_tuple_size = 0;
+    unsigned long long max_allocations = 0;
     int allow_float = 1;
     int allow_complex = 1;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnpp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKpp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
-                                     &max_tuple_size,
+                                     &max_tuple_size, &max_allocations,
                                      &allow_float, &allow_complex)) {
         return NULL;
     }
@@ -2038,6 +2039,7 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     limits->max_dict_size = max_dict_size;
     limits->max_set_size = max_set_size;
     limits->max_tuple_size = max_tuple_size;
+    limits->max_allocations = max_allocations;
     limits->allow_float = allow_float;
     limits->allow_complex = allow_complex;
 
@@ -2047,20 +2049,26 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
 PyDoc_STRVAR(setsandboxlimits_doc,
 "setsandboxlimits(*, max_int_digits=0, max_str_length=0, max_bytes_length=0,\n\
                  max_list_size=0, max_dict_size=0, max_set_size=0,\n\
-                 max_tuple_size=0, allow_float=True, allow_complex=True)\n\
+                 max_tuple_size=0, max_allocations=0,\n\
+                 allow_float=True, allow_complex=True)\n\
 \n\
 Set sandbox limits for the current interpreter.\n\
 A value of 0 means no limit. Set allow_float/allow_complex to False to\n\
 forbid creation of those types.\n\
 \n\
+max_allocations limits the number of GC-tracked object allocations\n\
+(lists, tuples, dicts, sets, user classes). Use resetsandboxallocationcount()\n\
+to reset the counter.\n\
+\n\
 Recommended minimal limits that don't interfere with normal Python operation:\n\
-  max_int_digits=100       # allows integers up to ~10^900\n\
-  max_str_length=100000    # 100KB strings\n\
-  max_bytes_length=100000  # 100KB bytes\n\
-  max_list_size=10000      # 10K list items\n\
-  max_dict_size=10000      # 10K dict entries\n\
-  max_set_size=10000       # 10K set members\n\
-  max_tuple_size=10000     # 10K tuple items"
+  max_int_digits=100         # allows integers up to ~10^900\n\
+  max_str_length=100000      # 100KB strings\n\
+  max_bytes_length=100000    # 100KB bytes\n\
+  max_list_size=1000000      # 1M list items\n\
+  max_dict_size=1000000      # 1M dict entries\n\
+  max_set_size=1000000       # 1M set members\n\
+  max_tuple_size=1000000     # 1M tuple items\n\
+  max_allocations=1000000    # 1M GC-tracked allocations"
 );
 
 static PyObject *
@@ -2074,7 +2082,7 @@ sys_getsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    return Py_BuildValue("{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:O, s:O}",
+    return Py_BuildValue("{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:O, s:O}",
                          "max_int_digits", limits->max_int_digits,
                          "max_str_length", limits->max_str_length,
                          "max_bytes_length", limits->max_bytes_length,
@@ -2082,6 +2090,7 @@ sys_getsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
                          "max_dict_size", limits->max_dict_size,
                          "max_set_size", limits->max_set_size,
                          "max_tuple_size", limits->max_tuple_size,
+                         "max_allocations", (unsigned long long)limits->max_allocations,
                          "allow_float", limits->allow_float ? Py_True : Py_False,
                          "allow_complex", limits->allow_complex ? Py_True : Py_False);
 }
@@ -2090,6 +2099,48 @@ PyDoc_STRVAR(getsandboxlimits_doc,
 "getsandboxlimits() -> dict\n\
 \n\
 Return the current sandbox limits as a dictionary."
+);
+
+static PyObject *
+sys_getsandboxcounts(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return NULL;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    return Py_BuildValue("{s:K}",
+                         "allocation_count", (unsigned long long)limits->allocation_count);
+}
+
+PyDoc_STRVAR(getsandboxcounts_doc,
+"getsandboxcounts() -> dict\n\
+\n\
+Return the current sandbox counters as a dictionary.\n\
+Contains allocation_count which tracks GC-tracked object allocations."
+);
+
+static PyObject *
+sys_resetsandboxallocationcount(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return NULL;
+    }
+
+    interp->sandbox.limits.allocation_count = 0;
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(resetsandboxallocationcount_doc,
+"resetsandboxallocationcount()\n\
+\n\
+Reset the sandbox allocation counter to 0.\n\
+Use this before running untrusted code to track its allocations."
 );
 
 static PyObject *
@@ -2257,6 +2308,9 @@ static PyMethodDef sys_methods[] = {
     {"getsandboxlimits", sys_getsandboxlimits, METH_NOARGS, getsandboxlimits_doc},
     {"setsandboxlimits", _PyCFunction_CAST(sys_setsandboxlimits),
      METH_VARARGS | METH_KEYWORDS, setsandboxlimits_doc},
+    {"getsandboxcounts", sys_getsandboxcounts, METH_NOARGS, getsandboxcounts_doc},
+    {"resetsandboxallocationcount", sys_resetsandboxallocationcount, METH_NOARGS,
+     resetsandboxallocationcount_doc},
     {"getobjectcreationhook", sys_getobjectcreationhook, METH_NOARGS,
      getobjectcreationhook_doc},
     {"setobjectcreationhook", sys_setobjectcreationhook, METH_O,

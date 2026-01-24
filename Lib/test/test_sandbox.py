@@ -4,12 +4,17 @@ import sys
 import unittest
 
 
+def _get_settable_limits():
+    """Get current limits for restoring in tearDown."""
+    return sys.getsandboxlimits()
+
+
 class SandboxLimitsTests(unittest.TestCase):
     """Test sandbox limits functionality."""
 
     def setUp(self):
-        # Save original limits
-        self.original_limits = sys.getsandboxlimits()
+        # Save original limits (excluding read-only fields)
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         # Restore original limits
@@ -22,9 +27,16 @@ class SandboxLimitsTests(unittest.TestCase):
         expected_keys = {
             'max_int_digits', 'max_str_length', 'max_bytes_length',
             'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
-            'allow_float', 'allow_complex'
+            'max_allocations', 'allow_float', 'allow_complex'
         }
         self.assertEqual(set(limits.keys()), expected_keys)
+
+    def test_getsandboxcounts_returns_dict(self):
+        """getsandboxcounts should return a dictionary with count keys."""
+        counts = sys.getsandboxcounts()
+        self.assertIsInstance(counts, dict)
+        expected_keys = {'allocation_count'}
+        self.assertEqual(set(counts.keys()), expected_keys)
 
     def test_default_limits_are_zero(self):
         """Default limits should be 0 (no limit) and types allowed."""
@@ -36,6 +48,7 @@ class SandboxLimitsTests(unittest.TestCase):
         self.assertEqual(limits['max_dict_size'], 0)
         self.assertEqual(limits['max_set_size'], 0)
         self.assertEqual(limits['max_tuple_size'], 0)
+        self.assertEqual(limits['max_allocations'], 0)
         self.assertTrue(limits['allow_float'])
         self.assertTrue(limits['allow_complex'])
 
@@ -55,7 +68,7 @@ class IntegerLimitsTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.original_limits = sys.getsandboxlimits()
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         sys.setsandboxlimits(**self.original_limits)
@@ -85,7 +98,7 @@ class StringLimitsTests(unittest.TestCase):
     """Test string length limits."""
 
     def setUp(self):
-        self.original_limits = sys.getsandboxlimits()
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         sys.setsandboxlimits(**self.original_limits)
@@ -109,7 +122,7 @@ class ListLimitsTests(unittest.TestCase):
     """Test list size limits."""
 
     def setUp(self):
-        self.original_limits = sys.getsandboxlimits()
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         sys.setsandboxlimits(**self.original_limits)
@@ -134,7 +147,7 @@ class DictLimitsTests(unittest.TestCase):
     """Test dict size limits."""
 
     def setUp(self):
-        self.original_limits = sys.getsandboxlimits()
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         sys.setsandboxlimits(**self.original_limits)
@@ -159,7 +172,7 @@ class SetLimitsTests(unittest.TestCase):
     """Test set size limits."""
 
     def setUp(self):
-        self.original_limits = sys.getsandboxlimits()
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         sys.setsandboxlimits(**self.original_limits)
@@ -184,7 +197,7 @@ class TupleLimitsTests(unittest.TestCase):
     """Test tuple size limits."""
 
     def setUp(self):
-        self.original_limits = sys.getsandboxlimits()
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         sys.setsandboxlimits(**self.original_limits)
@@ -207,7 +220,7 @@ class TypeRestrictionTests(unittest.TestCase):
     """Test type restriction (float, complex)."""
 
     def setUp(self):
-        self.original_limits = sys.getsandboxlimits()
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         sys.setsandboxlimits(**self.original_limits)
@@ -312,7 +325,7 @@ class MinimalSafeLimitsTests(unittest.TestCase):
     }
 
     def setUp(self):
-        self.original_limits = sys.getsandboxlimits()
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         sys.setsandboxlimits(**self.original_limits)
@@ -360,7 +373,7 @@ class SuspendResumeLimitsTests(unittest.TestCase):
     """Test suspend/resume functionality for syscalls."""
 
     def setUp(self):
-        self.original_limits = sys.getsandboxlimits()
+        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         # Ensure limits are resumed
@@ -431,6 +444,134 @@ class SuspendResumeLimitsTests(unittest.TestCase):
         # Should fail now
         with self.assertRaises(OverflowError):
             list(range(20))
+
+
+class AllocationCountLimitsTests(unittest.TestCase):
+    """Test allocation counting limits for GC-tracked objects."""
+
+    def setUp(self):
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        # Ensure limits are resumed
+        while sys.issandboxsuspended():
+            sys.resumesandboxlimits()
+        sys.setsandboxlimits(**self.original_limits)
+        sys.resetsandboxallocationcount()
+
+    def test_set_and_get_max_allocations(self):
+        """Setting and getting max_allocations should work."""
+        sys.setsandboxlimits(max_allocations=10000)
+        limits = sys.getsandboxlimits()
+        self.assertEqual(limits['max_allocations'], 10000)
+
+    def test_allocation_count_tracked(self):
+        """Allocation count should be tracked."""
+        sys.resetsandboxallocationcount()
+        initial = sys.getsandboxcounts()['allocation_count']
+        self.assertEqual(initial, 0)
+
+        # Create some objects
+        _ = [1, 2, 3]
+        _ = {'a': 1}
+        _ = (1, 2)
+
+        count = sys.getsandboxcounts()['allocation_count']
+        self.assertGreater(count, 0)
+
+    def test_exceeding_allocation_limit_raises_memory_error(self):
+        """Exceeding allocation limit should raise MemoryError."""
+        import subprocess
+        # Use a higher limit to allow for error handling allocations
+        code = '''
+import sys
+sys.setsandboxlimits(max_allocations=1000)
+sys.resetsandboxallocationcount()
+a = []
+try:
+    for i in range(2000):
+        a = [a]
+    sys.exit(2)  # Should not reach here
+except MemoryError:
+    sys.exit(0)  # Successfully caught MemoryError
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        # The process should complete (not hang) and either:
+        # - Return 0 (caught MemoryError successfully)
+        # - Return non-zero with MemoryError indication (error handling failed)
+        if result.returncode == 0:
+            return  # Test passed
+        if result.returncode == 2:
+            self.fail("MemoryError was not raised")
+        # If it exited with error, check that MemoryError was involved
+        self.assertIn("MemoryError", result.stderr,
+                      f"Expected MemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_reset_allocation_count(self):
+        """resetsandboxallocationcount should reset counter to 0."""
+        sys.setsandboxlimits(max_allocations=1000)
+
+        # Create some objects
+        for _ in range(10):
+            _ = [1, 2, 3]
+
+        count_before = sys.getsandboxcounts()['allocation_count']
+        self.assertGreater(count_before, 0)
+
+        sys.resetsandboxallocationcount()
+        count_after = sys.getsandboxcounts()['allocation_count']
+        self.assertEqual(count_after, 0)
+
+    def test_allocations_while_suspended_dont_count(self):
+        """Allocations while suspended should not count toward limit."""
+        sys.setsandboxlimits(max_allocations=100)
+        sys.resetsandboxallocationcount()
+
+        # Suspend and create lots of objects
+        sys.suspendsandboxlimits()
+        for _ in range(200):
+            _ = [1, 2, 3]
+        count_suspended = sys.getsandboxcounts()['allocation_count']
+
+        sys.resumesandboxlimits()
+
+        # Should still be at a low count (suspended allocations didn't count)
+        self.assertLess(count_suspended, 100)
+
+    def test_no_limit_allows_many_allocations(self):
+        """With no limit (0), many allocations should be allowed."""
+        sys.setsandboxlimits(max_allocations=0)
+        sys.resetsandboxallocationcount()
+
+        # Create many objects - should not raise
+        for _ in range(1000):
+            _ = [1, 2, 3]
+
+    def test_different_object_types_all_count(self):
+        """Lists, dicts, sets, tuples, and user classes all count."""
+        sys.setsandboxlimits(max_allocations=1000)
+        sys.resetsandboxallocationcount()
+
+        # Create different types
+        _ = [1, 2, 3]       # list
+        _ = {'a': 1}        # dict
+        _ = {1, 2, 3}       # set
+        # Note: small tuples may be cached and not allocate new memory
+
+        class MyClass:
+            pass
+
+        _ = MyClass()       # user class instance
+
+        count = sys.getsandboxcounts()['allocation_count']
+        # At least 4 objects were created (list, dict, set, class instance)
+        # Small tuples may be cached so we don't count them
+        self.assertGreaterEqual(count, 4)
 
 
 if __name__ == '__main__':

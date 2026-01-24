@@ -33,6 +33,7 @@
 
 #include "Python.h"
 #include "pycore_object.h"        // _PyObject_GC_UNTRACK()
+#include "pycore_sandbox.h"       // _PySandbox_CheckSetSize()
 #include <stddef.h>               // offsetof()
 
 /* Object used as dummy key to fill deleted entries */
@@ -162,12 +163,20 @@ set_add_entry(PySetObject *so, PyObject *key, Py_hash_t hash)
   found_unused_or_dummy:
     if (freeslot == NULL)
         goto found_unused;
+    /* Check sandbox limits before insertion */
+    if (_PySandbox_CheckSetSize(so->used + 1) < 0) {
+        goto comparison_error;
+    }
     so->used++;
     freeslot->key = key;
     freeslot->hash = hash;
     return 0;
 
   found_unused:
+    /* Check sandbox limits before insertion */
+    if (_PySandbox_CheckSetSize(so->used + 1) < 0) {
+        goto comparison_error;
+    }
     so->fill++;
     so->used++;
     entry->key = key;

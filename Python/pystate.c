@@ -12,6 +12,7 @@
 #include "pycore_pymem.h"         // _PyMem_SetDefaultAllocator()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
 #include "pycore_runtime_init.h"  // _PyRuntimeState_INIT
+#include "pycore_sandbox.h"       // _PySandbox_Init()
 #include "pycore_sysmodule.h"
 
 /* --------------------------------------------------------------------------
@@ -294,6 +295,7 @@ init_interpreter(PyInterpreterState *interp,
     _PyGC_InitState(&interp->gc);
     PyConfig_InitPythonConfig(&interp->config);
     _PyType_InitCache(interp);
+    _PySandbox_Init(interp);
 
     interp->_initialized = 1;
 }
@@ -431,6 +433,7 @@ interpreter_clear(PyInterpreterState *interp, PyThreadState *tstate)
     _PyAST_Fini(interp);
     _PyWarnings_Fini(interp);
     _PyAtExit_Fini(interp);
+    _PySandbox_Fini(interp);
 
     // All Python types must be destroyed before the last GC collection. Python
     // types create a reference cycle to themselves in their in their

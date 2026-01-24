@@ -121,6 +121,7 @@ As a consequence of this, split keys have a maximum size of 16.
 #include "pycore_object.h"        // _PyObject_GC_TRACK()
 #include "pycore_pyerrors.h"      // _PyErr_Fetch()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckDictSize()
 #include "stringlib/eq.h"         // unicode_eq()
 
 #include <stdbool.h>
@@ -1244,6 +1245,10 @@ insertdict(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value)
 
     if (ix == DKIX_EMPTY) {
         /* Insert into new slot. */
+        /* Check sandbox limits before insertion */
+        if (_PySandbox_CheckDictSize(mp->ma_used + 1) < 0) {
+            goto Fail;
+        }
         mp->ma_keys->dk_version = 0;
         assert(old_value == NULL);
         if (mp->ma_keys->dk_usable <= 0) {
@@ -1289,6 +1294,10 @@ insertdict(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value)
         if (_PyDict_HasSplitTable(mp)) {
             mp->ma_values->values[ix] = value;
             if (old_value == NULL) {
+                /* Check sandbox limits before adding to split table */
+                if (_PySandbox_CheckDictSize(mp->ma_used + 1) < 0) {
+                    goto Fail;
+                }
                 _PyDictValues_AddToInsertionOrder(mp->ma_values, ix);
                 mp->ma_used++;
             }

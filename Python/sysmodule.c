@@ -29,6 +29,7 @@ Data members:
 #include "pycore_pymath.h"        // _PY_SHORT_FLOAT_REPR
 #include "pycore_pymem.h"         // _PyMem_SetDefaultAllocator()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // PySandbox_SetLimits(), etc.
 #include "pycore_structseq.h"     // _PyStructSequence_InitType()
 #include "pycore_tuple.h"         // _PyTuple_FromArray()
 
@@ -1993,6 +1994,162 @@ sys_getandroidapilevel_impl(PyObject *module)
 }
 #endif   /* ANDROID_API_LEVEL */
 
+/* ============ Sandbox API ============ */
+
+static PyObject *
+sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = {
+        "max_int_digits", "max_str_length", "max_bytes_length",
+        "max_list_size", "max_dict_size", "max_set_size", "max_tuple_size",
+        "allow_float", "allow_complex", NULL
+    };
+
+    Py_ssize_t max_int_digits = 0;
+    Py_ssize_t max_str_length = 0;
+    Py_ssize_t max_bytes_length = 0;
+    Py_ssize_t max_list_size = 0;
+    Py_ssize_t max_dict_size = 0;
+    Py_ssize_t max_set_size = 0;
+    Py_ssize_t max_tuple_size = 0;
+    int allow_float = 1;
+    int allow_complex = 1;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnpp", kwlist,
+                                     &max_int_digits, &max_str_length,
+                                     &max_bytes_length, &max_list_size,
+                                     &max_dict_size, &max_set_size,
+                                     &max_tuple_size,
+                                     &allow_float, &allow_complex)) {
+        return NULL;
+    }
+
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return NULL;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+    limits->max_int_digits = max_int_digits;
+    limits->max_str_length = max_str_length;
+    limits->max_bytes_length = max_bytes_length;
+    limits->max_list_size = max_list_size;
+    limits->max_dict_size = max_dict_size;
+    limits->max_set_size = max_set_size;
+    limits->max_tuple_size = max_tuple_size;
+    limits->allow_float = allow_float;
+    limits->allow_complex = allow_complex;
+
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(setsandboxlimits_doc,
+"setsandboxlimits(*, max_int_digits=0, max_str_length=0, max_bytes_length=0,\n\
+                 max_list_size=0, max_dict_size=0, max_set_size=0,\n\
+                 max_tuple_size=0, allow_float=True, allow_complex=True)\n\
+\n\
+Set sandbox limits for the current interpreter.\n\
+A value of 0 means no limit. Set allow_float/allow_complex to False to\n\
+forbid creation of those types.\n\
+\n\
+Recommended minimal limits that don't interfere with normal Python operation:\n\
+  max_int_digits=100       # allows integers up to ~10^900\n\
+  max_str_length=100000    # 100KB strings\n\
+  max_bytes_length=100000  # 100KB bytes\n\
+  max_list_size=10000      # 10K list items\n\
+  max_dict_size=10000      # 10K dict entries\n\
+  max_set_size=10000       # 10K set members\n\
+  max_tuple_size=10000     # 10K tuple items"
+);
+
+static PyObject *
+sys_getsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return NULL;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    return Py_BuildValue("{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:O, s:O}",
+                         "max_int_digits", limits->max_int_digits,
+                         "max_str_length", limits->max_str_length,
+                         "max_bytes_length", limits->max_bytes_length,
+                         "max_list_size", limits->max_list_size,
+                         "max_dict_size", limits->max_dict_size,
+                         "max_set_size", limits->max_set_size,
+                         "max_tuple_size", limits->max_tuple_size,
+                         "allow_float", limits->allow_float ? Py_True : Py_False,
+                         "allow_complex", limits->allow_complex ? Py_True : Py_False);
+}
+
+PyDoc_STRVAR(getsandboxlimits_doc,
+"getsandboxlimits() -> dict\n\
+\n\
+Return the current sandbox limits as a dictionary."
+);
+
+static PyObject *
+sys_setobjectcreationhook(PyObject *self, PyObject *arg)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return NULL;
+    }
+
+    _PyObjectCreationHook *hook_state = &interp->sandbox.creation_hook;
+
+    if (arg == Py_None) {
+        Py_CLEAR(hook_state->hook_callback);
+    } else {
+        if (!PyCallable_Check(arg)) {
+            PyErr_SetString(PyExc_TypeError, "hook must be callable or None");
+            return NULL;
+        }
+        Py_INCREF(arg);
+        Py_XDECREF(hook_state->hook_callback);
+        hook_state->hook_callback = arg;
+    }
+
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(setobjectcreationhook_doc,
+"setobjectcreationhook(hook)\n\
+\n\
+Set a callback to be called when objects are created via type.__call__.\n\
+The hook receives (obj, type, frame, context) and should return the object\n\
+(original or replacement) or raise an exception to block creation.\n\
+Pass None to remove the hook."
+);
+
+static PyObject *
+sys_getobjectcreationhook(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
+        return NULL;
+    }
+
+    PyObject *hook = interp->sandbox.creation_hook.hook_callback;
+    if (hook == NULL) {
+        Py_RETURN_NONE;
+    }
+    Py_INCREF(hook);
+    return hook;
+}
+
+PyDoc_STRVAR(getobjectcreationhook_doc,
+"getobjectcreationhook() -> callable or None\n\
+\n\
+Return the current object creation hook, or None if not set."
+);
+
 static PyMethodDef sys_methods[] = {
     /* Might as well keep this in alphabetic order */
     SYS_ADDAUDITHOOK_METHODDEF
@@ -2049,6 +2206,13 @@ static PyMethodDef sys_methods[] = {
     SYS_UNRAISABLEHOOK_METHODDEF
     SYS_GET_INT_MAX_STR_DIGITS_METHODDEF
     SYS_SET_INT_MAX_STR_DIGITS_METHODDEF
+    {"getsandboxlimits", sys_getsandboxlimits, METH_NOARGS, getsandboxlimits_doc},
+    {"setsandboxlimits", _PyCFunction_CAST(sys_setsandboxlimits),
+     METH_VARARGS | METH_KEYWORDS, setsandboxlimits_doc},
+    {"getobjectcreationhook", sys_getobjectcreationhook, METH_NOARGS,
+     getobjectcreationhook_doc},
+    {"setobjectcreationhook", sys_setobjectcreationhook, METH_O,
+     setobjectcreationhook_doc},
     {NULL, NULL}  // sentinel
 };
 

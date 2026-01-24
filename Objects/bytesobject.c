@@ -13,6 +13,7 @@
 #include "pycore_long.h"          // _PyLong_DigitValue
 #include "pycore_object.h"        // _PyObject_GC_TRACK
 #include "pycore_pymem.h"         // PYMEM_CLEANBYTE
+#include "pycore_sandbox.h"       // _PySandbox_CheckBytesLength()
 #include "pycore_strhex.h"        // _Py_strhex_with_sep()
 
 #include <stddef.h>
@@ -93,6 +94,11 @@ _PyBytes_FromSize(Py_ssize_t size, int use_calloc)
     if ((size_t)size > (size_t)PY_SSIZE_T_MAX - PyBytesObject_SIZE) {
         PyErr_SetString(PyExc_OverflowError,
                         "byte string is too large");
+        return NULL;
+    }
+
+    /* Check sandbox limits before allocation */
+    if (_PySandbox_CheckBytesLength(size) < 0) {
         return NULL;
     }
 

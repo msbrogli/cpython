@@ -25,6 +25,7 @@ extern "C" {
 #include "pycore_typeobject.h"    // struct type_cache
 #include "pycore_unicodeobject.h" // struct _Py_unicode_state
 #include "pycore_warnings.h"      // struct _warnings_runtime_state
+#include "pycore_sandbox.h"       // _PySandboxState
 
 struct _pending_calls {
     PyThread_type_lock lock;
@@ -177,6 +178,9 @@ struct _is {
     struct callable_cache callable_cache;
 
     int int_max_str_digits;
+
+    /* Sandbox state: resource limits and object creation hooks */
+    _PySandboxState sandbox;
 
     /* The following fields are here to avoid allocation during init.
        The data is exposed through PyInterpreterState pointer fields.

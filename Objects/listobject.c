@@ -6,6 +6,7 @@
 #include "pycore_list.h"          // struct _Py_list_state
 #include "pycore_object.h"        // _PyObject_GC_TRACK()
 #include "pycore_tuple.h"         // _PyTuple_FromArray()
+#include "pycore_sandbox.h"       // _PySandbox_CheckListSize()
 #include <stddef.h>
 
 /*[clinic input]
@@ -46,6 +47,11 @@ list_resize(PyListObject *self, Py_ssize_t newsize)
     PyObject **items;
     size_t new_allocated, num_allocated_bytes;
     Py_ssize_t allocated = self->allocated;
+
+    /* Check sandbox limits before growing */
+    if (newsize > Py_SIZE(self) && _PySandbox_CheckListSize(newsize) < 0) {
+        return -1;
+    }
 
     /* Bypass realloc() when a previous overallocation is large enough
        to accommodate the newsize.  If the newsize falls lower than half

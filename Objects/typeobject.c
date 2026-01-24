@@ -12,6 +12,7 @@
 #include "pycore_typeobject.h"    // struct type_cache
 #include "pycore_unionobject.h"   // _Py_union_type_or
 #include "pycore_frame.h"         // _PyInterpreterFrame
+#include "pycore_sandbox.h"       // _PySandbox_CallCreationHook
 #include "opcode.h"               // MAKE_CELL
 #include "structmember.h"         // PyMemberDef
 
@@ -1088,6 +1089,11 @@ type_call(PyTypeObject *type, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
+    /* Check if this type is allowed by sandbox */
+    if (_PySandbox_CheckTypeAllowed(type) < 0) {
+        return NULL;
+    }
+
     obj = type->tp_new(type, args, kwds);
     obj = _Py_CheckFunctionResult(tstate, (PyObject*)type, obj, NULL);
     if (obj == NULL)
@@ -1110,6 +1116,12 @@ type_call(PyTypeObject *type, PyObject *args, PyObject *kwds)
             assert(!_PyErr_Occurred(tstate));
         }
     }
+
+    /* Call object creation hook (can replace or block object) */
+    if (obj != NULL) {
+        obj = _PySandbox_CallCreationHook(obj, type, Py_OBJHOOK_TYPE_CALL);
+    }
+
     return obj;
 }
 

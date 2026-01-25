@@ -6,18 +6,19 @@ This comprehensive document describes the complete implementation of the sandbox
 
 1. [Overview](#overview)
 2. [Feature Summary](#feature-summary)
-3. [Architecture](#architecture)
-4. [Data Structures](#data-structures)
-5. [Limit Types and Enforcement](#limit-types-and-enforcement)
-6. [Scope Tracking](#scope-tracking)
-7. [Object Creation Hooks](#object-creation-hooks)
-8. [Suspend/Resume](#suspendresume)
-9. [Integration Points](#integration-points)
-10. [Python API Reference](#python-api-reference)
-11. [C API Reference](#c-api-reference)
-12. [Implementation Files](#implementation-files)
-13. [Porting Guide](#porting-guide)
-14. [Testing](#testing)
+3. [Exception Details](#exception-details)
+4. [Architecture](#architecture)
+5. [Data Structures](#data-structures)
+6. [Limit Types and Enforcement](#limit-types-and-enforcement)
+7. [Scope Tracking](#scope-tracking)
+8. [Object Creation Hooks](#object-creation-hooks)
+9. [Suspend/Resume](#suspendresume)
+10. [Integration Points](#integration-points)
+11. [Python API Reference](#python-api-reference)
+12. [C API Reference](#c-api-reference)
+13. [Implementation Files](#implementation-files)
+14. [Porting Guide](#porting-guide)
+15. [Testing](#testing)
 
 ---
 
@@ -53,6 +54,49 @@ The CPython sandbox provides mechanisms for limiting resource usage and monitori
 | `global_max_allocations` | Max GC-tracked allocations total | `MemoryError` |
 | `scope_max_allocations` | Max allocations in sandbox scope | `MemoryError` |
 | `scope_max_statements` | Max statements in sandbox scope | `RuntimeError` |
+
+---
+
+## Exception Details
+
+When a sandbox limit is exceeded, a specific exception is raised with a descriptive error message. Understanding these exceptions is important for proper error handling in sandboxed code.
+
+### Exception Types and Error Messages
+
+| Limit | Exception | Error Message |
+|-------|-----------|---------------|
+| `max_int_digits` | `OverflowError` | "Integer size (N digits) exceeds sandbox limit (M digits)" |
+| `max_str_length` | `OverflowError` | "String length exceeds sandbox limit" |
+| `max_bytes_length` | `OverflowError` | "Bytes length exceeds sandbox limit" |
+| `max_list_size` | `OverflowError` | "List size (N) exceeds sandbox limit (M)" |
+| `max_dict_size` | `OverflowError` | "Dict size (N) exceeds sandbox limit (M)" |
+| `max_set_size` | `OverflowError` | "Set size (N) exceeds sandbox limit (M)" |
+| `max_tuple_size` | `OverflowError` | "Tuple size (N) exceeds sandbox limit (M)" |
+| `allow_float=False` | `TypeError` | "float type is forbidden in sandbox" |
+| `allow_complex=False` | `TypeError` | "complex type is forbidden in sandbox" |
+| `global_max_allocations` | `MemoryError` | (standard MemoryError, no message) |
+| `scope_max_allocations` | `MemoryError` | (standard MemoryError, no message) |
+| `scope_max_statements` | `RuntimeError` | "Sandbox statement limit exceeded" |
+
+### Memory Allocation Grace Behavior
+
+When `global_max_allocations` or `scope_max_allocations` limits are reached, the sandbox allows a small number of additional "grace" allocations before raising `MemoryError`. This grace period exists because:
+
+1. **Error object creation**: Python needs to allocate objects to create and raise the `MemoryError` exception itself
+2. **Exception handling**: The code catching the exception may need to allocate objects for logging, cleanup, or error reporting
+
+The implementation uses a `GRACE_HEADROOM` constant (typically 1000 allocations) to allow error handling to proceed after the limit is first hit.
+
+### Statement Limit Single-Raise Behavior
+
+The `scope_max_statements` limit has special behavior: the `RuntimeError` is raised **exactly once**, on the first statement that exceeds the limit. Subsequent statements do not raise additional exceptions.
+
+This design allows:
+1. **Exception handlers to execute**: The `except` and `finally` blocks need to run statements to handle the error
+2. **Cleanup code to complete**: Resource cleanup and logging can proceed normally
+3. **Stack unwinding**: Python can properly unwind the call stack
+
+See the [Statement Counting Exception Behavior](#statement-counting-exception-behavior) section for implementation details.
 
 ---
 
@@ -588,6 +632,48 @@ _PySandbox_CheckScopeStatement(void)
 
     return 0;
 }
+```
+
+#### Statement Counting Exception Behavior
+
+The statement limit uses a deliberate "single-raise" pattern. The key insight is in this check:
+
+```c
+if (limits->scope_statement_count == limits->scope_max_statements + 1)
+```
+
+Notice the use of `==` (equals) rather than `>=` (greater-than-or-equal). This means:
+
+1. **First violation (count == limit + 1)**: Raises `RuntimeError`
+2. **Subsequent statements (count > limit + 1)**: No exception raised, execution continues
+
+**Why this matters:**
+
+When Python raises an exception, the interpreter still needs to execute statements to:
+- Unwind the call stack and find exception handlers
+- Execute `except` blocks to catch and handle the error
+- Execute `finally` blocks for cleanup
+- Create error messages and log entries
+
+If the sandbox raised `RuntimeError` on every statement after the limit, these essential operations would fail, potentially leaving resources in an inconsistent state.
+
+**Example behavior:**
+
+```python
+sys.setsandboxlimits(scope_max_statements=10)
+sys.addsandboxfilename("<test>")
+
+try:
+    exec(compile("""
+for i in range(100):  # Will exceed limit
+    pass
+""", "<test>", "exec"))
+except RuntimeError as e:
+    # This except block CAN execute because no new RuntimeError is raised
+    print(f"Caught: {e}")  # Prints: Caught: Sandbox statement limit exceeded
+finally:
+    # This finally block CAN execute for cleanup
+    sys.clearsandboxfilenames()
 ```
 
 ### Allocation Counting

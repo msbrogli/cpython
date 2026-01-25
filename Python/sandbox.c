@@ -1,4 +1,17 @@
-/* Sandbox implementation: resource limits and object creation hooks */
+/* Sandbox implementation: resource limits and object creation hooks
+ *
+ * Thread Safety Note:
+ * -------------------
+ * Sandbox limits and counters are per-interpreter state. In CPython 3.11,
+ * the GIL (Global Interpreter Lock) protects all access to interpreter state,
+ * so the non-atomic counter increments (global_allocation_count, etc.) are
+ * safe. If CPython moves to per-interpreter GILs or free-threading, these
+ * counters would need atomic operations or other synchronization.
+ *
+ * The sandbox is designed for single-threaded sandboxed execution where
+ * untrusted code runs in isolation. Multi-threaded sandboxed execution
+ * within the same interpreter is not a supported use case.
+ */
 
 #include "Python.h"
 #include "pycore_frame.h"
@@ -74,14 +87,24 @@ get_sandbox_limits(void)
     return &interp->sandbox.limits;
 }
 
+/* Macro to reduce boilerplate in _PySandbox_Check* functions.
+ * Returns 0 (allow) early if:
+ * - No interpreter state available
+ * - The specific limit is not set (0)
+ * - Already in a recursive check
+ * - Sandbox is suspended
+ */
+#define _PYSANDBOX_CHECK_PROLOGUE(limit_field) \
+    _PySandboxLimits *limits = get_sandbox_limits(); \
+    if (limits == NULL || limits->limit_field == 0 || \
+        limits->in_check || limits->suspended) { \
+        return 0; \
+    }
+
 int
 _PySandbox_CheckIntSize(Py_ssize_t ndigits)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_int_digits == 0 ||
-        limits->in_check || limits->suspended) {
-        return 0;  /* No limit, already checking, or suspended */
-    }
+    _PYSANDBOX_CHECK_PROLOGUE(max_int_digits)
 
     if (ndigits > limits->max_int_digits) {
         /* Prevent recursive checks during error handling */
@@ -98,17 +121,14 @@ _PySandbox_CheckIntSize(Py_ssize_t ndigits)
 int
 _PySandbox_CheckStrLength(Py_ssize_t length)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_str_length == 0 ||
-        limits->in_check || limits->suspended) {
-        return 0;  /* No limit, already checking, or suspended */
-    }
+    _PYSANDBOX_CHECK_PROLOGUE(max_str_length)
 
     if (length > limits->max_str_length) {
         /* Prevent recursive checks during error handling */
         limits->in_check = 1;
-        PyErr_SetString(PyExc_OverflowError,
-                        "String length exceeds sandbox limit");
+        PyErr_Format(PyExc_OverflowError,
+                     "String length (%zd) exceeds sandbox limit (%zd)",
+                     length, limits->max_str_length);
         limits->in_check = 0;
         return -1;
     }
@@ -118,17 +138,14 @@ _PySandbox_CheckStrLength(Py_ssize_t length)
 int
 _PySandbox_CheckBytesLength(Py_ssize_t length)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_bytes_length == 0 ||
-        limits->in_check || limits->suspended) {
-        return 0;  /* No limit, already checking, or suspended */
-    }
+    _PYSANDBOX_CHECK_PROLOGUE(max_bytes_length)
 
     if (length > limits->max_bytes_length) {
         /* Prevent recursive checks during error handling */
         limits->in_check = 1;
-        PyErr_SetString(PyExc_OverflowError,
-                        "Bytes length exceeds sandbox limit");
+        PyErr_Format(PyExc_OverflowError,
+                     "Bytes length (%zd) exceeds sandbox limit (%zd)",
+                     length, limits->max_bytes_length);
         limits->in_check = 0;
         return -1;
     }
@@ -138,11 +155,7 @@ _PySandbox_CheckBytesLength(Py_ssize_t length)
 int
 _PySandbox_CheckListSize(Py_ssize_t size)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_list_size == 0 ||
-        limits->in_check || limits->suspended) {
-        return 0;  /* No limit, already checking, or suspended */
-    }
+    _PYSANDBOX_CHECK_PROLOGUE(max_list_size)
 
     if (size > limits->max_list_size) {
         limits->in_check = 1;
@@ -158,11 +171,7 @@ _PySandbox_CheckListSize(Py_ssize_t size)
 int
 _PySandbox_CheckDictSize(Py_ssize_t size)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_dict_size == 0 ||
-        limits->in_check || limits->suspended) {
-        return 0;  /* No limit, already checking, or suspended */
-    }
+    _PYSANDBOX_CHECK_PROLOGUE(max_dict_size)
 
     if (size > limits->max_dict_size) {
         limits->in_check = 1;
@@ -178,11 +187,7 @@ _PySandbox_CheckDictSize(Py_ssize_t size)
 int
 _PySandbox_CheckSetSize(Py_ssize_t size)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_set_size == 0 ||
-        limits->in_check || limits->suspended) {
-        return 0;  /* No limit, already checking, or suspended */
-    }
+    _PYSANDBOX_CHECK_PROLOGUE(max_set_size)
 
     if (size > limits->max_set_size) {
         limits->in_check = 1;
@@ -198,11 +203,7 @@ _PySandbox_CheckSetSize(Py_ssize_t size)
 int
 _PySandbox_CheckTupleSize(Py_ssize_t size)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_tuple_size == 0 ||
-        limits->in_check || limits->suspended) {
-        return 0;  /* No limit, already checking, or suspended */
-    }
+    _PYSANDBOX_CHECK_PROLOGUE(max_tuple_size)
 
     if (size > limits->max_tuple_size) {
         limits->in_check = 1;
@@ -249,7 +250,14 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
 
 /* ============ Registered Filenames Set ============ */
 
-/* Check if a filename is in the registered set. O(n) but n is small. */
+/* Check if a filename is in the registered set.
+ *
+ * Performance: O(n) linear search where n = number of registered filenames.
+ * This is acceptable for typical use cases where n < 10. For sandboxing,
+ * usually only 1-3 filenames are registered (the sandboxed code's filename
+ * and perhaps a few helper modules). If larger sets become common,
+ * consider hash-based lookup (PySet).
+ */
 static int
 filename_is_registered(_PySandboxFilenameSet *set, PyObject *filename)
 {
@@ -328,7 +336,9 @@ add_filename_to_set(_PySandboxFilenameSet *set, PyObject *filename)
         return 0;
     }
 
-    /* Grow if needed */
+    /* Grow if needed.
+     * Note: On realloc failure, set->filenames remains valid (not freed),
+     * so we can safely return -1 without memory corruption. */
     if (set->count >= set->capacity) {
         size_t new_capacity = set->capacity * 2;
         PyObject **new_filenames = PyMem_RawRealloc(set->filenames,
@@ -420,6 +430,22 @@ get_current_interpreter_frame(void)
     return frame;
 }
 
+/* _PySandbox_CheckAllocation - Check allocation against limits
+ *
+ * This function is called from gc.c when GC-tracked objects are created.
+ * It handles both global and scoped allocation limits.
+ *
+ * Design decisions:
+ * - Counters are always incremented (for monitoring), even if no limit is set
+ * - Scoped counting only occurs when current frame's filename is registered
+ * - Grace headroom (ALLOCATION_GRACE_HEADROOM) allows error handling to
+ *   allocate objects for exception formatting after limit is hit
+ * - Only raises error on the first allocation past the limit (count == max+1)
+ *   to avoid cascading failures during error handling
+ * - If an error is already set, skip raising another (prevents infinite loops)
+ *
+ * Returns: 0 if allocation OK, -1 if limit exceeded (exception set)
+ */
 int
 _PySandbox_CheckAllocation(void)
 {
@@ -499,6 +525,20 @@ _PySandbox_CheckAllocation(void)
 
 /* ============ Scoped Statement Checking ============ */
 
+/* _PySandbox_CheckScopeStatement - Check statement execution against limit
+ *
+ * This function is called from ceval.c for each statement executed.
+ * It only counts statements when:
+ * - A statement limit is configured (scope_max_statements > 0)
+ * - Sandbox is not suspended and not in recursive check
+ * - At least one filename is registered for scope tracking
+ * - Current frame's co_filename matches a registered filename
+ *
+ * The error is raised exactly once (at count == max+1) to allow error
+ * handling code to execute without triggering additional errors.
+ *
+ * Returns: 0 if OK, -1 if limit exceeded (RuntimeError set)
+ */
 int
 _PySandbox_CheckScopeStatement(void)
 {
@@ -702,6 +742,9 @@ _PySandbox_ClearFilenames(void)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp == NULL) {
+        /* Silent return is appropriate here: if there's no interpreter,
+         * there are no filenames to clear. This can happen during
+         * interpreter finalization or in abnormal shutdown scenarios. */
         return;
     }
 

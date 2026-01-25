@@ -1,7 +1,39 @@
 """Tests for the sandbox functionality in sys module."""
 
+import subprocess
 import sys
 import unittest
+
+
+# Default timeout for subprocess tests (seconds)
+SUBPROCESS_TIMEOUT = 10
+
+# Test limit values - chosen to be large enough for normal test operations
+# but small enough to trigger limit checks quickly
+TEST_LIST_LIMIT = 500
+TEST_DICT_LIMIT = 500
+TEST_SET_LIMIT = 500
+TEST_TUPLE_LIMIT = 500
+TEST_STR_LIMIT = 100
+TEST_INT_DIGITS_LIMIT = 5  # ~45 decimal digits (each internal digit ~9 decimals)
+
+
+def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
+    """Run code in a subprocess with sandbox limits.
+
+    Args:
+        code: Python code to execute as a string
+        timeout: Maximum time to wait for the subprocess (seconds)
+
+    Returns:
+        subprocess.CompletedProcess with returncode, stdout, and stderr
+    """
+    return subprocess.run(
+        [sys.executable, '-c', code],
+        capture_output=True,
+        text=True,
+        timeout=timeout
+    )
 
 
 def _get_settable_limits():
@@ -22,7 +54,7 @@ class SandboxLimitsTests(unittest.TestCase):
         # Exit scope if entered
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
 
     def test_getsandboxlimits_returns_dict(self):
@@ -83,13 +115,13 @@ class IntegerLimitsTests(unittest.TestCase):
 
     def test_small_integers_allowed(self):
         """Small integers should always be allowed."""
-        sys.setsandboxlimits(max_int_digits=5)
+        sys.setsandboxlimits(max_int_digits=TEST_INT_DIGITS_LIMIT)
         x = 12345
         self.assertEqual(x, 12345)
 
     def test_large_integers_blocked(self):
         """Large integers exceeding limit should raise OverflowError."""
-        sys.setsandboxlimits(max_int_digits=5)  # ~45 decimal digits
+        sys.setsandboxlimits(max_int_digits=TEST_INT_DIGITS_LIMIT)
         # 10^50 requires about 6 internal digits
         with self.assertRaises(OverflowError) as cm:
             x = 10 ** 50
@@ -113,13 +145,13 @@ class StringLimitsTests(unittest.TestCase):
 
     def test_small_strings_allowed(self):
         """Small strings should always be allowed."""
-        sys.setsandboxlimits(max_str_length=100)
+        sys.setsandboxlimits(max_str_length=TEST_STR_LIMIT)
         s = "hello world"
         self.assertEqual(s, "hello world")
 
     def test_large_strings_blocked(self):
         """Large strings exceeding limit should raise OverflowError."""
-        sys.setsandboxlimits(max_str_length=100)
+        sys.setsandboxlimits(max_str_length=TEST_STR_LIMIT)
         with self.assertRaises(OverflowError) as cm:
             # Use join to trigger PyUnicode_New
             s = ''.join(['x' for _ in range(200)])
@@ -162,13 +194,13 @@ class DictLimitsTests(unittest.TestCase):
 
     def test_small_dicts_allowed(self):
         """Small dicts should always be allowed."""
-        sys.setsandboxlimits(max_dict_size=500)
+        sys.setsandboxlimits(max_dict_size=TEST_DICT_LIMIT)
         d = {'a': 1, 'b': 2}
         self.assertEqual(len(d), 2)
 
     def test_large_dicts_blocked(self):
         """Large dicts exceeding limit should raise OverflowError."""
-        sys.setsandboxlimits(max_dict_size=500)
+        sys.setsandboxlimits(max_dict_size=TEST_DICT_LIMIT)
         d = {}
         with self.assertRaises(OverflowError) as cm:
             for i in range(600):
@@ -187,13 +219,13 @@ class SetLimitsTests(unittest.TestCase):
 
     def test_small_sets_allowed(self):
         """Small sets should always be allowed."""
-        sys.setsandboxlimits(max_set_size=500)
+        sys.setsandboxlimits(max_set_size=TEST_SET_LIMIT)
         s = {1, 2, 3}
         self.assertEqual(len(s), 3)
 
     def test_large_sets_blocked(self):
         """Large sets exceeding limit should raise OverflowError."""
-        sys.setsandboxlimits(max_set_size=500)
+        sys.setsandboxlimits(max_set_size=TEST_SET_LIMIT)
         s = set()
         with self.assertRaises(OverflowError) as cm:
             for i in range(600):
@@ -212,13 +244,13 @@ class TupleLimitsTests(unittest.TestCase):
 
     def test_small_tuples_allowed(self):
         """Small tuples should always be allowed."""
-        sys.setsandboxlimits(max_tuple_size=500)
+        sys.setsandboxlimits(max_tuple_size=TEST_TUPLE_LIMIT)
         t = (1, 2, 3, 4, 5)
         self.assertEqual(len(t), 5)
 
     def test_large_tuples_blocked(self):
         """Large tuples exceeding limit should raise OverflowError."""
-        sys.setsandboxlimits(max_tuple_size=500)
+        sys.setsandboxlimits(max_tuple_size=TEST_TUPLE_LIMIT)
         with self.assertRaises(OverflowError) as cm:
             t = tuple(range(600))
         self.assertIn("sandbox limit", str(cm.exception))
@@ -489,7 +521,6 @@ class GlobalAllocationCountLimitsTests(unittest.TestCase):
 
     def test_exceeding_global_allocation_limit_raises_memory_error(self):
         """Exceeding global allocation limit should raise MemoryError."""
-        import subprocess
         # Use a higher limit to allow for error handling allocations
         code = '''
 import sys
@@ -503,12 +534,7 @@ try:
 except MemoryError:
     sys.exit(0)  # Successfully caught MemoryError
 '''
-        result = subprocess.run(
-            [sys.executable, '-c', code],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        result = _run_sandboxed_code(code)
         # The process should complete (not hang) and either:
         # - Return 0 (caught MemoryError successfully)
         # - Return non-zero with MemoryError indication (error handling failed)
@@ -568,7 +594,7 @@ class SandboxScopeTests(unittest.TestCase):
         # Ensure clean scope state from any previous tests
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         self.original_limits = _get_settable_limits()
 
@@ -578,7 +604,7 @@ class SandboxScopeTests(unittest.TestCase):
             sys.resumesandboxlimits()
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         sys.setsandboxlimits(**self.original_limits)
 
@@ -623,7 +649,7 @@ class ScopedStatementCountTests(unittest.TestCase):
         # Ensure clean scope state from any previous tests
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         self.original_limits = _get_settable_limits()
 
@@ -632,7 +658,7 @@ class ScopedStatementCountTests(unittest.TestCase):
             sys.resumesandboxlimits()
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         sys.setsandboxlimits(**self.original_limits)
 
@@ -644,7 +670,6 @@ class ScopedStatementCountTests(unittest.TestCase):
 
     def test_statement_counting_in_exec(self):
         """Statements in exec() should be counted."""
-        import subprocess
         code = '''
 import sys
 sys.setsandboxlimits(scope_max_statements=1000000)
@@ -656,18 +681,12 @@ counts = sys.getsandboxcounts()
 print(counts['scope_statement_count'])
 sys.exit(0 if counts['scope_statement_count'] > 0 else 1)
 '''
-        result = subprocess.run(
-            [sys.executable, '-c', code],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
                         f"Statement counting failed: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_exceeding_statement_limit_raises_runtime_error(self):
         """Exceeding statement limit should raise RuntimeError."""
-        import subprocess
         # With ancestry-based scope, exec'd code is counted because it shares
         # the same co_filename ("<string>") as the selected frame
         code = '''
@@ -686,12 +705,7 @@ except RuntimeError as e:
         sys.exit(0)  # Expected error
     sys.exit(3)  # Wrong error message
 '''
-        result = subprocess.run(
-            [sys.executable, '-c', code],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
                         f"Statement limit not enforced: stdout={result.stdout!r} stderr={result.stderr!r}")
 
@@ -724,7 +738,7 @@ class ScopedAllocationCountTests(unittest.TestCase):
         # Ensure clean scope state from any previous tests
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         # Reset all counters for clean test state
         sys.resetsandboxcounters()
@@ -735,7 +749,7 @@ class ScopedAllocationCountTests(unittest.TestCase):
             sys.resumesandboxlimits()
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         sys.setsandboxlimits(**self.original_limits)
         sys.resetsandboxcounters()
@@ -858,7 +872,7 @@ class IntegrationTests(unittest.TestCase):
         # Ensure clean scope state from any previous tests
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         self.original_limits = _get_settable_limits()
 
@@ -867,7 +881,7 @@ class IntegrationTests(unittest.TestCase):
             sys.resumesandboxlimits()
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         sys.setsandboxlimits(**self.original_limits)
 
@@ -922,7 +936,7 @@ class SelectedFramesScopeTests(unittest.TestCase):
         # Ensure clean scope state from any previous tests
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         # Reset all counters for clean test state
         sys.resetsandboxcounters()
@@ -933,7 +947,7 @@ class SelectedFramesScopeTests(unittest.TestCase):
             sys.resumesandboxlimits()
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         sys.setsandboxlimits(**self.original_limits)
         sys.resetsandboxcounters()
@@ -1252,7 +1266,7 @@ class FilenameBasedScopeTests(unittest.TestCase):
         # Ensure clean scope state from any previous tests
         try:
             sys.exitsandboxscope()
-        except:
+        except RuntimeError:
             pass
         # Reset all counters for clean test state
         sys.resetsandboxcounters()
@@ -1263,7 +1277,7 @@ class FilenameBasedScopeTests(unittest.TestCase):
             sys.resumesandboxlimits()
         try:
             sys.clearsandboxfilenames()
-        except:
+        except RuntimeError:
             pass
         sys.setsandboxlimits(**self.original_limits)
         sys.resetsandboxcounters()

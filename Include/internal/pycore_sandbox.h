@@ -63,6 +63,8 @@ typedef struct {
     uint64_t scope_statement_count;     /* Line executions in scope */
     uint64_t scope_max_allocations;     /* 0 = no limit */
     uint64_t scope_allocation_count;    /* Allocations in scope */
+    uint64_t scope_max_iterations;      /* 0 = no limit */
+    uint64_t scope_iteration_count;     /* Iterator calls in scope */
 
     /* Sandbox scope tracking - set of registered filenames.
      * Code with a registered co_filename counts toward scope limits.
@@ -98,6 +100,8 @@ typedef struct {
     .scope_statement_count = 0,     \
     .scope_max_allocations = 0,     \
     .scope_allocation_count = 0,    \
+    .scope_max_iterations = 0,      \
+    .scope_iteration_count = 0,     \
     .registered_filenames = {.filenames = NULL, .capacity = 0, .count = 0}, \
     .allow_float = 1,               \
     .allow_complex = 1,             \
@@ -187,6 +191,9 @@ PyAPI_FUNC(int) _PySandbox_CheckAllocation(void);
 
 /* Scoped statement checking - returns -1 and sets exception when limit exceeded */
 PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
+
+/* Scoped iteration checking - returns -1 and sets exception when limit exceeded */
+PyAPI_FUNC(int) _PySandbox_CheckIteration(void);
 
 /* Sandbox scope management */
 PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */

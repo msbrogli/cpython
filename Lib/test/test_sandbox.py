@@ -65,7 +65,7 @@ class SandboxLimitsTests(unittest.TestCase):
             'max_int_digits', 'max_str_length', 'max_bytes_length',
             'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
             'global_max_allocations', 'scope_max_statements', 'scope_max_allocations',
-            'allow_float', 'allow_complex'
+            'scope_max_iterations', 'allow_float', 'allow_complex'
         }
         self.assertEqual(set(limits.keys()), expected_keys)
 
@@ -73,7 +73,7 @@ class SandboxLimitsTests(unittest.TestCase):
         """getsandboxcounts should return a dictionary with count keys."""
         counts = sys.getsandboxcounts()
         self.assertIsInstance(counts, dict)
-        expected_keys = {'global_allocation_count', 'scope_allocation_count', 'scope_statement_count'}
+        expected_keys = {'global_allocation_count', 'scope_allocation_count', 'scope_statement_count', 'scope_iteration_count'}
         self.assertEqual(set(counts.keys()), expected_keys)
 
     def test_default_limits_are_zero(self):
@@ -1595,6 +1595,168 @@ sys.exit(0 if count_after == count_tracked else 1)
         )
         self.assertEqual(result.returncode, 0,
                         f"Different filenames not independent: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+
+class ScopedIterationCountTests(unittest.TestCase):
+    """Tests for scoped iteration counting and limits.
+
+    The iteration limit counts calls to PyIter_Next(), which is used by
+    many C builtins like sum(), min(), max() when consuming iterators.
+    This protects against infinite loops in C code that would otherwise
+    bypass the statement limit.
+    """
+
+    def setUp(self):
+        # Ensure clean scope state from any previous tests
+        try:
+            sys.exitsandboxscope()
+        except RuntimeError:
+            pass
+        sys.resetsandboxcounters()
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        while sys.issandboxsuspended():
+            sys.resumesandboxlimits()
+        try:
+            sys.exitsandboxscope()
+        except RuntimeError:
+            pass
+        sys.setsandboxlimits(**self.original_limits)
+        sys.resetsandboxcounters()
+
+    def test_set_and_get_scope_max_iterations(self):
+        """Setting and getting scope_max_iterations should work."""
+        sys.setsandboxlimits(scope_max_iterations=50000)
+        limits = sys.getsandboxlimits()
+        self.assertEqual(limits['scope_max_iterations'], 50000)
+
+    def test_iteration_count_tracked_with_sum(self):
+        """Iteration count should be tracked when using sum()."""
+        from itertools import islice, cycle
+        sys.setsandboxlimits(scope_max_iterations=1000000)
+        sys.resetsandboxcounters()
+        sys.entersandboxscope()
+
+        # Use sum() which calls PyIter_Next
+        _ = sum(islice(cycle([1, 2, 3]), 100))
+
+        counts = sys.getsandboxcounts()
+        self.assertGreater(counts['scope_iteration_count'], 0)
+        sys.exitsandboxscope()
+
+    def test_exceeding_iteration_limit_raises_runtime_error(self):
+        """Exceeding iteration limit should raise RuntimeError."""
+        code = '''
+import sys
+from itertools import cycle
+
+sys.setsandboxlimits(scope_max_iterations=1000)
+sys.resetsandboxcounters()
+sys.entersandboxscope()
+try:
+    # This should raise RuntimeError when iteration limit is exceeded
+    sum(cycle([0, 1]))
+    sys.exit(2)  # Should not reach here
+except RuntimeError as e:
+    if "iteration limit" in str(e).lower():
+        sys.exit(0)  # Success
+    else:
+        print(f"Wrong error: {e}", file=sys.stderr)
+        sys.exit(1)
+except Exception as e:
+    print(f"Wrong exception type: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(1)
+finally:
+    sys.exitsandboxscope()
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected RuntimeError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_normal_iteration_within_limit_works(self):
+        """Normal iteration within limits should work fine."""
+        from itertools import islice, cycle
+        sys.setsandboxlimits(scope_max_iterations=1000000)
+        sys.resetsandboxcounters()
+        sys.entersandboxscope()
+
+        # This should work fine
+        # cycle([1, 2, 3]) for 999 items: 333 complete cycles of (1+2+3=6) = 1998
+        result = sum(islice(cycle([1, 2, 3]), 999))
+        self.assertEqual(result, 1998)
+
+        sys.exitsandboxscope()
+
+    def test_iteration_limit_protects_sum_with_infinite_iterator(self):
+        """Iteration limit should protect against sum() with infinite iterator."""
+        code = '''
+import sys
+from itertools import cycle
+
+sys.setsandboxlimits(scope_max_iterations=500)
+sys.entersandboxscope()
+try:
+    sum(cycle([0]))  # Infinite iterator
+    print("FAIL: No exception raised")
+    sys.exit(1)
+except RuntimeError:
+    print("PASS: RuntimeError raised")
+    sys.exit(0)
+finally:
+    sys.exitsandboxscope()
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Iteration limit didn't protect sum(): {result.stdout!r} {result.stderr!r}")
+
+    def test_reset_scope_iteration_count(self):
+        """resetsandboxcounters should reset scope iteration counter."""
+        from itertools import islice, cycle
+        sys.setsandboxlimits(scope_max_iterations=1000000)
+
+        sys.entersandboxscope()
+        _ = sum(islice(cycle([1]), 100))
+        sys.exitsandboxscope()
+
+        count_before = sys.getsandboxcounts()['scope_iteration_count']
+        self.assertGreater(count_before, 0)
+
+        sys.resetsandboxcounters()
+        count_after = sys.getsandboxcounts()['scope_iteration_count']
+        self.assertEqual(count_after, 0)
+
+    def test_no_iteration_limit_allows_many_iterations(self):
+        """With no iteration limit (0), many iterations should be allowed."""
+        from itertools import islice, cycle
+        sys.setsandboxlimits(scope_max_iterations=0)
+        sys.resetsandboxcounters()
+        sys.entersandboxscope()
+
+        # This should work with no limit
+        result = sum(islice(cycle([1]), 10000))
+        self.assertEqual(result, 10000)
+
+        sys.exitsandboxscope()
+
+    def test_enter_scope_resets_iteration_count(self):
+        """entersandboxscope should reset iteration counters."""
+        from itertools import islice, cycle
+        sys.setsandboxlimits(scope_max_iterations=1000000)
+
+        # First scope with some iterations
+        sys.entersandboxscope()
+        _ = sum(islice(cycle([1]), 100))
+        count1 = sys.getsandboxcounts()['scope_iteration_count']
+        sys.exitsandboxscope()
+
+        # Second scope should start fresh
+        sys.entersandboxscope()
+        count2 = sys.getsandboxcounts()['scope_iteration_count']
+        sys.exitsandboxscope()
+
+        self.assertGreater(count1, 0)
+        self.assertEqual(count2, 0)
 
 
 if __name__ == '__main__':

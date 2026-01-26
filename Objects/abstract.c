@@ -7,6 +7,7 @@
 #include "pycore_object.h"        // _Py_CheckSlotResult()
 #include "pycore_pyerrors.h"      // _PyErr_Occurred()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckIteration()
 #include "pycore_unionobject.h"   // _PyUnion_Check()
 #include <ctype.h>
 #include <stddef.h>               // offsetof()
@@ -2860,6 +2861,11 @@ PyAIter_Check(PyObject *obj)
 PyObject *
 PyIter_Next(PyObject *iter)
 {
+    /* Check iteration limits */
+    if (_PySandbox_CheckIteration() < 0) {
+        return NULL;
+    }
+
     PyObject *result;
     result = (*Py_TYPE(iter)->tp_iternext)(iter);
     if (result == NULL) {

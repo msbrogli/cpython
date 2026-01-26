@@ -5642,8 +5642,8 @@ handle_eval_breaker:
                         : _PyCode_LineNumberFromArray(frame->f_code, instr_prev);
                     int line = _PyCode_LineNumberFromArray(frame->f_code, _PyInterpreterFrame_LASTI(frame));
 
-                    /* Count if: line changed OR backward jump/self-loop (loop iteration) */
-                    if (line != -1 && (line != lastline || _PyInterpreterFrame_LASTI(frame) <= instr_prev)) {
+                    /* Count every traced line execution */
+                    if (line != -1) {
                         if (_PySandbox_CheckScopeStatement() < 0) {
                             frame->prev_instr = next_instr + 1;
                             goto error;

@@ -6,25 +6,29 @@ This comprehensive document describes the complete implementation of the sandbox
 
 1. [Overview](#overview)
 2. [Feature Summary](#feature-summary)
-3. [Exception Details](#exception-details)
+3. [Sandbox Exceptions](#sandbox-exceptions)
 4. [Architecture](#architecture)
 5. [Data Structures](#data-structures)
 6. [Limit Types and Enforcement](#limit-types-and-enforcement)
 7. [Scope Tracking](#scope-tracking)
-8. [Object Creation Hooks](#object-creation-hooks)
-9. [Suspend/Resume](#suspendresume)
-10. [Integration Points](#integration-points)
-11. [Python API Reference](#python-api-reference)
-12. [C API Reference](#c-api-reference)
-13. [Implementation Files](#implementation-files)
-14. [Porting Guide](#porting-guide)
-15. [Testing](#testing)
+8. [Iteration Limits and Iterator Wrapper](#iteration-limits-and-iterator-wrapper)
+9. [Dunder Access Control](#dunder-access-control)
+10. [Frozen Mode](#frozen-mode)
+11. [Opcode Restrictions](#opcode-restrictions)
+12. [Object Creation Hooks](#object-creation-hooks)
+13. [Suspend/Resume](#suspendresume)
+14. [Integration Points](#integration-points)
+15. [Python API Reference](#python-api-reference)
+16. [C API Reference](#c-api-reference)
+17. [Implementation Files](#implementation-files)
+18. [Porting Guide](#porting-guide)
+19. [Testing](#testing)
 
 ---
 
 ## Overview
 
-The CPython sandbox provides mechanisms for limiting resource usage and monitoring object creation in Python code. It's designed for executing untrusted code with controlled resource limits.
+The CPython sandbox provides mechanisms for limiting resource usage, monitoring object creation, and restricting operations in Python code. It is designed for executing untrusted code with controlled resource limits.
 
 ### Key Capabilities
 
@@ -32,9 +36,14 @@ The CPython sandbox provides mechanisms for limiting resource usage and monitori
 - **Type Restrictions**: Forbid creation of float or complex types
 - **Allocation Limits**: Limit total object allocations (global and scoped)
 - **Statement Limits**: Limit number of statements executed (prevents infinite loops)
+- **Iteration Limits**: Limit number of iterator steps (prevents abuse via C builtins)
+- **Dunder Access Control**: Block access to double-underscore attributes in sandbox scope
+- **Frozen Mode**: Prevent attribute mutations globally or per-object
+- **Opcode Restrictions**: Ban specific bytecode opcodes from executing in sandbox scope
 - **Scope Tracking**: Track limits only for specific code (by filename)
 - **Object Creation Hooks**: Intercept and optionally replace objects at creation time
 - **Suspend/Resume**: Temporarily bypass limits for trusted code
+- **Sandbox Exceptions**: Dedicated exception hierarchy for sandbox violations
 
 ---
 
@@ -42,61 +51,113 @@ The CPython sandbox provides mechanisms for limiting resource usage and monitori
 
 | Feature | Description | Exception Type |
 |---------|-------------|----------------|
-| `max_int_digits` | Max internal digits (~30 bits each) for integers | `OverflowError` |
-| `max_str_length` | Max characters in strings | `OverflowError` |
-| `max_bytes_length` | Max bytes in bytes/bytearray | `OverflowError` |
-| `max_list_size` | Max items in lists | `OverflowError` |
-| `max_dict_size` | Max entries in dicts | `OverflowError` |
-| `max_set_size` | Max members in sets | `OverflowError` |
-| `max_tuple_size` | Max items in tuples | `OverflowError` |
-| `allow_float` | Allow/forbid float creation | `TypeError` |
-| `allow_complex` | Allow/forbid complex creation | `TypeError` |
-| `global_max_allocations` | Max GC-tracked allocations total | `MemoryError` |
-| `scope_max_allocations` | Max allocations in sandbox scope | `MemoryError` |
-| `scope_max_statements` | Max statements in sandbox scope | `RuntimeError` |
+| `max_int_digits` | Max internal digits (~30 bits each) for integers | `SandboxOverflowError` |
+| `max_str_length` | Max characters in strings | `SandboxOverflowError` |
+| `max_bytes_length` | Max bytes in bytes/bytearray | `SandboxOverflowError` |
+| `max_list_size` | Max items in lists | `SandboxOverflowError` |
+| `max_dict_size` | Max entries in dicts | `SandboxOverflowError` |
+| `max_set_size` | Max members in sets | `SandboxOverflowError` |
+| `max_tuple_size` | Max items in tuples | `SandboxOverflowError` |
+| `allow_float` | Allow/forbid float creation | `SandboxTypeError` |
+| `allow_complex` | Allow/forbid complex creation | `SandboxTypeError` |
+| `allow_dunder_access` | Allow/block `__dunder__` attributes | `SandboxAttributeError` |
+| `global_max_allocations` | Max GC-tracked allocations total | `SandboxMemoryError` |
+| `scope_max_allocations` | Max allocations in sandbox scope | `SandboxMemoryError` |
+| `scope_max_statements` | Max statements in sandbox scope | `SandboxRuntimeError` |
+| `scope_max_iterations` | Max iterator steps in sandbox scope | `SandboxRuntimeError` |
+| Frozen mode (global) | Block all attribute mutations | `SandboxAttributeError` |
+| Frozen mode (per-object) | Block mutations on specific objects | `SandboxAttributeError` |
+| Opcode restrictions | Ban specific bytecode opcodes | `SandboxRuntimeError` |
 
 ---
 
-## Exception Details
+## Sandbox Exceptions
 
-When a sandbox limit is exceeded, a specific exception is raised with a descriptive error message. Understanding these exceptions is important for proper error handling in sandboxed code.
+All sandbox violations raise exceptions from a dedicated hierarchy rooted at `SandboxError`. This allows callers to catch all sandbox-related errors with a single `except SandboxError` clause while still distinguishing specific violation types.
+
+### Exception Hierarchy
+
+```
+Exception
+ +-- SandboxError
+      +-- SandboxOverflowError    (size/length limit exceeded)
+      +-- SandboxMemoryError      (allocation limit exceeded)
+      +-- SandboxRuntimeError     (statement/iteration limit, banned opcode)
+      +-- SandboxTypeError        (forbidden type creation)
+      +-- SandboxAttributeError   (frozen mode, dunder access blocked)
+```
 
 ### Exception Types and Error Messages
 
 | Limit | Exception | Error Message |
 |-------|-----------|---------------|
-| `max_int_digits` | `OverflowError` | "Integer size (N digits) exceeds sandbox limit (M digits)" |
-| `max_str_length` | `OverflowError` | "String length exceeds sandbox limit" |
-| `max_bytes_length` | `OverflowError` | "Bytes length exceeds sandbox limit" |
-| `max_list_size` | `OverflowError` | "List size (N) exceeds sandbox limit (M)" |
-| `max_dict_size` | `OverflowError` | "Dict size (N) exceeds sandbox limit (M)" |
-| `max_set_size` | `OverflowError` | "Set size (N) exceeds sandbox limit (M)" |
-| `max_tuple_size` | `OverflowError` | "Tuple size (N) exceeds sandbox limit (M)" |
-| `allow_float=False` | `TypeError` | "float type is forbidden in sandbox" |
-| `allow_complex=False` | `TypeError` | "complex type is forbidden in sandbox" |
-| `global_max_allocations` | `MemoryError` | (standard MemoryError, no message) |
-| `scope_max_allocations` | `MemoryError` | (standard MemoryError, no message) |
-| `scope_max_statements` | `RuntimeError` | "Sandbox statement limit exceeded" |
+| `max_int_digits` | `SandboxOverflowError` | "Integer size (N digits) exceeds sandbox limit (M digits)" |
+| `max_str_length` | `SandboxOverflowError` | "String length (N) exceeds sandbox limit (M)" |
+| `max_bytes_length` | `SandboxOverflowError` | "Bytes length (N) exceeds sandbox limit (M)" |
+| `max_list_size` | `SandboxOverflowError` | "List size (N) exceeds sandbox limit (M)" |
+| `max_dict_size` | `SandboxOverflowError` | "Dict size (N) exceeds sandbox limit (M)" |
+| `max_set_size` | `SandboxOverflowError` | "Set size (N) exceeds sandbox limit (M)" |
+| `max_tuple_size` | `SandboxOverflowError` | "Tuple size (N) exceeds sandbox limit (M)" |
+| `allow_float=False` | `SandboxTypeError` | "float type is forbidden in sandbox" |
+| `allow_complex=False` | `SandboxTypeError` | "complex type is forbidden in sandbox" |
+| `allow_dunder_access=False` | `SandboxAttributeError` | "dunder attribute access blocked in sandbox: 'name'" |
+| `global_max_allocations` | `SandboxMemoryError` | "Sandbox global allocation limit exceeded" |
+| `scope_max_allocations` | `SandboxMemoryError` | "Sandbox scoped allocation limit exceeded" |
+| `scope_max_statements` | `SandboxRuntimeError` | "Sandbox statement limit exceeded" |
+| `scope_max_iterations` | `SandboxRuntimeError` | "Sandbox iteration limit exceeded" |
+| Frozen mode (global) | `SandboxAttributeError` | "cannot modify 'type' object: sandbox frozen mode is active" |
+| Frozen mode (per-object) | `SandboxAttributeError` | "cannot modify frozen object 'type'" |
+| Banned opcode | `SandboxRuntimeError` | "Opcode N is not allowed in sandbox scope" |
+
+### Exception Registration
+
+The exceptions are defined in `Objects/exceptions.c` using the `SimpleExtendsException` macro:
+
+```c
+SimpleExtendsException(PyExc_Exception, SandboxError,
+                       "Base class for sandbox violations");
+SimpleExtendsException(PyExc_SandboxError, SandboxOverflowError,
+                       "Sandbox size/length limit exceeded");
+SimpleExtendsException(PyExc_SandboxError, SandboxMemoryError,
+                       "Sandbox allocation limit exceeded");
+SimpleExtendsException(PyExc_SandboxError, SandboxRuntimeError,
+                       "Sandbox runtime limit exceeded");
+SimpleExtendsException(PyExc_SandboxError, SandboxTypeError,
+                       "Sandbox type restriction violated");
+SimpleExtendsException(PyExc_SandboxError, SandboxAttributeError,
+                       "Sandbox attribute access violation");
+```
+
+They are declared in `Include/pyerrors.h`:
+
+```c
+PyAPI_DATA(PyObject *) PyExc_SandboxError;
+PyAPI_DATA(PyObject *) PyExc_SandboxOverflowError;
+PyAPI_DATA(PyObject *) PyExc_SandboxMemoryError;
+PyAPI_DATA(PyObject *) PyExc_SandboxRuntimeError;
+PyAPI_DATA(PyObject *) PyExc_SandboxTypeError;
+PyAPI_DATA(PyObject *) PyExc_SandboxAttributeError;
+```
+
+All sandbox exceptions are available as builtins (e.g. `except SandboxError:`).
 
 ### Memory Allocation Grace Behavior
 
-When `global_max_allocations` or `scope_max_allocations` limits are reached, the sandbox allows a small number of additional "grace" allocations before raising `MemoryError`. This grace period exists because:
+When `global_max_allocations` or `scope_max_allocations` limits are reached, the sandbox allows a small number of additional "grace" allocations before raising `SandboxMemoryError`. This grace period exists because:
 
-1. **Error object creation**: Python needs to allocate objects to create and raise the `MemoryError` exception itself
+1. **Error object creation**: Python needs to allocate objects to create and raise the `SandboxMemoryError` exception itself
 2. **Exception handling**: The code catching the exception may need to allocate objects for logging, cleanup, or error reporting
 
-The implementation uses a `GRACE_HEADROOM` constant (typically 1000 allocations) to allow error handling to proceed after the limit is first hit.
+The implementation uses a `ALLOCATION_GRACE_HEADROOM` constant (1000 allocations) to allow error handling to proceed after the limit is first hit.
 
-### Statement Limit Single-Raise Behavior
+### Statement/Iteration Limit Single-Raise Behavior
 
-The `scope_max_statements` limit has special behavior: the `RuntimeError` is raised **exactly once**, on the first statement that exceeds the limit. Subsequent statements do not raise additional exceptions.
+The `scope_max_statements` and `scope_max_iterations` limits have special behavior: the `SandboxRuntimeError` is raised **exactly once**, on the first call that exceeds the limit. Subsequent calls do not raise additional exceptions.
 
 This design allows:
 1. **Exception handlers to execute**: The `except` and `finally` blocks need to run statements to handle the error
 2. **Cleanup code to complete**: Resource cleanup and logging can proceed normally
 3. **Stack unwinding**: Python can properly unwind the call stack
-
-See the [Statement Counting Exception Behavior](#statement-counting-exception-behavior) section for implementation details.
 
 ---
 
@@ -105,32 +166,38 @@ See the [Statement Counting Exception Behavior](#statement-counting-exception-be
 ### Component Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Python Code                               │
-│   sys.setsandboxlimits(...)  sys.addsandboxfilename(...)        │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Python/sysmodule.c                          │
-│   sys_setsandboxlimits()  sys_addsandboxfilename()  etc.        │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Python/sandbox.c                            │
-│   _PySandbox_CheckIntSize()  _PySandbox_AddFilename()  etc.     │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-            ┌───────────────────┼───────────────────┐
-            ▼                   ▼                   ▼
-┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
-│ Objects/          │ │ Python/ceval.c    │ │ Modules/          │
-│ longobject.c      │ │ Statement tracing │ │ gcmodule.c        │
-│ listobject.c      │ │                   │ │ Allocation count  │
-│ dictobject.c      │ │                   │ │                   │
-│ etc.              │ │                   │ │                   │
-└───────────────────┘ └───────────────────┘ └───────────────────┘
++-------------------------------------------------------------------+
+|                        Python Code                                |
+|   sys.setsandboxlimits(...)  sys.addsandboxfilename(...)          |
+|   sys.setsandboxfrozenmode(...)  sys.setsandboxbannedopcodes(...) |
++-------------------------------------------------------------------+
+                                |
+                                v
++-------------------------------------------------------------------+
+|                      Python/sysmodule.c                           |
+|   sys_setsandboxlimits()  sys_addsandboxfilename()  etc.          |
++-------------------------------------------------------------------+
+                                |
+                                v
++-------------------------------------------------------------------+
+|                      Python/sandbox.c                             |
+|   _PySandbox_CheckIntSize()  _PySandbox_AddFilename()             |
+|   _PySandbox_CheckFrozen()   _PySandbox_CheckOpcode()             |
+|   _PySandbox_CheckIteration()  _PySandbox_WrapIterator()          |
++-------------------------------------------------------------------+
+                                |
+            +-------------------+-------------------+
+            v                   v                   v
++-------------------+ +-------------------+ +-------------------+
+| Objects/          | | Python/ceval.c    | | Modules/          |
+| longobject.c      | | Statement tracing | | gcmodule.c        |
+| listobject.c      | | Opcode checking   | | Allocation count  |
+| dictobject.c      | | Dunder access     | |                   |
+| abstract.c        | |                   | |                   |
+| object.c          | |                   | |                   |
+| descrobject.c     | |                   | |                   |
+| etc.              | |                   | |                   |
++-------------------+ +-------------------+ +-------------------+
 ```
 
 ### State Storage
@@ -145,11 +212,44 @@ typedef struct _is {
 } PyInterpreterState;
 ```
 
+### Object-Level State
+
+Per-object frozen/mutable flags are stored in `ob_flags` (a new `uint32_t` field added to `PyObject`):
+
+```c
+typedef struct _object {
+    Py_ssize_t ob_refcnt;
+    uint32_t ob_flags;      /* Per-instance sandbox flags */
+    PyTypeObject *ob_type;
+} PyObject;
+
+#define Py_OBJFLAGS_FROZEN    (1U << 0)  /* Object is individually frozen */
+#define Py_OBJFLAGS_MUTABLE   (1U << 1)  /* Override: allow mutation even in frozen mode */
+
+#define Py_IS_FROZEN(op) (((PyObject*)(op))->ob_flags & Py_OBJFLAGS_FROZEN)
+#define Py_IS_MUTABLE(op) (((PyObject*)(op))->ob_flags & Py_OBJFLAGS_MUTABLE)
+```
+
 ---
 
 ## Data Structures
 
 ### File: `Include/internal/pycore_sandbox.h`
+
+#### `_PySandboxOpcodeSet`
+
+256-bit bitmap for opcode restriction:
+
+```c
+typedef struct {
+    uint32_t bits[8];  /* 8 * 32 = 256 bits */
+} _PySandboxOpcodeSet;
+
+#define _PySandbox_OpcodeSet_HAS(set, op)   ((set)->bits[(op) >> 5] & (1U << ((op) & 31)))
+#define _PySandbox_OpcodeSet_SET(set, op)   ((set)->bits[(op) >> 5] |= (1U << ((op) & 31)))
+#define _PySandbox_OpcodeSet_CLEAR(set, op) ((set)->bits[(op) >> 5] &= ~(1U << ((op) & 31)))
+#define _PySandbox_OpcodeSet_ZERO(set)      memset((set)->bits, 0, sizeof((set)->bits))
+```
 
 #### `_PySandboxFilenameSet`
 
@@ -191,6 +291,8 @@ typedef struct {
     uint64_t scope_statement_count;     /* Statement executions in scope */
     uint64_t scope_max_allocations;     /* 0 = no limit */
     uint64_t scope_allocation_count;    /* Allocations in scope */
+    uint64_t scope_max_iterations;      /* 0 = no limit */
+    uint64_t scope_iteration_count;     /* Iterator calls in scope */
 
     /* Sandbox scope tracking - set of registered filenames */
     _PySandboxFilenameSet registered_filenames;
@@ -204,6 +306,9 @@ typedef struct {
 
     /* Suspend counter */
     int suspended;
+
+    /* Dunder access control */
+    int allow_dunder_access;     /* 1 = allowed (default), 0 = block __ attributes */
 } _PySandboxLimits;
 ```
 
@@ -228,6 +333,9 @@ Combined state:
 typedef struct {
     _PySandboxLimits limits;
     _PyObjectCreationHook creation_hook;
+    int frozen_mode;                     /* 1 = global freeze active, 0 = normal */
+    int opcode_restrict_mode;            /* 1 = active, 0 = off */
+    _PySandboxOpcodeSet banned_opcodes;  /* bitmap of banned opcodes */
 } _PySandboxState;
 ```
 
@@ -248,11 +356,14 @@ typedef struct {
     .scope_statement_count = 0,     \
     .scope_max_allocations = 0,     \
     .scope_allocation_count = 0,    \
+    .scope_max_iterations = 0,      \
+    .scope_iteration_count = 0,     \
     .registered_filenames = {.filenames = NULL, .capacity = 0, .count = 0}, \
     .allow_float = 1,               \
     .allow_complex = 1,             \
     .in_check = 0,                  \
     .suspended = 0,                 \
+    .allow_dunder_access = 1,       \
 }
 
 #define _PyObjectCreationHook_INIT { \
@@ -265,6 +376,9 @@ typedef struct {
 #define _PySandboxState_INIT {              \
     .limits = _PySandboxLimits_INIT,        \
     .creation_hook = _PyObjectCreationHook_INIT, \
+    .frozen_mode = 0,                       \
+    .opcode_restrict_mode = 0,              \
+    .banned_opcodes = {{0}},                \
 }
 ```
 
@@ -281,19 +395,12 @@ typedef struct {
 **Enforcement Point**: `Objects/longobject.c` in `_PyLong_New()`
 
 ```c
-/* In Objects/longobject.c */
-#include "pycore_sandbox.h"
-
 PyLongObject *
 _PyLong_New(Py_ssize_t size)
 {
-    /* ... allocation code ... */
-
-    /* Check sandbox limits before allocation */
     if (_PySandbox_CheckIntSize(size) < 0) {
         return NULL;
     }
-
     /* ... rest of allocation ... */
 }
 ```
@@ -304,15 +411,11 @@ _PyLong_New(Py_ssize_t size)
 int
 _PySandbox_CheckIntSize(Py_ssize_t ndigits)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_int_digits == 0 ||
-        limits->in_check || limits->suspended) {
-        return 0;  /* No limit, already checking, or suspended */
-    }
+    _PYSANDBOX_CHECK_PROLOGUE(max_int_digits)
 
     if (ndigits > limits->max_int_digits) {
         limits->in_check = 1;
-        PyErr_Format(PyExc_OverflowError,
+        PyErr_Format(PyExc_SandboxOverflowError,
                      "Integer size (%zd digits) exceeds sandbox limit (%zd digits)",
                      ndigits, limits->max_int_digits);
         limits->in_check = 0;
@@ -330,157 +433,38 @@ _PySandbox_CheckIntSize(Py_ssize_t ndigits)
 
 **Enforcement Point**: `Objects/unicodeobject.c` in `PyUnicode_New()`
 
-```c
-/* In Objects/unicodeobject.c */
-#include "pycore_sandbox.h"
-
-PyObject *
-PyUnicode_New(Py_ssize_t size, Py_UCS4 maxchar)
-{
-    /* Check sandbox limits */
-    if (_PySandbox_CheckStrLength(size) < 0) {
-        return NULL;
-    }
-    /* ... rest of function ... */
-}
-```
-
-**Check Function**:
-
-```c
-int
-_PySandbox_CheckStrLength(Py_ssize_t length)
-{
-    _PySandboxLimits *limits = get_sandbox_limits();
-    if (limits == NULL || limits->max_str_length == 0 ||
-        limits->in_check || limits->suspended) {
-        return 0;
-    }
-
-    if (length > limits->max_str_length) {
-        limits->in_check = 1;
-        PyErr_SetString(PyExc_OverflowError,
-                        "String length exceeds sandbox limit");
-        limits->in_check = 0;
-        return -1;
-    }
-    return 0;
-}
-```
-
 ### Bytes Length Limit (`max_bytes_length`)
 
 **Purpose**: Prevent memory exhaustion via huge byte strings.
 
 **Enforcement Point**: `Objects/bytesobject.c` in `PyBytes_FromStringAndSize()` and related functions.
 
-```c
-/* In Objects/bytesobject.c */
-#include "pycore_sandbox.h"
+### Container Size Limits (`max_list_size`, `max_dict_size`, `max_set_size`, `max_tuple_size`)
 
-PyObject *
-PyBytes_FromStringAndSize(const char *str, Py_ssize_t size)
-{
-    /* Check sandbox limits */
-    if (_PySandbox_CheckBytesLength(size) < 0) {
-        return NULL;
-    }
-    /* ... rest of function ... */
-}
-```
+**Purpose**: Prevent memory exhaustion via huge containers.
 
-### List Size Limit (`max_list_size`)
+**Enforcement Points**:
+- `Objects/listobject.c` in `list_resize()` and other growth functions
+- `Objects/dictobject.c` in dict insertion/growth functions
+- `Objects/setobject.c` in set addition functions
+- `Objects/tupleobject.c` in `PyTuple_New()`
 
-**Purpose**: Prevent memory exhaustion via huge lists.
-
-**Enforcement Point**: `Objects/listobject.c` in `list_resize()` and other growth functions.
+All size limit checks follow the same pattern using the `_PYSANDBOX_CHECK_PROLOGUE` macro for early exits:
 
 ```c
-/* In Objects/listobject.c */
-#include "pycore_sandbox.h"
-
-static int
-list_resize(PyListObject *self, Py_ssize_t newsize)
-{
-    /* Check sandbox limits */
-    if (_PySandbox_CheckListSize(newsize) < 0) {
-        return -1;
+#define _PYSANDBOX_CHECK_PROLOGUE(limit_field) \
+    _PySandboxLimits *limits = get_sandbox_limits(); \
+    if (limits == NULL || limits->limit_field == 0 || \
+        limits->in_check || limits->suspended) { \
+        return 0; \
     }
-    /* ... rest of function ... */
-}
-```
-
-### Dict Size Limit (`max_dict_size`)
-
-**Purpose**: Prevent memory exhaustion via huge dicts.
-
-**Enforcement Point**: `Objects/dictobject.c` in dict insertion/growth functions.
-
-```c
-/* In Objects/dictobject.c */
-#include "pycore_sandbox.h"
-
-static int
-insertdict(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value)
-{
-    /* ... lookup code ... */
-
-    /* Check sandbox limits before growing */
-    Py_ssize_t new_size = mp->ma_used + 1;
-    if (_PySandbox_CheckDictSize(new_size) < 0) {
-        return -1;
-    }
-    /* ... rest of function ... */
-}
-```
-
-### Set Size Limit (`max_set_size`)
-
-**Purpose**: Prevent memory exhaustion via huge sets.
-
-**Enforcement Point**: `Objects/setobject.c` in set addition functions.
-
-```c
-/* In Objects/setobject.c */
-#include "pycore_sandbox.h"
-
-static int
-set_add_key(PySetObject *so, PyObject *key)
-{
-    /* Check sandbox limits */
-    if (_PySandbox_CheckSetSize(so->used + 1) < 0) {
-        return -1;
-    }
-    /* ... rest of function ... */
-}
-```
-
-### Tuple Size Limit (`max_tuple_size`)
-
-**Purpose**: Prevent memory exhaustion via huge tuples.
-
-**Enforcement Point**: `Objects/tupleobject.c` in `PyTuple_New()`.
-
-```c
-/* In Objects/tupleobject.c */
-#include "pycore_sandbox.h"
-
-PyObject *
-PyTuple_New(Py_ssize_t size)
-{
-    /* Check sandbox limits */
-    if (_PySandbox_CheckTupleSize(size) < 0) {
-        return NULL;
-    }
-    /* ... rest of function ... */
-}
 ```
 
 ### Type Restrictions (`allow_float`, `allow_complex`)
 
 **Purpose**: Forbid creation of specific types.
 
-**Enforcement Point**: `Objects/typeobject.c` in `type_call()` or `Objects/floatobject.c` and `Objects/complexobject.c`.
+**Enforcement Point**: `Objects/typeobject.c` in `type_call()`, `Objects/floatobject.c`, and `Objects/complexobject.c`.
 
 ```c
 int
@@ -492,13 +476,13 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
     }
 
     if (!limits->allow_float && type == &PyFloat_Type) {
-        PyErr_SetString(PyExc_TypeError,
+        PyErr_SetString(PyExc_SandboxTypeError,
                         "float type is forbidden in sandbox");
         return -1;
     }
 
     if (!limits->allow_complex && type == &PyComplex_Type) {
-        PyErr_SetString(PyExc_TypeError,
+        PyErr_SetString(PyExc_SandboxTypeError,
                         "complex type is forbidden in sandbox");
         return -1;
     }
@@ -579,52 +563,32 @@ frame_in_sandbox_scope(_PySandboxFilenameSet *set, _PyInterpreterFrame *frame)
 When `scope_max_statements > 0`, Python enables line tracing. Each line execution calls `_PySandbox_CheckScopeStatement()`.
 
 ```c
-/* In Python/ceval.c - simplified */
-static int
-maybe_call_line_trace(...)
-{
-    /* ... other tracing code ... */
-
-    /* Check sandbox statement limit */
-    if (_PySandbox_CheckScopeStatement() < 0) {
-        return -1;
-    }
-
-    /* ... rest of function ... */
-}
-```
-
-**Check Function**:
-
-```c
 int
 _PySandbox_CheckScopeStatement(void)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
+    /* ... thread state checks ... */
+    _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    /* Skip if no limit, suspended, or in_check */
-    if (limits == NULL || limits->scope_max_statements == 0 ||
+    if (limits->scope_max_statements == 0 ||
         limits->in_check || limits->suspended) {
         return 0;
     }
 
-    /* Skip if no registered filenames */
     if (limits->registered_filenames.count == 0) {
         return 0;
     }
 
-    /* Check if current frame is in scope */
     _PyInterpreterFrame *current = get_current_interpreter_frame();
     if (!frame_in_sandbox_scope(&limits->registered_filenames, current)) {
         return 0;
     }
 
-    /* Increment and check */
     limits->scope_statement_count++;
 
+    /* Only raise error ONCE at exactly max+1 to allow error handling */
     if (limits->scope_statement_count == limits->scope_max_statements + 1) {
         limits->in_check = 1;
-        PyErr_SetString(PyExc_RuntimeError,
+        PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox statement limit exceeded");
         limits->in_check = 0;
         return -1;
@@ -636,74 +600,29 @@ _PySandbox_CheckScopeStatement(void)
 
 #### Statement Counting Exception Behavior
 
-The statement limit uses a deliberate "single-raise" pattern. The key insight is in this check:
+The statement limit uses a deliberate "single-raise" pattern. The key is the use of `==` (equals) rather than `>=` (greater-than-or-equal):
 
 ```c
 if (limits->scope_statement_count == limits->scope_max_statements + 1)
 ```
 
-Notice the use of `==` (equals) rather than `>=` (greater-than-or-equal). This means:
-
-1. **First violation (count == limit + 1)**: Raises `RuntimeError`
+1. **First violation (count == limit + 1)**: Raises `SandboxRuntimeError`
 2. **Subsequent statements (count > limit + 1)**: No exception raised, execution continues
 
-**Why this matters:**
-
-When Python raises an exception, the interpreter still needs to execute statements to:
-- Unwind the call stack and find exception handlers
-- Execute `except` blocks to catch and handle the error
-- Execute `finally` blocks for cleanup
-- Create error messages and log entries
-
-If the sandbox raised `RuntimeError` on every statement after the limit, these essential operations would fail, potentially leaving resources in an inconsistent state.
-
-**Example behavior:**
-
-```python
-sys.setsandboxlimits(scope_max_statements=10)
-sys.addsandboxfilename("<test>")
-
-try:
-    exec(compile("""
-for i in range(100):  # Will exceed limit
-    pass
-""", "<test>", "exec"))
-except RuntimeError as e:
-    # This except block CAN execute because no new RuntimeError is raised
-    print(f"Caught: {e}")  # Prints: Caught: Sandbox statement limit exceeded
-finally:
-    # This finally block CAN execute for cleanup
-    sys.clearsandboxfilenames()
-```
+This allows `except` and `finally` blocks to run, enables proper stack unwinding, and avoids cascading failures during error handling.
 
 ### Allocation Counting
 
 **Enforcement Point**: `Modules/gcmodule.c` in `_PyObject_GC_Alloc()`.
 
 ```c
-/* In Modules/gcmodule.c */
-#include "pycore_sandbox.h"
-
-static PyObject *
-_PyObject_GC_Alloc(int use_calloc, size_t basicsize)
-{
-    /* Check sandbox allocation limits */
-    if (_PySandbox_CheckAllocation() < 0) {
-        return NULL;
-    }
-    /* ... rest of allocation ... */
-}
-```
-
-**Check Function**:
-
-```c
 int
 _PySandbox_CheckAllocation(void)
 {
-    _PySandboxLimits *limits = get_sandbox_limits();
+    /* ... thread/interpreter state checks ... */
+    _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    if (limits == NULL || limits->in_check || limits->suspended) {
+    if (limits->in_check || limits->suspended) {
         return 0;
     }
 
@@ -728,31 +647,340 @@ _PySandbox_CheckAllocation(void)
         return 0;
     }
 
-    /* Check global limit */
+    /* Check global limit with grace headroom */
     if (limits->global_max_allocations > 0) {
-        if (limits->global_allocation_count > limits->global_max_allocations + GRACE_HEADROOM) {
-            PyErr_NoMemory();
+        if (limits->global_allocation_count > limits->global_max_allocations + ALLOCATION_GRACE_HEADROOM) {
+            PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox global allocation limit exceeded");
             return -1;
         }
         if (limits->global_allocation_count == limits->global_max_allocations + 1) {
-            PyErr_NoMemory();
+            PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox global allocation limit exceeded");
             return -1;
         }
     }
 
-    /* Check scoped limit */
+    /* Check scoped limit with grace headroom */
     if (in_scope && limits->scope_max_allocations > 0) {
-        if (limits->scope_allocation_count > limits->scope_max_allocations + GRACE_HEADROOM) {
-            PyErr_NoMemory();
+        if (limits->scope_allocation_count > limits->scope_max_allocations + ALLOCATION_GRACE_HEADROOM) {
+            PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox scoped allocation limit exceeded");
             return -1;
         }
         if (limits->scope_allocation_count == limits->scope_max_allocations + 1) {
-            PyErr_NoMemory();
+            PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox scoped allocation limit exceeded");
             return -1;
         }
     }
 
     return 0;
+}
+```
+
+---
+
+## Iteration Limits and Iterator Wrapper
+
+### Purpose
+
+Prevent infinite or excessive iteration in sandboxed code. This is critical because many C-level builtins (e.g., `list()`, `sum()`, `sorted()`, `min()`, `max()`) call `tp_iternext` directly, bypassing the Python-level statement counter. The iteration limit covers all these cases.
+
+### How It Works
+
+1. **Iterator Wrapping**: When an iterator is created via `PyObject_GetIter()` while in sandbox scope, the returned iterator is wrapped in a `_PySandboxIteratorWrapper` object.
+2. **Per-Step Checking**: Each call to the wrapper's `tp_iternext` checks `_PySandbox_CheckIteration()` before delegating to the wrapped iterator.
+3. **Single Wrap Point**: By wrapping at `PyObject_GetIter()`, all 26+ direct `tp_iternext` call sites in CPython are automatically protected.
+
+### Iterator Wrapper Implementation
+
+```c
+typedef struct {
+    PyObject_HEAD
+    PyObject *wrapped;  /* The wrapped iterator (strong ref) */
+} _PySandboxIteratorWrapper;
+
+static PyObject *
+sandbox_iter_wrapper_iternext(_PySandboxIteratorWrapper *self)
+{
+    /* Check iteration limits BEFORE delegating */
+    if (_PySandbox_CheckIteration() < 0) {
+        return NULL;  /* Exception already set */
+    }
+
+    /* Delegate to wrapped iterator's tp_iternext */
+    PyTypeObject *type = Py_TYPE(self->wrapped);
+    return (*type->tp_iternext)(self->wrapped);
+}
+```
+
+### Wrap Function
+
+```c
+PyObject *
+_PySandbox_WrapIterator(PyObject *iter)
+{
+    if (iter == NULL) return NULL;
+
+    /* Don't wrap if not in sandbox scope */
+    if (!_PySandbox_IsInScope()) {
+        Py_INCREF(iter);
+        return iter;
+    }
+
+    /* Avoid wrapping an already-wrapped iterator */
+    if (Py_TYPE(iter) == &_PySandboxIteratorWrapper_Type) {
+        Py_INCREF(iter);
+        return iter;
+    }
+
+    /* Create and return wrapper */
+    _PySandboxIteratorWrapper *wrapper = PyObject_GC_New(
+        _PySandboxIteratorWrapper, &_PySandboxIteratorWrapper_Type);
+    Py_INCREF(iter);
+    wrapper->wrapped = iter;
+    PyObject_GC_Track(wrapper);
+    return (PyObject *)wrapper;
+}
+```
+
+### Iteration Check Function
+
+```c
+int
+_PySandbox_CheckIteration(void)
+{
+    /* ... thread/interpreter state checks ... */
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    if (limits->scope_max_iterations == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;
+    }
+
+    if (limits->registered_filenames.count == 0) {
+        return 0;
+    }
+
+    _PyInterpreterFrame *current = get_current_interpreter_frame();
+    if (!frame_in_sandbox_scope(&limits->registered_filenames, current)) {
+        return 0;
+    }
+
+    limits->scope_iteration_count++;
+
+    /* Only raise error ONCE at exactly max+1 */
+    if (limits->scope_iteration_count == limits->scope_max_iterations + 1) {
+        limits->in_check = 1;
+        PyErr_SetString(PyExc_SandboxRuntimeError,
+                        "Sandbox iteration limit exceeded");
+        limits->in_check = 0;
+        return -1;
+    }
+
+    return 0;
+}
+```
+
+### Lazy Type Initialization
+
+The wrapper type (`_PySandboxIteratorWrapper_Type`) is initialized lazily on first use rather than during `_PySandbox_Init()`, because `PyType_Ready()` requires a valid thread state which isn't available during early interpreter initialization.
+
+---
+
+## Dunder Access Control
+
+### Purpose
+
+Block access to double-underscore (`__dunder__`) attributes from sandboxed code, preventing introspection-based sandbox escapes (e.g., `obj.__class__.__subclasses__()`, `obj.__globals__`).
+
+### Configuration
+
+Set via `sys.setsandboxlimits(allow_dunder_access=False)`. Default is `True` (allowed).
+
+### Scope-Aware
+
+Dunder blocking is only enforced within sandbox scope. Code outside the scope (e.g., the test framework, stdlib) can access dunder attributes freely.
+
+### Enforcement Point
+
+`Objects/abstract.c` and `Objects/descrobject.c` for attribute access operations (LOAD_ATTR, STORE_ATTR, DELETE_ATTR).
+
+### Check Function
+
+```c
+int
+_PySandbox_CheckDunderAccess(PyObject *name)
+{
+    _PySandboxLimits *limits = get_sandbox_limits();
+    if (limits == NULL || limits->allow_dunder_access ||
+        limits->in_check || limits->suspended) {
+        return 0;
+    }
+
+    if (!is_dunder_name(name)) {
+        return 0;
+    }
+
+    /* Check if in sandbox scope */
+    if (limits->registered_filenames.count == 0) {
+        return 0;
+    }
+
+    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    if (frame == NULL || !frame_in_sandbox_scope(&limits->registered_filenames, frame)) {
+        return 0;
+    }
+
+    limits->in_check = 1;
+    PyErr_Format(PyExc_SandboxAttributeError,
+                 "dunder attribute access blocked in sandbox: '%U'", name);
+    limits->in_check = 0;
+    return -1;
+}
+```
+
+### Dunder Name Detection
+
+A name is considered a "dunder" if it contains `__` anywhere (using `strstr`):
+
+```c
+static int
+is_dunder_name(PyObject *name)
+{
+    const char *str = PyUnicode_AsUTF8(name);
+    return strstr(str, "__") != NULL;
+}
+```
+
+---
+
+## Frozen Mode
+
+### Purpose
+
+Prevent all attribute mutations on objects, useful for ensuring sandboxed code cannot modify shared state. Supports both a global flag and per-object freeze/mutable overrides.
+
+### Global Frozen Mode
+
+When enabled via `sys.setsandboxfrozenmode(True)`, all attribute set/delete operations are blocked within sandbox scope unless the target object has the `Py_OBJFLAGS_MUTABLE` flag.
+
+### Per-Object Freezing
+
+Individual objects can be frozen with `sys.sandboxfreezeobject(obj)`, which sets `Py_OBJFLAGS_FROZEN` in `ob_flags`. This works independently of global frozen mode.
+
+### Mutable Override
+
+Objects can be marked as mutable with `sys.sandboxsetobjectmutable(obj)`, which sets `Py_OBJFLAGS_MUTABLE`. This overrides both global frozen mode and per-object freeze.
+
+### Priority Order
+
+1. **Mutable flag** (`Py_OBJFLAGS_MUTABLE`): If set, always allow mutations (fast exit)
+2. **Suspend state**: If sandbox is suspended, allow all mutations
+3. **Scope check**: Only enforce within sandbox scope
+4. **Per-instance frozen** (`Py_OBJFLAGS_FROZEN`): If set, block mutations
+5. **Global frozen mode**: If active, block mutations
+
+### Enforcement Points
+
+- `Objects/object.c` in `PyObject_GenericSetAttr()` and `PyObject_GenericSetDict()`
+- `Objects/typeobject.c` in `type_setattro()`
+- `Objects/descrobject.c` in descriptor set/delete
+
+### Check Function
+
+```c
+int
+_PySandbox_CheckFrozen(PyObject *obj)
+{
+    /* Fast path: mutable objects are always allowed */
+    if (Py_IS_MUTABLE(obj)) {
+        return 0;
+    }
+
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL || interp->sandbox.limits.suspended) {
+        return 0;
+    }
+
+    int obj_frozen = Py_IS_FROZEN(obj);
+    if (!obj_frozen && !interp->sandbox.frozen_mode) {
+        return 0;  /* No frozen restrictions exist */
+    }
+
+    /* Only enforce within sandbox scope */
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    if (!frame_in_sandbox_scope(&limits->registered_filenames, frame)) {
+        return 0;
+    }
+
+    if (obj_frozen) {
+        PyErr_Format(PyExc_SandboxAttributeError,
+                     "cannot modify frozen object '%.100s'",
+                     Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+
+    PyErr_Format(PyExc_SandboxAttributeError,
+                 "cannot modify '%.100s' object: sandbox frozen mode is active",
+                 Py_TYPE(obj)->tp_name);
+    return -1;
+}
+```
+
+---
+
+## Opcode Restrictions
+
+### Purpose
+
+Ban specific bytecode opcodes from executing within sandbox scope. This allows fine-grained control over what operations sandboxed code can perform (e.g., blocking `IMPORT_NAME`, `IMPORT_FROM`, `IMPORT_STAR` to prevent imports).
+
+### Configuration
+
+1. Set the banned opcodes: `sys.setsandboxbannedopcodes({opcode_int, ...})`
+2. Enable restriction mode: `sys.setsandboxopcoderestrictmode(True)`
+
+### Bitmap-Based Checking
+
+Banned opcodes are stored in a 256-bit bitmap (`_PySandboxOpcodeSet`) for O(1) lookup:
+
+```c
+typedef struct {
+    uint32_t bits[8];  /* 8 * 32 = 256 bits */
+} _PySandboxOpcodeSet;
+```
+
+### Enforcement Point
+
+`Python/ceval.c` in the `DO_TRACING` handler. The check runs for every opcode dispatch when tracing is active.
+
+### Fast Exits
+
+The check function has multiple fast exits to minimize overhead:
+
+```c
+int
+_PySandbox_CheckOpcode(int opcode)
+{
+    /* ... thread/interpreter state checks ... */
+
+    /* Fast exit: mode not active */
+    if (!sandbox->opcode_restrict_mode) return 0;
+
+    /* Fast exit: suspended or in recursive check */
+    if (limits->suspended || limits->in_check) return 0;
+
+    /* Fast exit: opcode not banned */
+    if (!_PySandbox_OpcodeSet_HAS(&sandbox->banned_opcodes, opcode)) return 0;
+
+    /* Check if in sandbox scope */
+    if (!frame_in_sandbox_scope(&limits->registered_filenames, frame)) return 0;
+
+    /* Banned opcode in sandbox scope - raise error */
+    limits->in_check = 1;
+    PyErr_Format(PyExc_SandboxRuntimeError,
+                 "Opcode %d is not allowed in sandbox scope", opcode);
+    limits->in_check = 0;
+    return -1;
 }
 ```
 
@@ -793,7 +1021,6 @@ type_call(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
     /* ... create object ... */
 
-    /* Call creation hook */
     obj = _PySandbox_CallCreationHook(obj, type, Py_OBJHOOK_TYPE_CALL);
     if (obj == NULL) {
         return NULL;  /* Hook raised exception */
@@ -831,17 +1058,11 @@ Temporarily bypass all limits for trusted code (e.g., during syscalls or stdlib 
 ### API
 
 ```python
-# Suspend limits (returns new suspend count)
 count = sys.suspendsandboxlimits()  # count = 1
-
-# Nested suspend
-count = sys.suspendsandboxlimits()  # count = 2
-
-# Resume (returns new suspend count)
+count = sys.suspendsandboxlimits()  # count = 2 (nested)
 count = sys.resumesandboxlimits()   # count = 1
 count = sys.resumesandboxlimits()   # count = 0, limits active again
 
-# Check if suspended
 if sys.issandboxsuspended():
     # Limits are bypassed
 ```
@@ -853,11 +1074,6 @@ int
 PySandbox_Suspend(void)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp == NULL) {
-        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
-        return -1;
-    }
-
     _PySandboxLimits *limits = &interp->sandbox.limits;
     limits->suspended++;
     return limits->suspended;
@@ -867,11 +1083,6 @@ int
 PySandbox_Resume(void)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp == NULL) {
-        PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
-        return -1;
-    }
-
     _PySandboxLimits *limits = &interp->sandbox.limits;
     if (limits->suspended > 0) {
         limits->suspended--;
@@ -888,6 +1099,8 @@ if (limits->suspended) {
 }
 ```
 
+Suspend also bypasses frozen mode checks and opcode restrictions.
+
 ---
 
 ## Integration Points
@@ -898,10 +1111,13 @@ if (limits->suspended) {
 |------|---------|
 | `Include/internal/pycore_sandbox.h` | Data structures and API declarations |
 | `Include/internal/pycore_interp.h` | Add `_PySandboxState sandbox` to `PyInterpreterState` |
+| `Include/object.h` | Add `ob_flags` field, `Py_OBJFLAGS_*` macros |
+| `Include/pyerrors.h` | Declare `PyExc_Sandbox*` exception types |
+| `Include/patchlevel.h` | Version string update (`3.11.14+sandbox`) |
 | `Python/sandbox.c` | Core implementation |
 | `Python/sysmodule.c` | Python API (sys module functions) |
-| `Python/pylifecycle.c` | Call `_PySandbox_Init()` / `_PySandbox_Fini()` |
-| `Python/ceval.c` | Statement tracing integration |
+| `Python/pystate.c` | State initialization |
+| `Python/ceval.c` | Statement tracing, opcode checking |
 | `Modules/gcmodule.c` | Allocation counting |
 | `Objects/longobject.c` | Integer size check |
 | `Objects/unicodeobject.c` | String length check |
@@ -912,7 +1128,15 @@ if (limits->suspended) {
 | `Objects/tupleobject.c` | Tuple size check |
 | `Objects/floatobject.c` | Float type check |
 | `Objects/complexobject.c` | Complex type check |
-| `Objects/typeobject.c` | Type check and creation hook |
+| `Objects/typeobject.c` | Type check, creation hook, frozen mode |
+| `Objects/object.c` | Frozen mode check on `GenericSetAttr` |
+| `Objects/abstract.c` | Dunder access check, iterator wrapping |
+| `Objects/descrobject.c` | Dunder access check, frozen mode |
+| `Objects/sliceobject.c` | Minor adjustment |
+| `Objects/exceptions.c` | Sandbox exception classes |
+| `Makefile.pre.in` | Build system (sandbox.c) |
+| `PCbuild/_freeze_module.vcxproj` | Windows build |
+| `PCbuild/pythoncore.vcxproj` | Windows build |
 
 ### PyInterpreterState Integration
 
@@ -921,37 +1145,18 @@ In `Include/internal/pycore_interp.h`:
 ```c
 struct _is {
     /* ... other fields ... */
-
     _PySandboxState sandbox;
-
     /* ... other fields ... */
 };
 ```
 
 ### Initialization
 
-In `Python/pylifecycle.c`:
+In `Python/pystate.c` / `Python/pylifecycle.c`:
 
 ```c
-static PyStatus
-new_interpreter(...)
-{
-    /* ... other initialization ... */
-
-    _PySandbox_Init(interp);
-
-    /* ... */
-}
-
-static void
-finalize_interp_clear(...)
-{
-    /* ... */
-
-    _PySandbox_Fini(interp);
-
-    /* ... */
-}
+_PySandbox_Init(interp);   /* During interpreter creation */
+_PySandbox_Fini(interp);   /* During interpreter finalization */
 ```
 
 ---
@@ -962,23 +1167,45 @@ finalize_interp_clear(...)
 
 | Function | Description |
 |----------|-------------|
-| `sys.setsandboxlimits(**kwargs)` | Set all limit values |
+| `sys.setsandboxlimits(**kwargs)` | Set all limit values (see parameters below) |
 | `sys.getsandboxlimits() -> dict` | Get current limit values |
 | `sys.getsandboxcounts() -> dict` | Get current counter values |
+
+**`setsandboxlimits` parameters:**
+- `max_int_digits` (int): Max internal integer digits. Default: 0 (no limit)
+- `max_str_length` (int): Max string length. Default: 0
+- `max_bytes_length` (int): Max bytes length. Default: 0
+- `max_list_size` (int): Max list size. Default: 0
+- `max_dict_size` (int): Max dict size. Default: 0
+- `max_set_size` (int): Max set size. Default: 0
+- `max_tuple_size` (int): Max tuple size. Default: 0
+- `global_max_allocations` (int): Max GC-tracked allocations total. Default: 0
+- `scope_max_statements` (int): Max statements in sandbox scope. Default: 0
+- `scope_max_allocations` (int): Max allocations in sandbox scope. Default: 0
+- `scope_max_iterations` (int): Max iterator steps in sandbox scope. Default: 0
+- `allow_float` (bool): Allow float creation. Default: True
+- `allow_complex` (bool): Allow complex creation. Default: True
+- `allow_dunder_access` (bool): Allow `__dunder__` attribute access. Default: True
+
+**`getsandboxcounts` returns:**
+- `global_allocation_count`: Total GC-tracked allocations
+- `scope_allocation_count`: Allocations within sandbox scope
+- `scope_statement_count`: Statements executed within sandbox scope
+- `scope_iteration_count`: Iterator steps within sandbox scope
 
 ### Counter Reset
 
 | Function | Description |
 |----------|-------------|
-| `sys.resetsandboxcounters()` | Reset all counters (global and scope) |
+| `sys.resetsandboxcounters()` | Reset all counters (global and scope) to 0 |
 
 ### Scope Management
 
 | Function | Description |
 |----------|-------------|
-| `sys.entersandboxscope()` | Add current frame's filename + reset counters |
+| `sys.entersandboxscope()` | Add current frame's filename + reset scope counters |
 | `sys.exitsandboxscope()` | Clear all registered filenames |
-| `sys.addsandboxframe()` | Add current frame's filename |
+| `sys.addsandboxframe()` | Add current frame's filename to registered set |
 | `sys.issandboxinscope() -> bool` | Check if current code is in scope |
 | `sys.addsandboxfilename(filename)` | Register a filename for tracking |
 | `sys.removesandboxfilename(filename)` | Remove a filename from tracking |
@@ -999,6 +1226,25 @@ finalize_interp_clear(...)
 | `sys.resumesandboxlimits() -> int` | Resume limits, return count |
 | `sys.issandboxsuspended() -> bool` | Check if suspended |
 
+### Frozen Mode
+
+| Function | Description |
+|----------|-------------|
+| `sys.setsandboxfrozenmode(enabled)` | Enable/disable global frozen mode |
+| `sys.getsandboxfrozenmode() -> bool` | Check if global frozen mode is active |
+| `sys.sandboxfreezeobject(obj)` | Freeze a specific object |
+| `sys.sandboxisobjectfrozen(obj) -> bool` | Check if object is individually frozen |
+| `sys.sandboxsetobjectmutable(obj, mutable=True)` | Mark object as mutable (overrides freeze) |
+
+### Opcode Restrictions
+
+| Function | Description |
+|----------|-------------|
+| `sys.setsandboxopcoderestrictmode(enabled)` | Enable/disable opcode restriction mode |
+| `sys.getsandboxopcoderestrictmode() -> bool` | Check if opcode restriction mode is active |
+| `sys.setsandboxbannedopcodes(opcode_set)` | Set banned opcodes (iterable of ints, or None) |
+| `sys.getsandboxbannedopcodes() -> frozenset` | Get currently banned opcodes |
+
 ---
 
 ## C API Reference
@@ -1016,6 +1262,10 @@ PyAPI_FUNC(int) _PySandbox_CheckTupleSize(Py_ssize_t size);
 PyAPI_FUNC(int) _PySandbox_CheckTypeAllowed(PyTypeObject *type);
 PyAPI_FUNC(int) _PySandbox_CheckAllocation(void);
 PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
+PyAPI_FUNC(int) _PySandbox_CheckIteration(void);
+PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
+PyAPI_FUNC(int) _PySandbox_CheckFrozen(PyObject *obj);
+PyAPI_FUNC(int) _PySandbox_CheckOpcode(int opcode);
 ```
 
 ### Scope Management
@@ -1036,11 +1286,11 @@ PyAPI_FUNC(void) _PySandbox_ClearFilenames(void);
 PyAPI_FUNC(void) _PySandbox_ResetCounters(void);
 ```
 
-### Initialization
+### Iterator Wrapper
 
 ```c
-PyAPI_FUNC(void) _PySandbox_Init(PyInterpreterState *interp);
-PyAPI_FUNC(void) _PySandbox_Fini(PyInterpreterState *interp);
+PyAPI_DATA(PyTypeObject) _PySandboxIteratorWrapper_Type;
+PyAPI_FUNC(PyObject *) _PySandbox_WrapIterator(PyObject *iter);
 ```
 
 ### Object Creation Hook
@@ -1048,6 +1298,13 @@ PyAPI_FUNC(void) _PySandbox_Fini(PyInterpreterState *interp);
 ```c
 PyAPI_FUNC(PyObject *) _PySandbox_CallCreationHook(
     PyObject *obj, PyTypeObject *type, int flags);
+```
+
+### Initialization
+
+```c
+PyAPI_FUNC(void) _PySandbox_Init(PyInterpreterState *interp);
+PyAPI_FUNC(void) _PySandbox_Fini(PyInterpreterState *interp);
 ```
 
 ### Suspend/Resume
@@ -1058,6 +1315,25 @@ PyAPI_FUNC(int) PySandbox_Resume(void);
 PyAPI_FUNC(int) PySandbox_IsSuspended(void);
 ```
 
+### Frozen Mode
+
+```c
+PyAPI_FUNC(void) PySandbox_SetFrozenMode(int mode);
+PyAPI_FUNC(int) PySandbox_GetFrozenMode(void);
+PyAPI_FUNC(void) PySandbox_FreezeObject(PyObject *obj);
+PyAPI_FUNC(int) PySandbox_IsObjectFrozen(PyObject *obj);
+PyAPI_FUNC(void) PySandbox_SetObjectMutable(PyObject *obj, int mutable);
+```
+
+### Opcode Restrictions
+
+```c
+PyAPI_FUNC(void) PySandbox_SetOpcodeRestrictMode(int mode);
+PyAPI_FUNC(int) PySandbox_GetOpcodeRestrictMode(void);
+PyAPI_FUNC(int) PySandbox_SetBannedOpcodes(PyObject *opcode_set);
+PyAPI_FUNC(PyObject *) PySandbox_GetBannedOpcodes(void);
+```
+
 ---
 
 ## Implementation Files
@@ -1065,33 +1341,57 @@ PyAPI_FUNC(int) PySandbox_IsSuspended(void);
 ### Complete File Listing
 
 ```
-Include/internal/
-├── pycore_sandbox.h      # Data structures, API declarations
-└── pycore_interp.h       # Modified: add sandbox field
+Include/
+  object.h                  # Modified: add ob_flags, Py_OBJFLAGS_* macros
+  pyerrors.h                # Modified: declare PyExc_Sandbox* exceptions
+  patchlevel.h              # Modified: version string
+  internal/
+    pycore_sandbox.h        # Data structures, API declarations (NEW FILE)
+    pycore_interp.h         # Modified: add sandbox field
+    pycore_pystate.h        # Modified: tracing state
 
 Python/
-├── sandbox.c             # Core implementation (NEW FILE)
-├── sysmodule.c           # Modified: add sys.* functions
-├── pylifecycle.c         # Modified: init/fini calls
-└── ceval.c               # Modified: statement tracing
+  sandbox.c                 # Core implementation (NEW FILE, ~1600 lines)
+  sysmodule.c               # Modified: add sys.* functions (~600 lines added)
+  pystate.c                 # Modified: initialization
+  ceval.c                   # Modified: statement tracing, opcode checking
 
 Modules/
-└── gcmodule.c            # Modified: allocation counting
+  gcmodule.c                # Modified: allocation counting
 
 Objects/
-├── longobject.c          # Modified: int size check
-├── unicodeobject.c       # Modified: string length check
-├── bytesobject.c         # Modified: bytes length check
-├── listobject.c          # Modified: list size check
-├── dictobject.c          # Modified: dict size check
-├── setobject.c           # Modified: set size check
-├── tupleobject.c         # Modified: tuple size check
-├── floatobject.c         # Modified: type check
-├── complexobject.c       # Modified: type check
-└── typeobject.c          # Modified: type check, creation hook
+  longobject.c              # Modified: int size check
+  unicodeobject.c           # Modified: string length check
+  bytesobject.c             # Modified: bytes length check
+  listobject.c              # Modified: list size check
+  dictobject.c              # Modified: dict size check
+  setobject.c               # Modified: set size check
+  tupleobject.c             # Modified: tuple size check
+  floatobject.c             # Modified: type check
+  complexobject.c           # Modified: type check (NEW FILE for check)
+  typeobject.c              # Modified: type check, creation hook, frozen mode
+  object.c                  # Modified: frozen mode check
+  abstract.c                # Modified: dunder access check, iterator wrapping
+  descrobject.c             # Modified: dunder access check, frozen mode
+  sliceobject.c             # Modified: minor adjustment
+  exceptions.c              # Modified: sandbox exception classes
 
-Lib/test/
-└── test_sandbox.py       # Test suite (NEW FILE)
+Build System/
+  Makefile.pre.in           # Modified: add sandbox.c
+  PCbuild/_freeze_module.vcxproj    # Modified: Windows build
+  PCbuild/pythoncore.vcxproj        # Modified: Windows build
+
+Lib/test/test_sandbox/     # Test package (NEW)
+  __init__.py               # Package init, shared helpers
+  test_limits.py            # API basics, type/size limits, suspend/resume
+  test_hooks.py             # Object creation hooks
+  test_allocations.py       # Global and scoped allocation counting
+  test_scope.py             # Scope management and statement counting
+  test_iterations.py        # Iteration counting and iterator wrapper
+  test_dunder_access.py     # Dunder attribute blocking
+  test_frozen_mode.py       # Frozen mode (global and per-object)
+  test_integration.py       # Integration tests
+  test_opcodes.py           # Opcode restrictions
 ```
 
 ---
@@ -1102,28 +1402,40 @@ Lib/test/
 
 1. **Add header file**
    - [ ] Create `Include/internal/pycore_sandbox.h`
-   - [ ] Define all data structures
+   - [ ] Define all data structures (`_PySandboxLimits`, `_PySandboxState`, `_PySandboxOpcodeSet`, etc.)
    - [ ] Define API function declarations
 
-2. **Modify interpreter state**
+2. **Add object flags**
+   - [ ] Add `uint32_t ob_flags` to `PyObject` in `Include/object.h`
+   - [ ] Define `Py_OBJFLAGS_FROZEN` and `Py_OBJFLAGS_MUTABLE` macros
+
+3. **Add sandbox exceptions**
+   - [ ] Declare `PyExc_Sandbox*` in `Include/pyerrors.h`
+   - [ ] Define exception classes in `Objects/exceptions.c`
+   - [ ] Register in the exception hierarchy (Level 3 under Exception)
+
+4. **Modify interpreter state**
    - [ ] Add `_PySandboxState sandbox` to `PyInterpreterState` in `pycore_interp.h`
 
-3. **Create implementation**
-   - [ ] Create `Python/sandbox.c`
+5. **Create implementation**
+   - [ ] Create `Python/sandbox.c` (~1600 lines)
    - [ ] Implement all check functions
    - [ ] Implement scope management
+   - [ ] Implement iterator wrapper
+   - [ ] Implement frozen mode checks
+   - [ ] Implement opcode restriction checks
    - [ ] Implement hooks
    - [ ] Implement suspend/resume
 
-4. **Add Python API**
-   - [ ] Add all `sys.*` functions to `Python/sysmodule.c`
+6. **Add Python API**
+   - [ ] Add all `sys.*` functions to `Python/sysmodule.c` (~600 lines)
    - [ ] Add method table entries
 
-5. **Add initialization**
-   - [ ] Call `_PySandbox_Init()` in `Python/pylifecycle.c`
+7. **Add initialization**
+   - [ ] Call `_PySandbox_Init()` in interpreter creation
    - [ ] Call `_PySandbox_Fini()` in finalization
 
-6. **Integrate limit checks**
+8. **Integrate limit checks**
    - [ ] `Objects/longobject.c`: `_PySandbox_CheckIntSize()`
    - [ ] `Objects/unicodeobject.c`: `_PySandbox_CheckStrLength()`
    - [ ] `Objects/bytesobject.c`: `_PySandbox_CheckBytesLength()`
@@ -1131,20 +1443,35 @@ Lib/test/
    - [ ] `Objects/dictobject.c`: `_PySandbox_CheckDictSize()`
    - [ ] `Objects/setobject.c`: `_PySandbox_CheckSetSize()`
    - [ ] `Objects/tupleobject.c`: `_PySandbox_CheckTupleSize()`
-   - [ ] `Objects/typeobject.c`: `_PySandbox_CheckTypeAllowed()`, hook
+   - [ ] `Objects/typeobject.c`: `_PySandbox_CheckTypeAllowed()`, hook, frozen
+   - [ ] `Objects/floatobject.c`: `_PySandbox_CheckTypeAllowed()`
+   - [ ] `Objects/complexobject.c`: `_PySandbox_CheckTypeAllowed()`
+   - [ ] `Objects/object.c`: `_PySandbox_CheckFrozen()`
+   - [ ] `Objects/abstract.c`: `_PySandbox_CheckDunderAccess()`, `_PySandbox_WrapIterator()`
+   - [ ] `Objects/descrobject.c`: `_PySandbox_CheckDunderAccess()`, `_PySandbox_CheckFrozen()`
 
-7. **Integrate allocation counting**
+9. **Integrate allocation counting**
    - [ ] `Modules/gcmodule.c`: `_PySandbox_CheckAllocation()`
 
-8. **Integrate statement tracing**
-   - [ ] `Python/ceval.c`: `_PySandbox_CheckScopeStatement()`
+10. **Integrate statement tracing and opcode checking**
+    - [ ] `Python/ceval.c`: `_PySandbox_CheckScopeStatement()`, `_PySandbox_CheckOpcode()`
 
-9. **Add tests**
-   - [ ] Create `Lib/test/test_sandbox.py`
-   - [ ] Test all limit types
-   - [ ] Test scope management
-   - [ ] Test hooks
-   - [ ] Test suspend/resume
+11. **Update build system**
+    - [ ] `Makefile.pre.in`: Add `sandbox.c` to PYTHON_OBJS
+    - [ ] `PCbuild/pythoncore.vcxproj`: Add sandbox.c
+    - [ ] `PCbuild/_freeze_module.vcxproj`: Add pycore_sandbox.h
+
+12. **Add tests**
+    - [ ] Create `Lib/test/test_sandbox/` package
+    - [ ] Test all limit types
+    - [ ] Test scope management
+    - [ ] Test iteration limits
+    - [ ] Test dunder access control
+    - [ ] Test frozen mode
+    - [ ] Test opcode restrictions
+    - [ ] Test hooks
+    - [ ] Test suspend/resume
+    - [ ] Test exception hierarchy
 
 ### Version-Specific Changes
 
@@ -1168,167 +1495,51 @@ Verify:
 - Interpreter state structure
 - GC module allocation paths
 - Line tracing mechanism
+- `_PyFrame_IsIncomplete` availability
 
 ---
 
 ## Testing
 
-### Test File
+### Test Package
 
-`Lib/test/test_sandbox.py`
+`Lib/test/test_sandbox/` -- tests split by feature domain.
 
-### Test Categories
+### Test Modules
 
-1. **Limit Tests**
-   - `SandboxLimitsTests`: Basic get/set
-   - `IntegerLimitsTests`: Integer size limits
-   - `StringLimitsTests`: String length limits
-   - `ListLimitsTests`: List size limits
-   - `DictLimitsTests`: Dict size limits
-   - `SetLimitsTests`: Set size limits
-   - `TupleLimitsTests`: Tuple size limits
-   - `TypeRestrictionTests`: Float/complex restrictions
+| Module | Description |
+|--------|-------------|
+| `test_limits.py` | API basics, type/size limits, suspend/resume |
+| `test_hooks.py` | Object creation hook functionality |
+| `test_allocations.py` | Global and scoped allocation counting |
+| `test_scope.py` | Scope management, statement counting, filename tracking |
+| `test_iterations.py` | Iteration counting and iterator wrapper protection |
+| `test_dunder_access.py` | Dunder attribute blocking |
+| `test_frozen_mode.py` | Global and per-object frozen mode |
+| `test_integration.py` | Combined functionality |
+| `test_opcodes.py` | Opcode restriction mode |
 
-2. **Allocation Tests**
-   - `GlobalAllocationCountLimitsTests`: Global allocation limits
-   - `ScopedAllocationCountTests`: Scoped allocation limits
+### Shared Test Infrastructure
 
-3. **Statement Tests**
-   - `ScopedStatementCountTests`: Statement counting and limits
-
-4. **Scope Tests**
-   - `SandboxScopeTests`: Basic scope enter/exit
-   - `SelectedFramesScopeTests`: Frame-based scope (legacy)
-   - `FilenameBasedScopeTests`: Filename-based scope
-
-5. **Hook Tests**
-   - `ObjectCreationHookTests`: Creation hook functionality
-
-6. **Suspend Tests**
-   - `SuspendResumeLimitsTests`: Suspend/resume behavior
-
-7. **Integration Tests**
-   - `IntegrationTests`: Combined functionality
-   - `MinimalSafeLimitsTests`: Recommended limits
+`__init__.py` provides shared helpers:
+- `_run_sandboxed_code(code)`: Run code in a subprocess with sandbox limits
+- `_get_settable_limits()`: Get current limits for restoring in tearDown
+- `SUBPROCESS_TIMEOUT`: Default timeout for subprocess tests (10 seconds)
+- Test limit constants (`TEST_LIST_LIMIT`, `TEST_STR_LIMIT`, etc.)
 
 ### Running Tests
 
 ```bash
-./python -m unittest test.test_sandbox -v
-```
+# Run all sandbox tests
+./python -m pytest Lib/test/test_sandbox/ -v
 
-### Expected Results
+# Run with unittest
+./python -m unittest discover -s Lib/test/test_sandbox -v
 
-All 70+ tests should pass:
-
-```
-----------------------------------------------------------------------
-Ran 70 tests in 0.XXXs
-
-OK
-```
-
----
-
-## Usage Examples
-
-### Basic Sandboxing
-
-```python
-import sys
-
-# Set conservative limits
-sys.setsandboxlimits(
-    max_int_digits=100,           # ~10^900
-    max_str_length=100000,        # 100KB
-    max_bytes_length=100000,      # 100KB
-    max_list_size=10000,
-    max_dict_size=10000,
-    max_set_size=10000,
-    max_tuple_size=10000,
-    scope_max_statements=100000,  # 100K statements
-    scope_max_allocations=10000,  # 10K allocations
-)
-
-# Register sandbox filename
-sys.addsandboxfilename("<user-code>")
-
-# Execute user code
-user_code = """
-result = []
-for i in range(100):
-    result.append(i * 2)
-"""
-
-try:
-    exec(compile(user_code, "<user-code>", "exec"))
-except (OverflowError, MemoryError, RuntimeError) as e:
-    print(f"Limit exceeded: {e}")
-finally:
-    sys.clearsandboxfilenames()
-```
-
-### Multi-Module Sandbox
-
-```python
-import sys
-
-sys.setsandboxlimits(scope_max_statements=50000)
-
-# Register multiple modules
-sys.addsandboxfilename("<sandbox-core>")
-sys.addsandboxfilename("<sandbox-utils>")
-
-# Core module
-exec(compile("""
-class Processor:
-    def process(self, data):
-        return [x * 2 for x in data]
-""", "<sandbox-core>", "exec"))
-
-# Utils module
-exec(compile("""
-def helper(x):
-    return x + 1
-""", "<sandbox-utils>", "exec"))
-
-# Main code
-exec(compile("""
-p = Processor()
-result = p.process([helper(i) for i in range(10)])
-""", "<sandbox-core>", "exec"))
-
-print(sys.getsandboxcounts())
-sys.clearsandboxfilenames()
-```
-
-### Monitoring Object Creation
-
-```python
-import sys
-
-created_types = {}
-
-def monitor_hook(obj, type_, frame, context):
-    name = type_.__name__
-    created_types[name] = created_types.get(name, 0) + 1
-    return obj
-
-sys.setobjectcreationhook(monitor_hook)
-
-# Run some code
-exec("""
-class Foo:
-    pass
-class Bar:
-    pass
-x = Foo()
-y = Bar()
-z = Foo()
-""")
-
-sys.setobjectcreationhook(None)
-print(created_types)  # {'Foo': 2, 'Bar': 1, ...}
+# Run a specific test module
+./python -m unittest test.test_sandbox.test_limits -v
+./python -m unittest test.test_sandbox.test_frozen_mode -v
+./python -m unittest test.test_sandbox.test_opcodes -v
 ```
 
 ---
@@ -1341,20 +1552,25 @@ For executing untrusted code, these limits provide protection while allowing rea
 sys.setsandboxlimits(
     # Data size limits
     max_int_digits=100,           # Integers up to ~10^900
-    max_str_length=1_000_000,     # 1MB strings
-    max_bytes_length=1_000_000,   # 1MB bytes
-    max_list_size=100_000,        # 100K list items
-    max_dict_size=100_000,        # 100K dict entries
-    max_set_size=100_000,         # 100K set members
-    max_tuple_size=100_000,       # 100K tuple items
+    max_str_length=100_000,       # 100KB strings
+    max_bytes_length=100_000,     # 100KB bytes
+    max_list_size=1_000_000,      # 1M list items
+    max_dict_size=1_000_000,      # 1M dict entries
+    max_set_size=1_000_000,       # 1M set members
+    max_tuple_size=1_000_000,     # 1M tuple items
 
     # Execution limits (scoped)
-    scope_max_statements=1_000_000,   # 1M statements
-    scope_max_allocations=100_000,    # 100K allocations
+    scope_max_statements=100_000,     # 100K statements
+    scope_max_allocations=10_000,     # 10K allocations
+    scope_max_iterations=1_000_000,   # 1M iterator steps
+
+    # Global limits
+    global_max_allocations=1_000_000, # 1M total allocations
 
     # Type restrictions (optional)
     allow_float=True,
     allow_complex=True,
+    allow_dunder_access=False,    # Block introspection escapes
 )
 ```
 

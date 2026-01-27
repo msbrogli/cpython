@@ -2003,7 +2003,7 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
         "max_int_digits", "max_str_length", "max_bytes_length",
         "max_list_size", "max_dict_size", "max_set_size", "max_tuple_size",
         "global_max_allocations", "scope_max_statements", "scope_max_allocations",
-        "scope_max_iterations", "allow_float", "allow_complex", NULL
+        "scope_max_iterations", "allow_float", "allow_complex", "allow_dunder_access", NULL
     };
 
     Py_ssize_t max_int_digits = 0;
@@ -2019,15 +2019,16 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     unsigned long long scope_max_iterations = 0;
     int allow_float = 1;
     int allow_complex = 1;
+    int allow_dunder_access = 1;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKKpp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKKppp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
                                      &max_tuple_size, &global_max_allocations,
                                      &scope_max_statements, &scope_max_allocations,
                                      &scope_max_iterations,
-                                     &allow_float, &allow_complex)) {
+                                     &allow_float, &allow_complex, &allow_dunder_access)) {
         return NULL;
     }
 
@@ -2057,6 +2058,7 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     limits->scope_max_iterations = scope_max_iterations;
     limits->allow_float = allow_float;
     limits->allow_complex = allow_complex;
+    limits->allow_dunder_access = allow_dunder_access;
 
     /* Update tracing state since scope_max_statements may have changed */
     _PyThreadState_UpdateTracingState(tstate);
@@ -2070,7 +2072,8 @@ PyDoc_STRVAR(setsandboxlimits_doc,
                  max_tuple_size=0, global_max_allocations=0,\n\
                  scope_max_statements=0, scope_max_allocations=0,\n\
                  scope_max_iterations=0,\n\
-                 allow_float=True, allow_complex=True)\n\
+                 allow_float=True, allow_complex=True,\n\
+                 allow_dunder_access=True)\n\
 \n\
 Set sandbox limits for the current interpreter.\n\
 A value of 0 means no limit. Set allow_float/allow_complex to False to\n\
@@ -2114,7 +2117,7 @@ sys_getsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    return Py_BuildValue("{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:K, s:O, s:O}",
+    return Py_BuildValue("{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:K, s:O, s:O, s:O}",
                          "max_int_digits", limits->max_int_digits,
                          "max_str_length", limits->max_str_length,
                          "max_bytes_length", limits->max_bytes_length,
@@ -2127,7 +2130,8 @@ sys_getsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
                          "scope_max_allocations", (unsigned long long)limits->scope_max_allocations,
                          "scope_max_iterations", (unsigned long long)limits->scope_max_iterations,
                          "allow_float", limits->allow_float ? Py_True : Py_False,
-                         "allow_complex", limits->allow_complex ? Py_True : Py_False);
+                         "allow_complex", limits->allow_complex ? Py_True : Py_False,
+                         "allow_dunder_access", limits->allow_dunder_access ? Py_True : Py_False);
 }
 
 PyDoc_STRVAR(getsandboxlimits_doc,

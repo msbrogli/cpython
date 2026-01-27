@@ -58,6 +58,7 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.limits.allow_complex = 1;
     interp->sandbox.limits.in_check = 0;
     interp->sandbox.limits.suspended = 0;
+    interp->sandbox.limits.allow_dunder_access = 1;
 
     interp->sandbox.creation_hook.hook_func = NULL;
     interp->sandbox.creation_hook.hook_userdata = NULL;
@@ -653,6 +654,65 @@ _PySandbox_CheckIteration(void)
     }
 
     return 0;
+}
+
+/* ============ Dunder Access Checking ============ */
+
+/* Check if a name contains "__" (dunder pattern) */
+static int
+is_dunder_name(PyObject *name)
+{
+    if (!PyUnicode_Check(name)) {
+        return 0;
+    }
+    const char *str = PyUnicode_AsUTF8(name);
+    if (str == NULL) {
+        PyErr_Clear();
+        return 0;
+    }
+    return strstr(str, "__") != NULL;
+}
+
+/* _PySandbox_CheckDunderAccess - Check if dunder attribute access is blocked
+ *
+ * This function is called from ceval.c for LOAD_ATTR, STORE_ATTR, DELETE_ATTR.
+ * It blocks access to attributes containing "__" when:
+ * - allow_dunder_access is disabled (0)
+ * - Sandbox is not suspended and not in recursive check
+ * - At least one filename is registered for scope tracking
+ * - Current frame's co_filename matches a registered filename
+ *
+ * Returns: 0 if access allowed, -1 if blocked (AttributeError set)
+ */
+int
+_PySandbox_CheckDunderAccess(PyObject *name)
+{
+    _PySandboxLimits *limits = get_sandbox_limits();
+    if (limits == NULL || limits->allow_dunder_access ||
+        limits->in_check || limits->suspended) {
+        return 0;
+    }
+
+    if (!is_dunder_name(name)) {
+        return 0;
+    }
+
+    /* Check if in sandbox scope */
+    if (limits->registered_filenames.count == 0) {
+        return 0;
+    }
+
+    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    if (frame == NULL || !frame_in_sandbox_scope(&limits->registered_filenames, frame)) {
+        return 0;
+    }
+
+    /* Block dunder access */
+    limits->in_check = 1;
+    PyErr_Format(PyExc_AttributeError,
+                 "dunder attribute access blocked in sandbox: '%U'", name);
+    limits->in_check = 0;
+    return -1;
 }
 
 /* ============ Sandbox Scope Management ============ */

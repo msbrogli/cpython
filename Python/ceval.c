@@ -2879,6 +2879,9 @@ handle_eval_breaker:
             PyObject *owner = TOP();
             PyObject *v = SECOND();
             int err;
+            if (_PySandbox_CheckDunderAccess(name) < 0) {
+                goto error;
+            }
             STACK_SHRINK(2);
             err = PyObject_SetAttr(owner, name, v);
             Py_DECREF(v);
@@ -2894,6 +2897,10 @@ handle_eval_breaker:
             PyObject *name = GETITEM(names, oparg);
             PyObject *owner = POP();
             int err;
+            if (_PySandbox_CheckDunderAccess(name) < 0) {
+                Py_DECREF(owner);
+                goto error;
+            }
             err = PyObject_SetAttr(owner, name, (PyObject *)NULL);
             Py_DECREF(owner);
             if (err != 0)
@@ -3459,6 +3466,9 @@ handle_eval_breaker:
             PREDICTED(LOAD_ATTR);
             PyObject *name = GETITEM(names, oparg);
             PyObject *owner = TOP();
+            if (_PySandbox_CheckDunderAccess(name) < 0) {
+                goto error;
+            }
             PyObject *res = PyObject_GetAttr(owner, name);
             if (res == NULL) {
                 goto error;
@@ -4334,6 +4344,10 @@ handle_eval_breaker:
             _py_stats.opcode_stats[FOR_ITER].specialization.failure++;
             _py_stats.opcode_stats[FOR_ITER].specialization.failure_kinds[_PySpecialization_ClassifyIterator(iter)]++;
 #endif
+            /* Check iteration limits before advancing iterator */
+            if (_PySandbox_CheckIteration() < 0) {
+                goto error;
+            }
             PyObject *next = (*Py_TYPE(iter)->tp_iternext)(iter);
             if (next != NULL) {
                 PUSH(next);

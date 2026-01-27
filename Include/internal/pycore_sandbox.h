@@ -83,6 +83,9 @@ typedef struct {
     /* Suspend counter - when > 0, all limits are bypassed.
        Use PySandbox_Suspend/Resume for nested suspend/resume. */
     int suspended;
+
+    /* Allow access to dunder attributes (names containing __) */
+    int allow_dunder_access;     /* 1 = allowed (default), 0 = block __ attributes */
 } _PySandboxLimits;
 
 /* Default values (no limits) */
@@ -107,6 +110,7 @@ typedef struct {
     .allow_complex = 1,             \
     .in_check = 0,                  \
     .suspended = 0,                 \
+    .allow_dunder_access = 1,       \
 }
 
 /* Object creation hook flags */
@@ -194,6 +198,9 @@ PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
 
 /* Scoped iteration checking - returns -1 and sets exception when limit exceeded */
 PyAPI_FUNC(int) _PySandbox_CheckIteration(void);
+
+/* Check dunder attribute access - returns -1 and sets exception when blocked */
+PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
 
 /* Sandbox scope management */
 PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */

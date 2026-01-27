@@ -121,10 +121,10 @@ class IntegerLimitsTests(unittest.TestCase):
         self.assertEqual(x, 12345)
 
     def test_large_integers_blocked(self):
-        """Large integers exceeding limit should raise OverflowError."""
+        """Large integers exceeding limit should raise SandboxOverflowError."""
         sys.setsandboxlimits(max_int_digits=TEST_INT_DIGITS_LIMIT)
         # 10^50 requires about 6 internal digits
-        with self.assertRaises(OverflowError) as cm:
+        with self.assertRaises(SandboxOverflowError) as cm:
             x = 10 ** 50
         self.assertIn("sandbox limit", str(cm.exception))
 
@@ -151,9 +151,9 @@ class StringLimitsTests(unittest.TestCase):
         self.assertEqual(s, "hello world")
 
     def test_large_strings_blocked(self):
-        """Large strings exceeding limit should raise OverflowError."""
+        """Large strings exceeding limit should raise SandboxOverflowError."""
         sys.setsandboxlimits(max_str_length=TEST_STR_LIMIT)
-        with self.assertRaises(OverflowError) as cm:
+        with self.assertRaises(SandboxOverflowError) as cm:
             # Use join to trigger PyUnicode_New
             s = ''.join(['x' for _ in range(200)])
         self.assertIn("sandbox limit", str(cm.exception))
@@ -175,10 +175,10 @@ class ListLimitsTests(unittest.TestCase):
         self.assertEqual(len(lst), 5)
 
     def test_large_lists_blocked(self):
-        """Large lists exceeding limit via append should raise OverflowError."""
+        """Large lists exceeding limit via append should raise SandboxOverflowError."""
         sys.setsandboxlimits(max_list_size=100)
         lst = []
-        with self.assertRaises(OverflowError) as cm:
+        with self.assertRaises(SandboxOverflowError) as cm:
             for i in range(150):
                 lst.append(i)
         self.assertIn("sandbox limit", str(cm.exception))
@@ -200,10 +200,10 @@ class DictLimitsTests(unittest.TestCase):
         self.assertEqual(len(d), 2)
 
     def test_large_dicts_blocked(self):
-        """Large dicts exceeding limit should raise OverflowError."""
+        """Large dicts exceeding limit should raise SandboxOverflowError."""
         sys.setsandboxlimits(max_dict_size=TEST_DICT_LIMIT)
         d = {}
-        with self.assertRaises(OverflowError) as cm:
+        with self.assertRaises(SandboxOverflowError) as cm:
             for i in range(600):
                 d[i] = i
         self.assertIn("sandbox limit", str(cm.exception))
@@ -225,10 +225,10 @@ class SetLimitsTests(unittest.TestCase):
         self.assertEqual(len(s), 3)
 
     def test_large_sets_blocked(self):
-        """Large sets exceeding limit should raise OverflowError."""
+        """Large sets exceeding limit should raise SandboxOverflowError."""
         sys.setsandboxlimits(max_set_size=TEST_SET_LIMIT)
         s = set()
-        with self.assertRaises(OverflowError) as cm:
+        with self.assertRaises(SandboxOverflowError) as cm:
             for i in range(600):
                 s.add(i)
         self.assertIn("sandbox limit", str(cm.exception))
@@ -250,9 +250,9 @@ class TupleLimitsTests(unittest.TestCase):
         self.assertEqual(len(t), 5)
 
     def test_large_tuples_blocked(self):
-        """Large tuples exceeding limit should raise OverflowError."""
+        """Large tuples exceeding limit should raise SandboxOverflowError."""
         sys.setsandboxlimits(max_tuple_size=TEST_TUPLE_LIMIT)
-        with self.assertRaises(OverflowError) as cm:
+        with self.assertRaises(SandboxOverflowError) as cm:
             t = tuple(range(600))
         self.assertIn("sandbox limit", str(cm.exception))
 
@@ -272,9 +272,9 @@ class TypeRestrictionTests(unittest.TestCase):
         self.assertEqual(f, 1.0)
 
     def test_float_blocked_when_disabled(self):
-        """Float creation should raise TypeError when disabled."""
+        """Float creation should raise SandboxTypeError when disabled."""
         sys.setsandboxlimits(allow_float=False)
-        with self.assertRaises(TypeError) as cm:
+        with self.assertRaises(SandboxTypeError) as cm:
             f = float(1)
         self.assertIn("forbidden", str(cm.exception))
 
@@ -284,9 +284,9 @@ class TypeRestrictionTests(unittest.TestCase):
         self.assertEqual(c, 1+2j)
 
     def test_complex_blocked_when_disabled(self):
-        """Complex creation should raise TypeError when disabled."""
+        """Complex creation should raise SandboxTypeError when disabled."""
         sys.setsandboxlimits(allow_complex=False)
-        with self.assertRaises(TypeError) as cm:
+        with self.assertRaises(SandboxTypeError) as cm:
             c = complex(1, 2)
         self.assertIn("forbidden", str(cm.exception))
 
@@ -402,11 +402,11 @@ class MinimalSafeLimitsTests(unittest.TestCase):
         sys.setsandboxlimits(**self.MINIMAL_LIMITS)
 
         # Should block very large integers
-        with self.assertRaises(OverflowError):
+        with self.assertRaises(SandboxOverflowError):
             x = 10 ** 1000  # Requires ~110 internal digits
 
         # Should block very long strings
-        with self.assertRaises(OverflowError):
+        with self.assertRaises(SandboxOverflowError):
             s = ''.join(['x' for _ in range(200000)])
 
 
@@ -427,7 +427,7 @@ class SuspendResumeLimitsTests(unittest.TestCase):
         sys.setsandboxlimits(max_list_size=10)
 
         # Should fail with limits active
-        with self.assertRaises(OverflowError):
+        with self.assertRaises(SandboxOverflowError):
             list(range(20))
 
         # Suspend and try again
@@ -452,7 +452,7 @@ class SuspendResumeLimitsTests(unittest.TestCase):
         self.assertFalse(sys.issandboxsuspended())
 
         # Should fail again
-        with self.assertRaises(OverflowError):
+        with self.assertRaises(SandboxOverflowError):
             list(range(20))
 
     def test_nested_suspend_resume(self):
@@ -483,7 +483,7 @@ class SuspendResumeLimitsTests(unittest.TestCase):
         self.assertFalse(sys.issandboxsuspended())
 
         # Should fail now
-        with self.assertRaises(OverflowError):
+        with self.assertRaises(SandboxOverflowError):
             list(range(20))
 
 
@@ -521,7 +521,7 @@ class GlobalAllocationCountLimitsTests(unittest.TestCase):
         self.assertGreater(count, 0)
 
     def test_exceeding_global_allocation_limit_raises_memory_error(self):
-        """Exceeding global allocation limit should raise MemoryError."""
+        """Exceeding global allocation limit should raise SandboxMemoryError."""
         # Use a higher limit to allow for error handling allocations
         code = '''
 import sys
@@ -532,20 +532,20 @@ try:
     for i in range(2000):
         a = [a]
     sys.exit(2)  # Should not reach here
-except MemoryError:
-    sys.exit(0)  # Successfully caught MemoryError
+except SandboxMemoryError:
+    sys.exit(0)  # Successfully caught SandboxMemoryError
 '''
         result = _run_sandboxed_code(code)
         # The process should complete (not hang) and either:
-        # - Return 0 (caught MemoryError successfully)
-        # - Return non-zero with MemoryError indication (error handling failed)
+        # - Return 0 (caught SandboxMemoryError successfully)
+        # - Return non-zero with SandboxMemoryError indication (error handling failed)
         if result.returncode == 0:
             return  # Test passed
         if result.returncode == 2:
-            self.fail("MemoryError was not raised")
-        # If it exited with error, check that MemoryError was involved
-        self.assertIn("MemoryError", result.stderr,
-                      f"Expected MemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
+            self.fail("SandboxMemoryError was not raised")
+        # If it exited with error, check that SandboxMemoryError was involved
+        self.assertIn("SandboxMemoryError", result.stderr,
+                      f"Expected SandboxMemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_reset_global_allocation_count(self):
         """resetsandboxcounters should reset global allocation counter to 0."""
@@ -687,7 +687,7 @@ sys.exit(0 if counts['scope_statement_count'] > 0 else 1)
                         f"Statement counting failed: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_exceeding_statement_limit_raises_runtime_error(self):
-        """Exceeding statement limit should raise RuntimeError."""
+        """Exceeding statement limit should raise SandboxRuntimeError."""
         # With ancestry-based scope, exec'd code is counted because it shares
         # the same co_filename ("<string>") as the selected frame
         code = '''
@@ -701,7 +701,7 @@ for _ in range(100):
     x = 1
 """)
     sys.exit(2)  # Should not reach here
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "statement limit" in str(e):
         sys.exit(0)  # Expected error
     sys.exit(3)  # Wrong error message
@@ -778,7 +778,7 @@ class ScopedAllocationCountTests(unittest.TestCase):
         self.assertGreater(count, 50)
 
     def test_exceeding_scoped_allocation_limit_raises_memory_error(self):
-        """Exceeding scoped allocation limit should raise MemoryError."""
+        """Exceeding scoped allocation limit should raise SandboxMemoryError."""
         import subprocess
         code = '''
 import sys
@@ -789,8 +789,8 @@ try:
     for i in range(1200):
         a = [a]
     sys.exit(2)  # Should not reach here
-except MemoryError:
-    sys.exit(0)  # Successfully caught MemoryError
+except SandboxMemoryError:
+    sys.exit(0)  # Successfully caught SandboxMemoryError
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -801,10 +801,10 @@ except MemoryError:
         if result.returncode == 0:
             return  # Test passed
         if result.returncode == 2:
-            self.fail("MemoryError was not raised")
-        # If it exited with error, check that MemoryError was involved
-        self.assertIn("MemoryError", result.stderr,
-                      f"Expected MemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
+            self.fail("SandboxMemoryError was not raised")
+        # If it exited with error, check that SandboxMemoryError was involved
+        self.assertIn("SandboxMemoryError", result.stderr,
+                      f"Expected SandboxMemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_reset_scope_allocation_count(self):
         """resetsandboxcounters should reset scope allocation counter."""
@@ -1509,7 +1509,7 @@ for _ in range(100):
     x = 1
 """, "<limited>", "exec"))
     sys.exit(2)  # Should not reach here
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "statement limit" in str(e):
         sys.exit(0)  # Expected error
     sys.exit(3)  # Wrong error message
@@ -1538,8 +1538,8 @@ for i in range(1000):
     a.append([i])
 """, "<alloc-limited>", "exec"), {"a": a})
     sys.exit(2)  # Should not reach here
-except MemoryError:
-    sys.exit(0)  # Successfully caught MemoryError
+except SandboxMemoryError:
+    sys.exit(0)  # Successfully caught SandboxMemoryError
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -1550,10 +1550,10 @@ except MemoryError:
         if result.returncode == 0:
             return  # Test passed
         if result.returncode == 2:
-            self.fail("MemoryError was not raised")
-        # If it exited with error, check that MemoryError was involved
-        self.assertIn("MemoryError", result.stderr,
-                      f"Expected MemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
+            self.fail("SandboxMemoryError was not raised")
+        # If it exited with error, check that SandboxMemoryError was involved
+        self.assertIn("SandboxMemoryError", result.stderr,
+                      f"Expected SandboxMemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_different_filenames_independent(self):
         """Different registered filenames should track independently."""
@@ -1647,7 +1647,7 @@ class ScopedIterationCountTests(unittest.TestCase):
         sys.exitsandboxscope()
 
     def test_exceeding_iteration_limit_raises_runtime_error(self):
-        """Exceeding iteration limit should raise RuntimeError."""
+        """Exceeding iteration limit should raise SandboxRuntimeError."""
         code = '''
 import sys
 from itertools import cycle
@@ -1656,10 +1656,10 @@ sys.setsandboxlimits(scope_max_iterations=1000)
 sys.resetsandboxcounters()
 sys.entersandboxscope()
 try:
-    # This should raise RuntimeError when iteration limit is exceeded
+    # This should raise SandboxRuntimeError when iteration limit is exceeded
     sum(cycle([0, 1]))
     sys.exit(2)  # Should not reach here
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e).lower():
         sys.exit(0)  # Success
     else:
@@ -1673,7 +1673,7 @@ finally:
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
-                        f"Expected RuntimeError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
+                        f"Expected SandboxRuntimeError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_normal_iteration_within_limit_works(self):
         """Normal iteration within limits should work fine."""
@@ -1701,8 +1701,8 @@ try:
     sum(cycle([0]))  # Infinite iterator
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError:
-    print("PASS: RuntimeError raised")
+except SandboxRuntimeError:
+    print("PASS: SandboxRuntimeError raised")
     sys.exit(0)
 finally:
     sys.exitsandboxscope()
@@ -1791,9 +1791,9 @@ try:
     result = list(cycle([0, 1]))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -1817,9 +1817,9 @@ try:
     result = tuple(cycle([0, 1]))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -1843,9 +1843,9 @@ try:
     result = set(count())  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -1869,9 +1869,9 @@ try:
     result = frozenset(count())  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -1895,9 +1895,9 @@ try:
     result = all(cycle([True]))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -1921,9 +1921,9 @@ try:
     result = any(cycle([False]))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -1948,9 +1948,9 @@ try:
         pass
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -1974,9 +1974,9 @@ try:
     result = list(enumerate(cycle([0])))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -2000,9 +2000,9 @@ try:
     result = list(zip(cycle([0]), cycle([1])))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -2026,9 +2026,9 @@ try:
     result = list(map(lambda x: x, cycle([0])))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -2052,9 +2052,9 @@ try:
     result = list(filter(lambda x: True, cycle([0])))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -2078,9 +2078,9 @@ try:
     result = sorted(count())  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -2104,9 +2104,9 @@ try:
     result = min(cycle([1, 2, 3]))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -2130,9 +2130,9 @@ try:
     result = max(cycle([1, 2, 3]))  # Should hit iteration limit
     print("FAIL: No exception raised")
     sys.exit(1)
-except RuntimeError as e:
+except SandboxRuntimeError as e:
     if "iteration limit" in str(e):
-        print("PASS: RuntimeError raised")
+        print("PASS: SandboxRuntimeError raised")
         sys.exit(0)
     else:
         print(f"FAIL: Wrong error: {e}")
@@ -2215,7 +2215,7 @@ x = {}
 try:
     d = x.__class__
     print("ERROR: should have raised")
-except AttributeError as e:
+except SandboxAttributeError as e:
     print("OK:", e)
 '''
         result = _run_sandboxed_code(code)
@@ -2232,7 +2232,7 @@ class Foo:
 try:
     Foo.__doc__ = "hacked"
     print("ERROR: should have raised")
-except AttributeError as e:
+except SandboxAttributeError as e:
     print("OK:", e)
 '''
         result = _run_sandboxed_code(code)
@@ -2249,7 +2249,7 @@ class Foo:
 try:
     del Foo.__doc__
     print("ERROR: should have raised")
-except AttributeError as e:
+except SandboxAttributeError as e:
     print("OK:", e)
 '''
         result = _run_sandboxed_code(code)
@@ -2294,7 +2294,7 @@ x = {}
 d = x.__class__
 """, "<sandbox>", "exec"))
     print("ERROR: should have raised")
-except AttributeError as e:
+except SandboxAttributeError as e:
     print("OK:", e)
 '''
         result = _run_sandboxed_code(code)

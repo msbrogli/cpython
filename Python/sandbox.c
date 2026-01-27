@@ -145,7 +145,7 @@ _PySandbox_CheckIntSize(Py_ssize_t ndigits)
     if (ndigits > limits->max_int_digits) {
         /* Prevent recursive checks during error handling */
         limits->in_check = 1;
-        PyErr_Format(PyExc_OverflowError,
+        PyErr_Format(PyExc_SandboxOverflowError,
                      "Integer size (%zd digits) exceeds sandbox limit (%zd digits)",
                      ndigits, limits->max_int_digits);
         limits->in_check = 0;
@@ -162,7 +162,7 @@ _PySandbox_CheckStrLength(Py_ssize_t length)
     if (length > limits->max_str_length) {
         /* Prevent recursive checks during error handling */
         limits->in_check = 1;
-        PyErr_Format(PyExc_OverflowError,
+        PyErr_Format(PyExc_SandboxOverflowError,
                      "String length (%zd) exceeds sandbox limit (%zd)",
                      length, limits->max_str_length);
         limits->in_check = 0;
@@ -179,7 +179,7 @@ _PySandbox_CheckBytesLength(Py_ssize_t length)
     if (length > limits->max_bytes_length) {
         /* Prevent recursive checks during error handling */
         limits->in_check = 1;
-        PyErr_Format(PyExc_OverflowError,
+        PyErr_Format(PyExc_SandboxOverflowError,
                      "Bytes length (%zd) exceeds sandbox limit (%zd)",
                      length, limits->max_bytes_length);
         limits->in_check = 0;
@@ -195,7 +195,7 @@ _PySandbox_CheckListSize(Py_ssize_t size)
 
     if (size > limits->max_list_size) {
         limits->in_check = 1;
-        PyErr_Format(PyExc_OverflowError,
+        PyErr_Format(PyExc_SandboxOverflowError,
                      "List size (%zd) exceeds sandbox limit (%zd)",
                      size, limits->max_list_size);
         limits->in_check = 0;
@@ -211,7 +211,7 @@ _PySandbox_CheckDictSize(Py_ssize_t size)
 
     if (size > limits->max_dict_size) {
         limits->in_check = 1;
-        PyErr_Format(PyExc_OverflowError,
+        PyErr_Format(PyExc_SandboxOverflowError,
                      "Dict size (%zd) exceeds sandbox limit (%zd)",
                      size, limits->max_dict_size);
         limits->in_check = 0;
@@ -227,7 +227,7 @@ _PySandbox_CheckSetSize(Py_ssize_t size)
 
     if (size > limits->max_set_size) {
         limits->in_check = 1;
-        PyErr_Format(PyExc_OverflowError,
+        PyErr_Format(PyExc_SandboxOverflowError,
                      "Set size (%zd) exceeds sandbox limit (%zd)",
                      size, limits->max_set_size);
         limits->in_check = 0;
@@ -243,7 +243,7 @@ _PySandbox_CheckTupleSize(Py_ssize_t size)
 
     if (size > limits->max_tuple_size) {
         limits->in_check = 1;
-        PyErr_Format(PyExc_OverflowError,
+        PyErr_Format(PyExc_SandboxOverflowError,
                      "Tuple size (%zd) exceeds sandbox limit (%zd)",
                      size, limits->max_tuple_size);
         limits->in_check = 0;
@@ -262,14 +262,14 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
 
     /* Check float */
     if (!limits->allow_float && type == &PyFloat_Type) {
-        PyErr_SetString(PyExc_TypeError,
+        PyErr_SetString(PyExc_SandboxTypeError,
                         "float type is forbidden in sandbox");
         return -1;
     }
 
     /* Check complex */
     if (!limits->allow_complex && type == &PyComplex_Type) {
-        PyErr_SetString(PyExc_TypeError,
+        PyErr_SetString(PyExc_SandboxTypeError,
                         "complex type is forbidden in sandbox");
         return -1;
     }
@@ -532,12 +532,12 @@ _PySandbox_CheckAllocation(void)
     if (limits->global_max_allocations > 0) {
         /* Hard limit: grace allocations exhausted, fail unconditionally */
         if (limits->global_allocation_count > limits->global_max_allocations + ALLOCATION_GRACE_HEADROOM) {
-            PyErr_NoMemory();
+            PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox global allocation limit exceeded");
             return -1;
         }
         /* Soft limit: raise MemoryError only on the first allocation past the limit */
         if (limits->global_allocation_count == limits->global_max_allocations + 1) {
-            PyErr_NoMemory();
+            PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox global allocation limit exceeded");
             return -1;
         }
     }
@@ -546,12 +546,12 @@ _PySandbox_CheckAllocation(void)
     if (in_scope && limits->scope_max_allocations > 0) {
         /* Hard limit: grace allocations exhausted, fail unconditionally */
         if (limits->scope_allocation_count > limits->scope_max_allocations + ALLOCATION_GRACE_HEADROOM) {
-            PyErr_NoMemory();
+            PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox scoped allocation limit exceeded");
             return -1;
         }
         /* Soft limit: raise MemoryError only on the first allocation past the limit */
         if (limits->scope_allocation_count == limits->scope_max_allocations + 1) {
-            PyErr_NoMemory();
+            PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox scoped allocation limit exceeded");
             return -1;
         }
     }
@@ -615,7 +615,7 @@ _PySandbox_CheckScopeStatement(void)
     /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
     if (limits->scope_statement_count == limits->scope_max_statements + 1) {
         limits->in_check = 1;
-        PyErr_SetString(PyExc_RuntimeError,
+        PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox statement limit exceeded");
         limits->in_check = 0;
         return -1;
@@ -680,7 +680,7 @@ _PySandbox_CheckIteration(void)
     /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
     if (limits->scope_iteration_count == limits->scope_max_iterations + 1) {
         limits->in_check = 1;
-        PyErr_SetString(PyExc_RuntimeError,
+        PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox iteration limit exceeded");
         limits->in_check = 0;
         return -1;
@@ -742,7 +742,7 @@ _PySandbox_CheckDunderAccess(PyObject *name)
 
     /* Block dunder access */
     limits->in_check = 1;
-    PyErr_Format(PyExc_AttributeError,
+    PyErr_Format(PyExc_SandboxAttributeError,
                  "dunder attribute access blocked in sandbox: '%U'", name);
     limits->in_check = 0;
     return -1;

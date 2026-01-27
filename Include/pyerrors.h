@@ -116,6 +116,13 @@ PyAPI_DATA(PyObject *) PyExc_UnicodeTranslateError;
 PyAPI_DATA(PyObject *) PyExc_ValueError;
 PyAPI_DATA(PyObject *) PyExc_ZeroDivisionError;
 
+PyAPI_DATA(PyObject *) PyExc_SandboxError;
+PyAPI_DATA(PyObject *) PyExc_SandboxOverflowError;
+PyAPI_DATA(PyObject *) PyExc_SandboxMemoryError;
+PyAPI_DATA(PyObject *) PyExc_SandboxRuntimeError;
+PyAPI_DATA(PyObject *) PyExc_SandboxTypeError;
+PyAPI_DATA(PyObject *) PyExc_SandboxAttributeError;
+
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03030000
 PyAPI_DATA(PyObject *) PyExc_BlockingIOError;
 PyAPI_DATA(PyObject *) PyExc_BrokenPipeError;

@@ -3339,6 +3339,23 @@ PyObject *PyExc_MemoryError = (PyObject *) &_PyExc_MemoryError;
 
 
 /*
+ *    Sandbox exceptions
+ */
+SimpleExtendsException(PyExc_Exception, SandboxError,
+                       "Base class for sandbox limit violations.");
+SimpleExtendsException(PyExc_SandboxError, SandboxOverflowError,
+                       "Sandbox size limit exceeded.");
+SimpleExtendsException(PyExc_SandboxError, SandboxMemoryError,
+                       "Sandbox allocation limit exceeded.");
+SimpleExtendsException(PyExc_SandboxError, SandboxRuntimeError,
+                       "Sandbox execution limit exceeded.");
+SimpleExtendsException(PyExc_SandboxError, SandboxTypeError,
+                       "Type forbidden in sandbox.");
+SimpleExtendsException(PyExc_SandboxError, SandboxAttributeError,
+                       "Attribute access blocked in sandbox.");
+
+
+/*
  *    BufferError extends Exception
  */
 SimpleExtendsException(PyExc_Exception, BufferError, "Buffer error.");
@@ -3584,6 +3601,14 @@ static struct static_exception static_exceptions[] = {
     ITEM(UnicodeDecodeError),
     ITEM(UnicodeEncodeError),
     ITEM(UnicodeTranslateError),
+
+    // Level 3: SandboxError(Exception) and subclasses
+    ITEM(SandboxError),
+    ITEM(SandboxOverflowError),   // base: SandboxError
+    ITEM(SandboxMemoryError),     // base: SandboxError
+    ITEM(SandboxRuntimeError),    // base: SandboxError
+    ITEM(SandboxTypeError),       // base: SandboxError
+    ITEM(SandboxAttributeError),  // base: SandboxError
 #undef ITEM
 };
 

@@ -5,28 +5,10 @@ within sandbox scope, SandboxRuntimeError is raised.
 """
 
 import opcode
-import subprocess
 import sys
 import unittest
 
-
-# Default timeout for subprocess tests (seconds)
-SUBPROCESS_TIMEOUT = 10
-
-
-def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
-    """Run code in a subprocess with sandbox limits."""
-    return subprocess.run(
-        [sys.executable, '-c', code],
-        capture_output=True,
-        text=True,
-        timeout=timeout
-    )
-
-
-def _get_settable_limits():
-    """Get current limits for restoring in tearDown."""
-    return sys.getsandboxlimits()
+from test.test_sandbox import _run_sandboxed_code, _get_settable_limits
 
 
 # ---------------------------------------------------------------------------

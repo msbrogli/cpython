@@ -13,6 +13,7 @@
 #include "pycore_pyerrors.h"      // _PyErr_Occurred()
 #include "pycore_pymem.h"         // _PyMem_IsPtrFreed()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckFrozen()
 #include "pycore_symtable.h"      // PySTEntry_Type
 #include "pycore_typeobject.h"    // _PyTypes_InitSlotDefs()
 #include "pycore_unionobject.h"   // _PyUnion_Type
@@ -1015,6 +1016,11 @@ PyObject_SetAttr(PyObject *v, PyObject *name, PyObject *value)
     PyTypeObject *tp = Py_TYPE(v);
     int err;
 
+    /* Check sandbox frozen state */
+    if (_PySandbox_CheckFrozen(v) < 0) {
+        return -1;
+    }
+
     if (!PyUnicode_Check(name)) {
         PyErr_Format(PyExc_TypeError,
                      "attribute name must be string, not '%.200s'",
@@ -1377,6 +1383,11 @@ _PyObject_GenericSetAttrWithDict(PyObject *obj, PyObject *name,
     descrsetfunc f;
     int res = -1;
 
+    /* Check sandbox frozen state */
+    if (_PySandbox_CheckFrozen(obj) < 0) {
+        return -1;
+    }
+
     if (!PyUnicode_Check(name)){
         PyErr_Format(PyExc_TypeError,
                      "attribute name must be string, not '%.200s'",
@@ -1726,7 +1737,7 @@ PyTypeObject _PyNone_Type = {
 
 PyObject _Py_NoneStruct = {
   _PyObject_EXTRA_INIT
-  1, &_PyNone_Type
+  1, 0, &_PyNone_Type
 };
 
 /* NotImplemented is an object that can be used to signal that an
@@ -1827,7 +1838,7 @@ PyTypeObject _PyNotImplemented_Type = {
 
 PyObject _Py_NotImplementedStruct = {
     _PyObject_EXTRA_INIT
-    1, &_PyNotImplemented_Type
+    1, 0, &_PyNotImplemented_Type
 };
 
 PyStatus
@@ -2028,6 +2039,7 @@ _Py_NewReference(PyObject *op)
 #ifdef Py_REF_DEBUG
     _Py_RefTotal++;
 #endif
+    op->ob_flags = 0;
     Py_SET_REFCNT(op, 1);
 #ifdef Py_TRACE_REFS
     _Py_AddToAllObjects(op, 1);

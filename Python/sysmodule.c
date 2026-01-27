@@ -2415,6 +2415,87 @@ PyDoc_STRVAR(issandboxsuspended_doc,
 Return True if sandbox limits are currently suspended."
 );
 
+/* ============ Sandbox Frozen Mode ============ */
+
+static PyObject *
+sys_setsandboxfrozenmode(PyObject *self, PyObject *arg)
+{
+    int mode = PyObject_IsTrue(arg);
+    if (mode < 0) {
+        return NULL;
+    }
+    PySandbox_SetFrozenMode(mode);
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(setsandboxfrozenmode_doc,
+"setsandboxfrozenmode(enabled)\n\
+\n\
+Enable or disable global sandbox frozen mode.\n\
+When enabled, all attribute modifications are blocked unless the\n\
+target object has been marked as mutable with sandboxsetobjectmutable()."
+);
+
+static PyObject *
+sys_getsandboxfrozenmode(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    int mode = PySandbox_GetFrozenMode();
+    return PyBool_FromLong(mode);
+}
+
+PyDoc_STRVAR(getsandboxfrozenmode_doc,
+"getsandboxfrozenmode() -> bool\n\
+\n\
+Return True if global sandbox frozen mode is currently active."
+);
+
+static PyObject *
+sys_sandboxfreezeobject(PyObject *self, PyObject *obj)
+{
+    PySandbox_FreezeObject(obj);
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(sandboxfreezeobject_doc,
+"sandboxfreezeobject(obj)\n\
+\n\
+Freeze an object, preventing all attribute modifications on it.\n\
+This is enforced regardless of global frozen mode."
+);
+
+static PyObject *
+sys_sandboxisobjectfrozen(PyObject *self, PyObject *obj)
+{
+    int frozen = PySandbox_IsObjectFrozen(obj);
+    return PyBool_FromLong(frozen);
+}
+
+PyDoc_STRVAR(sandboxisobjectfrozen_doc,
+"sandboxisobjectfrozen(obj) -> bool\n\
+\n\
+Return True if the object has been individually frozen."
+);
+
+static PyObject *
+sys_sandboxsetobjectmutable(PyObject *self, PyObject *args)
+{
+    PyObject *obj;
+    int mutable = 1;
+    if (!PyArg_ParseTuple(args, "O|p:sandboxsetobjectmutable", &obj, &mutable)) {
+        return NULL;
+    }
+    PySandbox_SetObjectMutable(obj, mutable);
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(sandboxsetobjectmutable_doc,
+"sandboxsetobjectmutable(obj, mutable=True)\n\
+\n\
+Mark an object as mutable, allowing attribute modifications on it\n\
+even when global sandbox frozen mode is active.\n\
+Pass mutable=False to clear the mutable flag."
+);
+
 static PyMethodDef sys_methods[] = {
     /* Might as well keep this in alphabetic order */
     SYS_ADDAUDITHOOK_METHODDEF
@@ -2501,6 +2582,16 @@ static PyMethodDef sys_methods[] = {
      resumesandboxlimits_doc},
     {"issandboxsuspended", sys_issandboxsuspended, METH_NOARGS,
      issandboxsuspended_doc},
+    {"setsandboxfrozenmode", sys_setsandboxfrozenmode, METH_O,
+     setsandboxfrozenmode_doc},
+    {"getsandboxfrozenmode", sys_getsandboxfrozenmode, METH_NOARGS,
+     getsandboxfrozenmode_doc},
+    {"sandboxfreezeobject", sys_sandboxfreezeobject, METH_O,
+     sandboxfreezeobject_doc},
+    {"sandboxisobjectfrozen", sys_sandboxisobjectfrozen, METH_O,
+     sandboxisobjectfrozen_doc},
+    {"sandboxsetobjectmutable", sys_sandboxsetobjectmutable, METH_VARARGS,
+     sandboxsetobjectmutable_doc},
     {NULL, NULL}  // sentinel
 };
 

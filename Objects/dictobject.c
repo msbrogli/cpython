@@ -5444,6 +5444,10 @@ int
 _PyObject_StoreInstanceAttribute(PyObject *obj, PyDictValues *values,
                               PyObject *name, PyObject *value)
 {
+    /* Check sandbox frozen state */
+    if (_PySandbox_CheckFrozen(obj) < 0) {
+        return -1;
+    }
     PyDictKeysObject *keys = CACHED_KEYS(Py_TYPE(obj));
     assert(keys != NULL);
     assert(values != NULL);

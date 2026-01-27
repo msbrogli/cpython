@@ -3992,6 +3992,10 @@ static int
 type_setattro(PyTypeObject *type, PyObject *name, PyObject *value)
 {
     int res;
+    /* Check sandbox frozen state */
+    if (_PySandbox_CheckFrozen((PyObject *)type) < 0) {
+        return -1;
+    }
     if (type->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) {
         PyErr_Format(
             PyExc_TypeError,

@@ -163,11 +163,13 @@ typedef struct {
 typedef struct {
     _PySandboxLimits limits;
     _PyObjectCreationHook creation_hook;
+    int frozen_mode;  /* 1 = global freeze active (block all attr mutations), 0 = normal */
 } _PySandboxState;
 
 #define _PySandboxState_INIT {              \
     .limits = _PySandboxLimits_INIT,        \
     .creation_hook = _PyObjectCreationHook_INIT, \
+    .frozen_mode = 0,                       \
 }
 
 /* ============ Internal API ============ */
@@ -201,6 +203,13 @@ PyAPI_FUNC(int) _PySandbox_CheckIteration(void);
 
 /* Check dunder attribute access - returns -1 and sets exception when blocked */
 PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
+
+/* Check if attribute mutation is blocked on an object.
+ * Returns 0 if mutation is allowed, -1 if blocked (sets SandboxAttributeError).
+ * Checks: per-instance Py_OBJFLAGS_MUTABLE (fast exit),
+ *         per-instance Py_OBJFLAGS_FROZEN, global frozen_mode.
+ * Respects sandbox suspend state. */
+PyAPI_FUNC(int) _PySandbox_CheckFrozen(PyObject *obj);
 
 /* Sandbox scope management */
 PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */
@@ -279,6 +288,21 @@ PyAPI_FUNC(int) PySandbox_Resume(void);
 
 /* Check if sandbox limits are currently suspended */
 PyAPI_FUNC(int) PySandbox_IsSuspended(void);
+
+/* Set/get global frozen mode. When active, all attribute mutations are blocked
+ * unless the target object has Py_OBJFLAGS_MUTABLE set. */
+PyAPI_FUNC(void) PySandbox_SetFrozenMode(int mode);
+PyAPI_FUNC(int) PySandbox_GetFrozenMode(void);
+
+/* Freeze a specific object (set Py_OBJFLAGS_FROZEN) */
+PyAPI_FUNC(void) PySandbox_FreezeObject(PyObject *obj);
+
+/* Check if a specific object is frozen */
+PyAPI_FUNC(int) PySandbox_IsObjectFrozen(PyObject *obj);
+
+/* Mark an object as mutable (override frozen mode).
+ * If mutable is nonzero, sets Py_OBJFLAGS_MUTABLE; otherwise clears it. */
+PyAPI_FUNC(void) PySandbox_SetObjectMutable(PyObject *obj, int mutable);
 
 #ifdef __cplusplus
 }

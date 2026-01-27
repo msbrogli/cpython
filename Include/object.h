@@ -78,7 +78,7 @@ whose size is determined when the object is allocated.
 
 #define PyObject_HEAD_INIT(type)        \
     { _PyObject_EXTRA_INIT              \
-    1, type },
+    1, 0, type },
 
 #define PyVarObject_HEAD_INIT(type, size)       \
     { PyObject_HEAD_INIT(type) size },
@@ -100,8 +100,17 @@ whose size is determined when the object is allocated.
 struct _object {
     _PyObject_HEAD_EXTRA
     Py_ssize_t ob_refcnt;
+    uint32_t ob_flags;
     PyTypeObject *ob_type;
 };
+
+/* Per-instance object flags (ob_flags) */
+#define Py_OBJFLAGS_FROZEN    (1U << 0)  /* Object is individually frozen */
+#define Py_OBJFLAGS_MUTABLE   (1U << 1)  /* Override: allow mutation even in frozen mode */
+
+/* Helper macros for object flags */
+#define Py_IS_FROZEN(op) (((PyObject*)(op))->ob_flags & Py_OBJFLAGS_FROZEN)
+#define Py_IS_MUTABLE(op) (((PyObject*)(op))->ob_flags & Py_OBJFLAGS_MUTABLE)
 
 /* Cast argument to PyObject* type. */
 #define _PyObject_CAST(op) _Py_CAST(PyObject*, (op))

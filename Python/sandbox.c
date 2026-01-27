@@ -97,6 +97,8 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.creation_hook.hook_userdata = NULL;
     interp->sandbox.creation_hook.hook_callback = NULL;
     interp->sandbox.creation_hook.in_hook = 0;
+
+    interp->sandbox.frozen_mode = 0;
 }
 
 void
@@ -1168,6 +1170,100 @@ PySandbox_IsSuspended(void)
     }
 
     return interp->sandbox.limits.suspended > 0;
+}
+
+/* ============ Frozen Mode ============ */
+
+/* Check if attribute mutation is blocked on an object.
+ * Returns 0 if mutation is allowed, -1 if blocked (sets SandboxAttributeError).
+ *
+ * Check order:
+ * 1. Per-instance mutable flag (fast exit — always allow)
+ * 2. Suspend state (if suspended, allow all mutations)
+ * 3. Fast path: no frozen restrictions exist
+ * 4. Scope check: only enforce within sandbox scope
+ * 5. Per-instance frozen flag
+ * 6. Global frozen mode
+ */
+int
+_PySandbox_CheckFrozen(PyObject *obj)
+{
+    /* Fast path: mutable objects are always allowed */
+    if (Py_IS_MUTABLE(obj)) {
+        return 0;
+    }
+
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL || interp->sandbox.limits.suspended) {
+        return 0;
+    }
+
+    /* Fast path: no frozen restrictions exist */
+    int obj_frozen = Py_IS_FROZEN(obj);
+    if (!obj_frozen && !interp->sandbox.frozen_mode) {
+        return 0;
+    }
+
+    /* Frozen restrictions exist — only enforce within sandbox scope */
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    if (!frame_in_sandbox_scope(&limits->registered_filenames, frame)) {
+        return 0;  /* Not in scope — allow */
+    }
+
+    if (obj_frozen) {
+        PyErr_Format(PyExc_SandboxAttributeError,
+                     "cannot modify frozen object '%.100s'",
+                     Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+
+    /* Global frozen mode (already checked it's true above) */
+    PyErr_Format(PyExc_SandboxAttributeError,
+                 "cannot modify '%.100s' object: sandbox frozen mode is active",
+                 Py_TYPE(obj)->tp_name);
+    return -1;
+}
+
+void
+PySandbox_SetFrozenMode(int mode)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp != NULL) {
+        interp->sandbox.frozen_mode = mode ? 1 : 0;
+    }
+}
+
+int
+PySandbox_GetFrozenMode(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return 0;
+    }
+    return interp->sandbox.frozen_mode;
+}
+
+void
+PySandbox_FreezeObject(PyObject *obj)
+{
+    obj->ob_flags |= Py_OBJFLAGS_FROZEN;
+}
+
+int
+PySandbox_IsObjectFrozen(PyObject *obj)
+{
+    return (obj->ob_flags & Py_OBJFLAGS_FROZEN) != 0;
+}
+
+void
+PySandbox_SetObjectMutable(PyObject *obj, int mutable)
+{
+    if (mutable) {
+        obj->ob_flags |= Py_OBJFLAGS_MUTABLE;
+    } else {
+        obj->ob_flags &= ~Py_OBJFLAGS_MUTABLE;
+    }
 }
 
 /* ============ Sandbox Iterator Wrapper ============ */

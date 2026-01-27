@@ -2796,8 +2796,16 @@ PyObject_GetIter(PyObject *o)
 
     f = t->tp_iter;
     if (f == NULL) {
-        if (PySequence_Check(o))
-            return PySeqIter_New(o);
+        if (PySequence_Check(o)) {
+            PyObject *iter = PySeqIter_New(o);
+            if (iter == NULL) {
+                return NULL;
+            }
+            /* Wrap iterator if in sandbox scope */
+            PyObject *wrapped = _PySandbox_WrapIterator(iter);
+            Py_DECREF(iter);
+            return wrapped;
+        }
         return type_error("'%.200s' object is not iterable", o);
     }
     else {
@@ -2809,6 +2817,12 @@ PyObject_GetIter(PyObject *o)
                          Py_TYPE(res)->tp_name);
             Py_DECREF(res);
             res = NULL;
+        }
+        if (res != NULL) {
+            /* Wrap iterator if in sandbox scope */
+            PyObject *wrapped = _PySandbox_WrapIterator(res);
+            Py_DECREF(res);
+            res = wrapped;
         }
         return res;
     }

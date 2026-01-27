@@ -227,6 +227,16 @@ PyAPI_FUNC(PyObject *) _PySandbox_CallCreationHook(
 PyAPI_FUNC(void) _PySandbox_Init(PyInterpreterState *interp);
 PyAPI_FUNC(void) _PySandbox_Fini(PyInterpreterState *interp);
 
+/* ============ Iterator Wrapper ============ */
+
+/* Sandbox iterator wrapper type - wraps iterators to check limits on each step */
+PyAPI_DATA(PyTypeObject) _PySandboxIteratorWrapper_Type;
+
+/* Wrap an iterator if sandbox scope is active.
+ * Returns a new reference (either the wrapper or the original iterator with incref).
+ * Returns NULL on error. */
+PyAPI_FUNC(PyObject *) _PySandbox_WrapIterator(PyObject *iter);
+
 /* ============ Public C API ============ */
 
 /* Set sandbox limits. Returns 0 on success, -1 on error */

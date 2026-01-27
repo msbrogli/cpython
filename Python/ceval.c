@@ -4344,10 +4344,6 @@ handle_eval_breaker:
             _py_stats.opcode_stats[FOR_ITER].specialization.failure++;
             _py_stats.opcode_stats[FOR_ITER].specialization.failure_kinds[_PySpecialization_ClassifyIterator(iter)]++;
 #endif
-            /* Check iteration limits before advancing iterator */
-            if (_PySandbox_CheckIteration() < 0) {
-                goto error;
-            }
             PyObject *next = (*Py_TYPE(iter)->tp_iternext)(iter);
             if (next != NULL) {
                 PUSH(next);

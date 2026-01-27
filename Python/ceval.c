@@ -5698,6 +5698,11 @@ handle_eval_breaker:
             }
         }
         TRACING_NEXTOPARG();
+        /* Sandbox opcode restriction check */
+        if (_PySandbox_CheckOpcode(opcode) < 0) {
+            next_instr++;
+            goto error;
+        }
         PRE_DISPATCH_GOTO();
         DISPATCH_GOTO();
     }

@@ -2450,6 +2450,67 @@ Return True if global sandbox frozen mode is currently active."
 );
 
 static PyObject *
+sys_setsandboxopcoderestrictmode(PyObject *self, PyObject *arg)
+{
+    int mode = PyObject_IsTrue(arg);
+    if (mode < 0) {
+        return NULL;
+    }
+    PySandbox_SetOpcodeRestrictMode(mode);
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(setsandboxopcoderestrictmode_doc,
+"setsandboxopcoderestrictmode(enabled)\n\
+\n\
+Enable or disable sandbox opcode restriction mode.\n\
+When enabled, opcodes in the banned set raise SandboxRuntimeError\n\
+when executed within sandbox scope."
+);
+
+static PyObject *
+sys_getsandboxopcoderestrictmode(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    int mode = PySandbox_GetOpcodeRestrictMode();
+    return PyBool_FromLong(mode);
+}
+
+PyDoc_STRVAR(getsandboxopcoderestrictmode_doc,
+"getsandboxopcoderestrictmode() -> bool\n\
+\n\
+Return True if sandbox opcode restriction mode is currently active."
+);
+
+static PyObject *
+sys_setsandboxbannedopcodes(PyObject *self, PyObject *arg)
+{
+    if (PySandbox_SetBannedOpcodes(arg) < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(setsandboxbannedopcodes_doc,
+"setsandboxbannedopcodes(opcode_set)\n\
+\n\
+Set the banned opcodes bitmap from an iterable of opcode integers.\n\
+Pass None to clear all banned opcodes.\n\
+Each value must be in range 0..255."
+);
+
+static PyObject *
+sys_getsandboxbannedopcodes(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    return PySandbox_GetBannedOpcodes();
+}
+
+PyDoc_STRVAR(getsandboxbannedopcodes_doc,
+"getsandboxbannedopcodes() -> frozenset[int]\n\
+\n\
+Return the currently banned opcodes as a frozenset of integers."
+);
+
+static PyObject *
 sys_sandboxfreezeobject(PyObject *self, PyObject *obj)
 {
     PySandbox_FreezeObject(obj);
@@ -2592,6 +2653,14 @@ static PyMethodDef sys_methods[] = {
      sandboxisobjectfrozen_doc},
     {"sandboxsetobjectmutable", sys_sandboxsetobjectmutable, METH_VARARGS,
      sandboxsetobjectmutable_doc},
+    {"setsandboxopcoderestrictmode", sys_setsandboxopcoderestrictmode, METH_O,
+     setsandboxopcoderestrictmode_doc},
+    {"getsandboxopcoderestrictmode", sys_getsandboxopcoderestrictmode, METH_NOARGS,
+     getsandboxopcoderestrictmode_doc},
+    {"setsandboxbannedopcodes", sys_setsandboxbannedopcodes, METH_O,
+     setsandboxbannedopcodes_doc},
+    {"getsandboxbannedopcodes", sys_getsandboxbannedopcodes, METH_NOARGS,
+     getsandboxbannedopcodes_doc},
     {NULL, NULL}  // sentinel
 };
 

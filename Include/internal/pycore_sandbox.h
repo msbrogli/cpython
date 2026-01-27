@@ -10,6 +10,7 @@ extern "C" {
 
 #include "pyport.h"        // Py_ssize_t, PyAPI_FUNC
 #include "exports.h"       // PyAPI_FUNC
+#include <string.h>        // memset
 
 /* Forward declarations */
 typedef struct _object PyObject;
@@ -28,6 +29,20 @@ struct _frame;
 
 /* Forward declaration for interpreter frame */
 struct _PyInterpreterFrame;
+
+/* 256-bit bitmap for opcode restriction. Bit set = opcode banned. */
+typedef struct {
+    uint32_t bits[8];  /* 8 * 32 = 256 bits */
+} _PySandboxOpcodeSet;
+
+#define _PySandbox_OpcodeSet_HAS(set, op) \
+    ((set)->bits[(op) >> 5] & (1U << ((op) & 31)))
+#define _PySandbox_OpcodeSet_SET(set, op) \
+    ((set)->bits[(op) >> 5] |= (1U << ((op) & 31)))
+#define _PySandbox_OpcodeSet_CLEAR(set, op) \
+    ((set)->bits[(op) >> 5] &= ~(1U << ((op) & 31)))
+#define _PySandbox_OpcodeSet_ZERO(set) \
+    memset((set)->bits, 0, sizeof((set)->bits))
 
 /* Registered filenames set for scope tracking.
  * Tracks sandbox scope by co_filename values rather than frame pointers.
@@ -164,12 +179,16 @@ typedef struct {
     _PySandboxLimits limits;
     _PyObjectCreationHook creation_hook;
     int frozen_mode;  /* 1 = global freeze active (block all attr mutations), 0 = normal */
+    int opcode_restrict_mode;            /* 1 = active, 0 = off */
+    _PySandboxOpcodeSet banned_opcodes;  /* bitmap of banned opcodes */
 } _PySandboxState;
 
 #define _PySandboxState_INIT {              \
     .limits = _PySandboxLimits_INIT,        \
     .creation_hook = _PyObjectCreationHook_INIT, \
     .frozen_mode = 0,                       \
+    .opcode_restrict_mode = 0,              \
+    .banned_opcodes = {{0}},                \
 }
 
 /* ============ Internal API ============ */
@@ -210,6 +229,11 @@ PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
  *         per-instance Py_OBJFLAGS_FROZEN, global frozen_mode.
  * Respects sandbox suspend state. */
 PyAPI_FUNC(int) _PySandbox_CheckFrozen(PyObject *obj);
+
+/* Opcode restriction check - called from DO_TRACING in ceval.c.
+ * Returns 0 if opcode is allowed, -1 if banned (sets SandboxRuntimeError).
+ * Fast exits: mode off, suspended, in_check, not in scope, opcode not banned. */
+PyAPI_FUNC(int) _PySandbox_CheckOpcode(int opcode);
 
 /* Sandbox scope management */
 PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */
@@ -303,6 +327,19 @@ PyAPI_FUNC(int) PySandbox_IsObjectFrozen(PyObject *obj);
 /* Mark an object as mutable (override frozen mode).
  * If mutable is nonzero, sets Py_OBJFLAGS_MUTABLE; otherwise clears it. */
 PyAPI_FUNC(void) PySandbox_SetObjectMutable(PyObject *obj, int mutable);
+
+/* Opcode restriction mode: enable/disable runtime opcode checks.
+ * When enabled, opcodes in the banned set raise SandboxRuntimeError
+ * for code executing within sandbox scope.
+ * Must call _PyThreadState_UpdateTracingState after changing. */
+PyAPI_FUNC(void) PySandbox_SetOpcodeRestrictMode(int mode);
+PyAPI_FUNC(int) PySandbox_GetOpcodeRestrictMode(void);
+
+/* Set/get the banned opcodes bitmap.
+ * SetBannedOpcodes: accepts a Python set/frozenset of ints, or None to clear.
+ * GetBannedOpcodes: returns a new frozenset of banned opcode ints. */
+PyAPI_FUNC(int) PySandbox_SetBannedOpcodes(PyObject *opcode_set);
+PyAPI_FUNC(PyObject *) PySandbox_GetBannedOpcodes(void);
 
 #ifdef __cplusplus
 }

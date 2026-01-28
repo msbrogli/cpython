@@ -415,7 +415,12 @@ PYTHON_OBJS=	\
 		Python/pylifecycle.o \
 		Python/pymath.o \
 		Python/pystate.o \
-		Python/sandbox.o \
+		Python/sandbox_core.o \
+		Python/sandbox_frozen.o \
+		Python/sandbox_iter.o \
+		Python/sandbox_limits.o \
+		Python/sandbox_opcodes.o \
+		Python/sandbox_pyapi.o \
 		Python/pythonrun.o \
 		Python/pytime.o \
 		Python/bootstrap_hash.o \

@@ -525,7 +525,12 @@
     <ClCompile Include="..\Python\Python-ast.c" />
     <ClCompile Include="..\Python\Python-tokenize.c" />
     <ClCompile Include="..\Python\pythonrun.c" />
-    <ClCompile Include="..\Python\sandbox.c" />
+    <ClCompile Include="..\Python\sandbox_core.c" />
+    <ClCompile Include="..\Python\sandbox_frozen.c" />
+    <ClCompile Include="..\Python\sandbox_iter.c" />
+    <ClCompile Include="..\Python\sandbox_limits.c" />
+    <ClCompile Include="..\Python\sandbox_opcodes.c" />
+    <ClCompile Include="..\Python\sandbox_pyapi.c" />
     <ClCompile Include="..\Python\specialize.c" />
     <ClCompile Include="..\Python\suggestions.c" />
     <ClCompile Include="..\Python\structmember.c" />

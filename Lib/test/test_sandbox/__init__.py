@@ -10,6 +10,7 @@ This package contains tests split by feature domain:
 - test_frozen_mode: Frozen mode and auto-mutable mode
 - test_integration: Integration tests
 - test_opcodes: Opcode restrictions
+- test_operations: Opcode-based operation counting (SANDBOX_COUNT)
 """
 
 import os

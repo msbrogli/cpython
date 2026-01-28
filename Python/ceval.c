@@ -1768,6 +1768,17 @@ handle_eval_breaker:
             DISPATCH();
         }
 
+        TARGET(SANDBOX_COUNT) {
+            PyInterpreterState *interp = tstate->interp;
+            if (interp->sandbox.limits.scope_max_operations > 0 &&
+                !interp->sandbox.limits.suspended) {
+                if (_PySandbox_CheckScopeOperation() < 0) {
+                    goto error;
+                }
+            }
+            DISPATCH();
+        }
+
         TARGET(RESUME) {
             _PyCode_Warmup(frame->f_code);
             JUMP_TO_INSTRUCTION(RESUME_QUICK);

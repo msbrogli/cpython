@@ -2003,7 +2003,8 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
         "max_int_digits", "max_str_length", "max_bytes_length",
         "max_list_size", "max_dict_size", "max_set_size", "max_tuple_size",
         "global_max_allocations", "scope_max_statements", "scope_max_allocations",
-        "scope_max_iterations", "allow_float", "allow_complex", "allow_dunder_access", NULL
+        "scope_max_iterations", "scope_max_operations",
+        "allow_float", "allow_complex", "allow_dunder_access", NULL
     };
 
     Py_ssize_t max_int_digits = 0;
@@ -2017,17 +2018,18 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     unsigned long long scope_max_statements = 0;
     unsigned long long scope_max_allocations = 0;
     unsigned long long scope_max_iterations = 0;
+    unsigned long long scope_max_operations = 0;
     int allow_float = 1;
     int allow_complex = 1;
     int allow_dunder_access = 1;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKKppp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKKKppp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
                                      &max_tuple_size, &global_max_allocations,
                                      &scope_max_statements, &scope_max_allocations,
-                                     &scope_max_iterations,
+                                     &scope_max_iterations, &scope_max_operations,
                                      &allow_float, &allow_complex, &allow_dunder_access)) {
         return NULL;
     }
@@ -2056,6 +2058,7 @@ sys_setsandboxlimits(PyObject *self, PyObject *args, PyObject *kwargs)
     limits->scope_max_statements = scope_max_statements;
     limits->scope_max_allocations = scope_max_allocations;
     limits->scope_max_iterations = scope_max_iterations;
+    limits->scope_max_operations = scope_max_operations;
     limits->allow_float = allow_float;
     limits->allow_complex = allow_complex;
     limits->allow_dunder_access = allow_dunder_access;
@@ -2071,7 +2074,7 @@ PyDoc_STRVAR(setsandboxlimits_doc,
                  max_list_size=0, max_dict_size=0, max_set_size=0,\n\
                  max_tuple_size=0, global_max_allocations=0,\n\
                  scope_max_statements=0, scope_max_allocations=0,\n\
-                 scope_max_iterations=0,\n\
+                 scope_max_iterations=0, scope_max_operations=0,\n\
                  allow_float=True, allow_complex=True,\n\
                  allow_dunder_access=True)\n\
 \n\
@@ -2117,7 +2120,7 @@ sys_getsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    return Py_BuildValue("{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:K, s:O, s:O, s:O}",
+    return Py_BuildValue("{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:K, s:K, s:O, s:O, s:O}",
                          "max_int_digits", limits->max_int_digits,
                          "max_str_length", limits->max_str_length,
                          "max_bytes_length", limits->max_bytes_length,
@@ -2129,6 +2132,7 @@ sys_getsandboxlimits(PyObject *self, PyObject *Py_UNUSED(args))
                          "scope_max_statements", (unsigned long long)limits->scope_max_statements,
                          "scope_max_allocations", (unsigned long long)limits->scope_max_allocations,
                          "scope_max_iterations", (unsigned long long)limits->scope_max_iterations,
+                         "scope_max_operations", (unsigned long long)limits->scope_max_operations,
                          "allow_float", limits->allow_float ? Py_True : Py_False,
                          "allow_complex", limits->allow_complex ? Py_True : Py_False,
                          "allow_dunder_access", limits->allow_dunder_access ? Py_True : Py_False);
@@ -2151,11 +2155,12 @@ sys_getsandboxcounts(PyObject *self, PyObject *Py_UNUSED(args))
 
     _PySandboxLimits *limits = &interp->sandbox.limits;
 
-    return Py_BuildValue("{s:K, s:K, s:K, s:K}",
+    return Py_BuildValue("{s:K, s:K, s:K, s:K, s:K}",
                          "global_allocation_count", (unsigned long long)limits->global_allocation_count,
                          "scope_allocation_count", (unsigned long long)limits->scope_allocation_count,
                          "scope_statement_count", (unsigned long long)limits->scope_statement_count,
-                         "scope_iteration_count", (unsigned long long)limits->scope_iteration_count);
+                         "scope_iteration_count", (unsigned long long)limits->scope_iteration_count,
+                         "scope_operation_count", (unsigned long long)limits->scope_operation_count);
 }
 
 PyDoc_STRVAR(getsandboxcounts_doc,
@@ -2166,7 +2171,8 @@ Contains:\n\
   global_allocation_count: Total GC-tracked object allocations.\n\
   scope_allocation_count:  Allocations within sandbox scope only.\n\
   scope_statement_count:   Line executions within sandbox scope.\n\
-  scope_iteration_count:   Iterator steps within sandbox scope."
+  scope_iteration_count:   Iterator steps within sandbox scope.\n\
+  scope_operation_count:   Operations counted via SANDBOX_COUNT opcode."
 );
 
 static PyObject *

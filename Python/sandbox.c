@@ -81,6 +81,8 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.limits.scope_allocation_count = 0;
     interp->sandbox.limits.scope_max_iterations = 0;
     interp->sandbox.limits.scope_iteration_count = 0;
+    interp->sandbox.limits.scope_max_operations = 0;
+    interp->sandbox.limits.scope_operation_count = 0;
 
     /* Registered filenames set (lazy-initialized) */
     interp->sandbox.limits.registered_filenames.filenames = NULL;
@@ -629,6 +631,71 @@ _PySandbox_CheckScopeStatement(void)
     return 0;
 }
 
+/* ============ Scoped Operation Checking (SANDBOX_COUNT opcode) ============ */
+
+/* _PySandbox_CheckScopeOperation - Check operation execution against limit
+ *
+ * This function is called from ceval.c for each SANDBOX_COUNT opcode.
+ * It only counts operations when:
+ * - An operation limit is configured (scope_max_operations > 0)
+ * - Sandbox is not suspended and not in recursive check
+ * - At least one filename is registered for scope tracking
+ * - Current frame's co_filename matches a registered filename
+ *
+ * The error is raised exactly once (at count == max+1) to allow error
+ * handling code to execute without triggering additional errors.
+ *
+ * Returns: 0 if OK, -1 if limit exceeded (RuntimeError set)
+ */
+int
+_PySandbox_CheckScopeOperation(void)
+{
+    /* Get thread state first - if not available, skip check */
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        return 0;
+    }
+
+    /* Get interpreter state - if not available, skip check */
+    PyInterpreterState *interp = tstate->interp;
+    if (interp == NULL) {
+        return 0;
+    }
+
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    /* Skip if no operation limit set, or if suspended/in_check */
+    if (limits->scope_max_operations == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;
+    }
+
+    /* Skip if no registered filenames */
+    if (limits->registered_filenames.count == 0) {
+        return 0;
+    }
+
+    /* Check if current frame's filename is in the registered set */
+    _PyInterpreterFrame *current = get_current_interpreter_frame();
+    if (!frame_in_sandbox_scope(&limits->registered_filenames, current)) {
+        return 0;
+    }
+
+    /* Increment operation count */
+    limits->scope_operation_count++;
+
+    /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
+    if (limits->scope_operation_count == limits->scope_max_operations + 1) {
+        limits->in_check = 1;
+        PyErr_SetString(PyExc_SandboxRuntimeError,
+                        "Sandbox operation limit exceeded");
+        limits->in_check = 0;
+        return -1;
+    }
+
+    return 0;
+}
+
 /* ============ Scoped Iteration Checking ============ */
 
 /* _PySandbox_CheckIteration - Check iteration against limit
@@ -788,6 +855,7 @@ _PySandbox_EnterScope(void)
     limits->scope_statement_count = 0;
     limits->scope_allocation_count = 0;
     limits->scope_iteration_count = 0;
+    limits->scope_operation_count = 0;
 
     return 0;
 }
@@ -873,6 +941,7 @@ _PySandbox_ResetCounters(void)
         interp->sandbox.limits.scope_statement_count = 0;
         interp->sandbox.limits.scope_allocation_count = 0;
         interp->sandbox.limits.scope_iteration_count = 0;
+        interp->sandbox.limits.scope_operation_count = 0;
     }
 }
 

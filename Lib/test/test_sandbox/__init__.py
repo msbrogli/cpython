@@ -11,6 +11,7 @@ This package contains tests split by feature domain:
 - test_integration: Integration tests
 - test_opcodes: Opcode restrictions
 - test_operations: Opcode-based operation counting (SANDBOX_COUNT)
+- test_bytecode: Bytecode-level verification of SANDBOX_COUNT placement
 """
 
 import os

@@ -69,10 +69,6 @@ typedef struct {
     Py_ssize_t max_set_size;
     Py_ssize_t max_tuple_size;
 
-    /* Global allocation limits (apply to all allocations regardless of scope) */
-    uint64_t global_max_allocations;   /* 0 = no limit */
-    uint64_t global_allocation_count;  /* Current count */
-
     /* Scoped limits - only enforced within sandbox scope (selected frames) */
     uint64_t scope_max_statements;      /* 0 = no limit */
     uint64_t scope_statement_count;     /* Line executions in scope */
@@ -114,8 +110,6 @@ typedef struct {
     .max_dict_size = 0,             \
     .max_set_size = 0,              \
     .max_tuple_size = 0,            \
-    .global_max_allocations = 0,    \
-    .global_allocation_count = 0,   \
     .scope_max_statements = 0,      \
     .scope_statement_count = 0,     \
     .scope_max_allocations = 0,     \
@@ -260,7 +254,7 @@ PyAPI_FUNC(int) _PySandbox_AddFilename(PyObject *filename);      /* Add a filena
 PyAPI_FUNC(int) _PySandbox_RemoveFilename(PyObject *filename);   /* Remove a filename from the set */
 PyAPI_FUNC(void) _PySandbox_ClearFilenames(void);                /* Clear all registered filenames */
 
-/* Counter resetter - resets all counters (global and scope) */
+/* Counter resetter - resets all scope counters */
 PyAPI_FUNC(void) _PySandbox_ResetCounters(void);
 
 /* Call object creation hook. Returns new object (may be replacement) or NULL on error */

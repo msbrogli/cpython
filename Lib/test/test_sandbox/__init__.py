@@ -3,7 +3,7 @@
 This package contains tests split by feature domain:
 - test_limits: API basics, type/size limits, suspend/resume
 - test_hooks: Object creation hooks
-- test_allocations: Global and scoped allocation counting
+- test_allocations: Scoped allocation counting
 - test_scope: Scope management and statement counting
 - test_iterations: Iteration counting and iterator wrapper protection
 - test_dunder_access: Dunder attribute blocking

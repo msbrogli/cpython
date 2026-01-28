@@ -37,7 +37,7 @@ class SandboxLimitsTests(unittest.TestCase):
         expected_keys = {
             'max_int_digits', 'max_str_length', 'max_bytes_length',
             'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
-            'max_allocations', 'max_scope_statements', 'max_scope_allocations',
+            'max_scope_statements', 'max_scope_allocations',
             'max_scope_iterations', 'max_scope_operations',
             'allow_float', 'allow_complex', 'allow_dunder_access'
         }
@@ -47,7 +47,7 @@ class SandboxLimitsTests(unittest.TestCase):
         """getsandboxcounts should return a dictionary with count keys."""
         counts = sys.sandbox.get_counts()
         self.assertIsInstance(counts, dict)
-        expected_keys = {'allocation_count', 'scope_allocation_count', 'scope_statement_count', 'scope_iteration_count', 'scope_operation_count'}
+        expected_keys = {'scope_allocation_count', 'scope_statement_count', 'scope_iteration_count', 'scope_operation_count'}
         self.assertEqual(set(counts.keys()), expected_keys)
 
     def test_default_limits_are_zero(self):
@@ -60,7 +60,6 @@ class SandboxLimitsTests(unittest.TestCase):
         self.assertEqual(limits['max_dict_size'], 0)
         self.assertEqual(limits['max_set_size'], 0)
         self.assertEqual(limits['max_tuple_size'], 0)
-        self.assertEqual(limits['max_allocations'], 0)
         self.assertEqual(limits['max_scope_statements'], 0)
         self.assertEqual(limits['max_scope_allocations'], 0)
         self.assertTrue(limits['allow_float'])
@@ -84,8 +83,10 @@ class IntegerLimitsTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
+        sys.sandbox.exit_scope()
         sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_integers_allowed(self):
@@ -114,8 +115,10 @@ class StringLimitsTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
+        sys.sandbox.exit_scope()
         sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_strings_allowed(self):
@@ -138,8 +141,10 @@ class ListLimitsTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
+        sys.sandbox.exit_scope()
         sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_lists_allowed(self):
@@ -163,8 +168,10 @@ class DictLimitsTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
+        sys.sandbox.exit_scope()
         sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_dicts_allowed(self):
@@ -188,8 +195,10 @@ class SetLimitsTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
+        sys.sandbox.exit_scope()
         sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_sets_allowed(self):
@@ -213,8 +222,10 @@ class TupleLimitsTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
+        sys.sandbox.exit_scope()
         sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_tuples_allowed(self):
@@ -236,8 +247,10 @@ class TypeRestrictionTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
+        sys.sandbox.exit_scope()
         sys.sandbox.set_limits(**self.original_limits)
 
     def test_float_allowed_by_default(self):
@@ -281,8 +294,10 @@ class MinimalSafeLimitsTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
+        sys.sandbox.exit_scope()
         sys.sandbox.set_limits(**self.original_limits)
 
     def test_minimal_limits_allow_imports(self):
@@ -329,11 +344,13 @@ class SuspendResumeLimitsTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
         # Ensure limits are resumed
         while sys.sandbox.suspended:
             sys.sandbox.resume()
+        sys.sandbox.exit_scope()
         sys.sandbox.set_limits(**self.original_limits)
 
     def test_suspend_bypasses_limits(self):
@@ -399,6 +416,60 @@ class SuspendResumeLimitsTests(unittest.TestCase):
         # Should fail now
         with self.assertRaises(SandboxOverflowError):
             list(range(20))
+
+
+class OutOfScopeLimitsTests(unittest.TestCase):
+    """Test that limits do NOT apply outside sandbox scope."""
+
+    def setUp(self):
+        self.original_limits = _get_settable_limits()
+        # Ensure not in scope
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+
+    def tearDown(self):
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+        sys.sandbox.set_limits(**self.original_limits)
+
+    def test_int_limit_not_enforced_outside_scope(self):
+        """Integer limits should not apply outside sandbox scope."""
+        sys.sandbox.set_limits(max_int_digits=TEST_INT_DIGITS_LIMIT)
+        # Should succeed - not in scope
+        x = 10 ** 50
+        self.assertIsInstance(x, int)
+
+    def test_str_limit_not_enforced_outside_scope(self):
+        """String limits should not apply outside sandbox scope."""
+        sys.sandbox.set_limits(max_str_length=TEST_STR_LIMIT)
+        # Should succeed - not in scope
+        s = ''.join(['x' for _ in range(200)])
+        self.assertEqual(len(s), 200)
+
+    def test_list_limit_not_enforced_outside_scope(self):
+        """List limits should not apply outside sandbox scope."""
+        sys.sandbox.set_limits(max_list_size=100)
+        # Should succeed - not in scope
+        lst = list(range(200))
+        self.assertEqual(len(lst), 200)
+
+    def test_float_restriction_not_enforced_outside_scope(self):
+        """Float restriction should not apply outside sandbox scope."""
+        sys.sandbox.set_limits(allow_float=False)
+        # Should succeed - not in scope
+        f = float(1)
+        self.assertEqual(f, 1.0)
+
+    def test_complex_restriction_not_enforced_outside_scope(self):
+        """Complex restriction should not apply outside sandbox scope."""
+        sys.sandbox.set_limits(allow_complex=False)
+        # Should succeed - not in scope
+        c = complex(1, 2)
+        self.assertEqual(c, 1+2j)
 
 
 if __name__ == '__main__':

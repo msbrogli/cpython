@@ -2915,7 +2915,9 @@ handle_eval_breaker:
             PyObject *owner = TOP();
             PyObject *v = SECOND();
             int err;
-            if (!tstate->interp->sandbox.limits.allow_dunder_access) {
+            /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
+            if (!tstate->interp->sandbox.limits.allow_dunder_access ||
+                !tstate->interp->sandbox.limits.allow_unsafe) {
                 if (_PySandbox_CheckDunderAccess(name) < 0) {
                     goto error;
                 }
@@ -2935,7 +2937,9 @@ handle_eval_breaker:
             PyObject *name = GETITEM(names, oparg);
             PyObject *owner = POP();
             int err;
-            if (!tstate->interp->sandbox.limits.allow_dunder_access) {
+            /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
+            if (!tstate->interp->sandbox.limits.allow_dunder_access ||
+                !tstate->interp->sandbox.limits.allow_unsafe) {
                 if (_PySandbox_CheckDunderAccess(name) < 0) {
                     Py_DECREF(owner);
                     goto error;
@@ -3506,7 +3510,9 @@ handle_eval_breaker:
             PREDICTED(LOAD_ATTR);
             PyObject *name = GETITEM(names, oparg);
             PyObject *owner = TOP();
-            if (!tstate->interp->sandbox.limits.allow_dunder_access) {
+            /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
+            if (!tstate->interp->sandbox.limits.allow_dunder_access ||
+                !tstate->interp->sandbox.limits.allow_unsafe) {
                 if (_PySandbox_CheckDunderAccess(name) < 0) {
                     goto error;
                 }
@@ -4536,6 +4542,14 @@ handle_eval_breaker:
             PyObject *name = GETITEM(names, oparg);
             PyObject *obj = TOP();
             PyObject *meth = NULL;
+
+            /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
+            if (!tstate->interp->sandbox.limits.allow_dunder_access ||
+                !tstate->interp->sandbox.limits.allow_unsafe) {
+                if (_PySandbox_CheckDunderAccess(name) < 0) {
+                    goto error;
+                }
+            }
 
             int meth_found = _PyObject_GetMethod(obj, name, &meth);
 

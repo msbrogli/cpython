@@ -749,6 +749,10 @@ builtin_compile_impl(PyObject *module, PyObject *source, PyObject *filename,
     int start[] = {Py_file_input, Py_eval_input, Py_single_input, Py_func_type_input};
     PyObject *result;
 
+    if (_PySandbox_CheckUnsafeBlocked("compile") < 0) {
+        goto error;
+    }
+
     PyCompilerFlags cf = _PyCompilerFlags_INIT;
     cf.cf_flags = flags | PyCF_SOURCE_IS_UTF8;
     if (feature_version >= 0 && (flags & PyCF_ONLY_AST)) {

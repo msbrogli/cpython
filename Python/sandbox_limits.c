@@ -153,7 +153,6 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
         return 0;
     }
 
-    /* Check float - use PyType_IsSubtype to catch subclasses (V-003 fix) */
     if (!limits->allow_float && PyType_IsSubtype(type, &PyFloat_Type)) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxTypeError,
@@ -162,7 +161,6 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
         return -1;
     }
 
-    /* Check complex - use PyType_IsSubtype to catch subclasses (V-003 fix) */
     if (!limits->allow_complex && PyType_IsSubtype(type, &PyComplex_Type)) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxTypeError,
@@ -211,7 +209,7 @@ _PySandbox_CheckAllocation(void)
     }
 
     /* Increment scoped count */
-    sandbox->counters.allocation_count++;
+    _PySandbox_CounterIncrement(sandbox->counters.allocation_count);
 
     /* If there's already an error set, don't raise another one.
      * This prevents allocation failures during error handling. */
@@ -220,13 +218,14 @@ _PySandbox_CheckAllocation(void)
     }
 
     /* Check scoped limit */
+    uint64_t alloc_count = _PySandbox_CounterLoad(sandbox->counters.allocation_count);
     /* Hard limit: grace allocations exhausted, fail unconditionally */
-    if (sandbox->counters.allocation_count > limits->max_allocations + ALLOCATION_GRACE_HEADROOM) {
+    if (alloc_count > limits->max_allocations + ALLOCATION_GRACE_HEADROOM) {
         PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox scoped allocation limit exceeded");
         return -1;
     }
     /* Soft limit: raise MemoryError only on the first allocation past the limit */
-    if (sandbox->counters.allocation_count == limits->max_allocations + 1) {
+    if (alloc_count == limits->max_allocations + 1) {
         PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox scoped allocation limit exceeded");
         return -1;
     }
@@ -269,10 +268,10 @@ _PySandbox_CheckScopeStatement(void)
     }
 
     /* Increment statement count */
-    sandbox->counters.statement_count++;
+    _PySandbox_CounterIncrement(sandbox->counters.statement_count);
 
     /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
-    if (sandbox->counters.statement_count == limits->max_statements + 1) {
+    if (_PySandbox_CounterLoad(sandbox->counters.statement_count) == limits->max_statements + 1) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox statement limit exceeded");
@@ -318,10 +317,10 @@ _PySandbox_CheckScopeOperation(void)
     }
 
     /* Increment operation count */
-    sandbox->counters.operation_count++;
+    _PySandbox_CounterIncrement(sandbox->counters.operation_count);
 
     /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
-    if (sandbox->counters.operation_count == limits->max_operations + 1) {
+    if (_PySandbox_CounterLoad(sandbox->counters.operation_count) == limits->max_operations + 1) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox operation limit exceeded");
@@ -372,16 +371,30 @@ is_dunder_name(PyObject *name)
     return 0;
 }
 
+/* Check if name is "__iter__"
+ * Returns: 1 if __iter__, 0 otherwise. */
+static int
+is_iter_dunder(PyObject *name)
+{
+    if (!PyUnicode_Check(name)) {
+        return 0;
+    }
+    return _PyUnicode_EqualToASCIIString(name, "__iter__");
+}
+
 /* _PySandbox_CheckDunderAccess - Check if dunder attribute access is blocked
  *
  * This function is called from ceval.c for LOAD_ATTR, STORE_ATTR, DELETE_ATTR.
- * It blocks access to attributes containing "__" when:
- * - allow_dunder_access is disabled (0)
+ * It blocks access to:
+ * - __iter__ when allow_unsafe=0
+ * - All dunder attributes when allow_dunder_access=0
+ *
+ * Requirements for blocking:
  * - Sandbox is not suspended and not in recursive check
  * - At least one filename is registered for scope tracking
  * - Current frame's co_filename matches a registered filename
  *
- * Returns: 0 if access allowed, -1 if blocked (AttributeError set)
+ * Returns: 0 if access allowed, -1 if blocked (exception set)
  */
 int
 _PySandbox_CheckDunderAccess(PyObject *name)
@@ -392,15 +405,16 @@ _PySandbox_CheckDunderAccess(PyObject *name)
         return 0;
     }
     _PySandboxLimits *limits = &sandbox->limits;
-    if (limits->allow_dunder_access) {
+
+    /* Fast path: if both __iter__ and general dunder access are allowed, skip */
+    int check_iter = !limits->allow_unsafe && is_iter_dunder(name);
+    int check_dunder = !limits->allow_dunder_access && is_dunder_name(name);
+
+    if (!check_iter && !check_dunder) {
         return 0;
     }
 
-    if (!is_dunder_name(name)) {
-        return 0;
-    }
-
-    /* Check if in sandbox scope */
+    /* Check if in sandbox scope (shared by both checks) */
     if (sandbox->registered_filenames == NULL) {
         return 0;
     }
@@ -417,10 +431,64 @@ _PySandbox_CheckDunderAccess(PyObject *name)
         return 0;
     }
 
-    /* Block dunder access */
+    /* Block __iter__ access unless allow_unsafe */
+    if (check_iter) {
+        sandbox->suppress_checks = 1;
+        PyErr_SetString(PyExc_SandboxSecurityError,
+                        "__iter__ access is not allowed in sandbox scope");
+        sandbox->suppress_checks = 0;
+        return -1;
+    }
+
+    /* Block general dunder access if allow_dunder_access=0 */
+    if (check_dunder) {
+        sandbox->suppress_checks = 1;
+        PyErr_Format(PyExc_SandboxAttributeError,
+                     "dunder attribute access blocked in sandbox: '%U'", name);
+        sandbox->suppress_checks = 0;
+        return -1;
+    }
+
+    return 0;
+}
+
+/* ============ Unsafe Operation Checking ============ */
+
+/* _PySandbox_CheckUnsafeBlocked - Check if an unsafe operation is blocked
+ *
+ * This function blocks dangerous operations (compile(), gc introspection, etc.)
+ * in sandbox scope unless allow_unsafe=1. It is used to prevent escape vectors.
+ *
+ * Returns: 0 if allowed, -1 if blocked (SandboxSecurityError set)
+ */
+int
+_PySandbox_CheckUnsafeBlocked(const char *operation)
+{
+    _PySandboxState *sandbox = get_sandbox_state();
+    if (sandbox == NULL || sandbox->suspended || sandbox->suppress_checks) {
+        return 0;
+    }
+    if (sandbox->limits.allow_unsafe) {
+        return 0;  /* Unsafe operations allowed */
+    }
+    if (sandbox->registered_filenames == NULL) {
+        return 0;  /* No scope registered */
+    }
+
+    /* Check if currently in sandbox scope */
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;  /* Error during scope check */
+    }
+    if (!in_scope) {
+        return 0;  /* Not in scope */
+    }
+
+    /* Block the unsafe operation */
     sandbox->suppress_checks = 1;
-    PyErr_Format(PyExc_SandboxAttributeError,
-                 "dunder attribute access blocked in sandbox: '%U'", name);
+    PyErr_Format(PyExc_SandboxSecurityError,
+                 "%s is not allowed in sandbox scope", operation);
     sandbox->suppress_checks = 0;
     return -1;
 }

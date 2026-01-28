@@ -344,6 +344,7 @@ SANDBOX_BOOL_GETSET(allow_float, limits.allow_float)
 SANDBOX_BOOL_GETSET(allow_complex, limits.allow_complex)
 SANDBOX_BOOL_GETSET(allow_dunder_access, limits.allow_dunder_access)
 SANDBOX_BOOL_GETSET(count_iterations_as_operations, limits.count_iterations_as_operations)
+SANDBOX_BOOL_GETSET(allow_unsafe, limits.allow_unsafe)
 SANDBOX_BOOL_GETSET(frozen_mode, frozen_mode)
 SANDBOX_BOOL_GETSET(auto_mutable, auto_mutable)
 
@@ -478,6 +479,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_allow_dunder_access, "Allow dunder attribute access", NULL},
     {"count_iterations_as_operations", (getter)sandbox_get_count_iterations_as_operations,
      (setter)sandbox_set_count_iterations_as_operations, "Count iterator yields as operations", NULL},
+    {"allow_unsafe", (getter)sandbox_get_allow_unsafe,
+     (setter)sandbox_set_allow_unsafe, "Allow unsafe operations (compile, gc introspection, __iter__)", NULL},
     {"frozen_mode", (getter)sandbox_get_frozen_mode,
      (setter)sandbox_set_frozen_mode, "Global frozen mode", NULL},
     {"auto_mutable", (getter)sandbox_get_auto_mutable,

@@ -4,6 +4,7 @@ This module tests that code running inside sandbox scope cannot modify
 sandbox configuration, ensuring sandboxed code cannot escape its restrictions.
 """
 
+import gc
 import sys
 import unittest
 
@@ -407,6 +408,331 @@ class SandboxModificationOutsideScopeAllowedTests(SandboxTestCase):
         with sys.sandbox.scope():
             self.assertTrue(sys.sandbox.in_scope())
         self.assertFalse(sys.sandbox.in_scope())
+
+
+class V001V002CompileBlockedTests(SandboxTestCase):
+    """Test that compile() is blocked in sandbox scope.
+
+    The compile() function allows creating code objects with arbitrary filenames,
+    which could be used to escape scope tracking. This test ensures compile()
+    is blocked when called from within sandbox scope.
+    """
+
+    def _run_in_scope(self, code_str):
+        """Execute code in sandbox scope via compile/exec."""
+        filename = "<sandbox_test>"
+        sys.sandbox.add_filename(filename)
+        try:
+            # compile() is called from OUTSIDE scope (this test file is not in scope)
+            code = compile(code_str, filename, "exec")
+            exec(code, {"sys": sys, "compile": compile})
+        finally:
+            sys.sandbox.remove_filename(filename)
+
+    def test_compile_blocked_in_scope(self):
+        """compile() should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError) as ctx:
+            self._run_in_scope("compile('x=1', 'attacker.py', 'exec')")
+        self.assertIn("compile", str(ctx.exception))
+        self.assertIn("not allowed", str(ctx.exception))
+
+    def test_compile_allowed_with_allow_unsafe(self):
+        """compile() should be allowed when allow_unsafe=True."""
+        sys.sandbox.allow_unsafe = True
+        try:
+            filename = "<sandbox_test>"
+            sys.sandbox.add_filename(filename)
+            try:
+                code = compile("result = compile('x=1', 'test.py', 'exec')", filename, "exec")
+                ns = {"compile": compile, "result": None}
+                exec(code, ns)
+                self.assertIsNotNone(ns["result"])
+            finally:
+                sys.sandbox.remove_filename(filename)
+        finally:
+            sys.sandbox.allow_unsafe = False
+
+    def test_compile_allowed_outside_scope(self):
+        """compile() should work outside sandbox scope."""
+        code = compile("x = 1", "test.py", "exec")
+        self.assertIsNotNone(code)
+
+
+class V007IterBlockedTests(SandboxTestCase):
+    """Test that __iter__ access is blocked in sandbox scope.
+
+    Direct access to __iter__ could bypass the sandbox iterator wrapper,
+    allowing unbounded iteration. This test ensures __iter__ is blocked.
+    """
+
+    def _run_in_scope(self, code_str, extra_globals=None):
+        """Execute code in sandbox scope via compile/exec."""
+        filename = "<sandbox_test>"
+        sys.sandbox.add_filename(filename)
+        try:
+            code = compile(code_str, filename, "exec")
+            ns = {"sys": sys}
+            if extra_globals:
+                ns.update(extra_globals)
+            exec(code, ns)
+            return ns
+        finally:
+            sys.sandbox.remove_filename(filename)
+
+    def test_iter_dunder_blocked_in_scope(self):
+        """__iter__ access should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError) as ctx:
+            self._run_in_scope("[1, 2, 3].__iter__()")
+        self.assertIn("__iter__", str(ctx.exception))
+        self.assertIn("not allowed", str(ctx.exception))
+
+    def test_iter_dunder_on_dict_blocked(self):
+        """__iter__ on dict should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError):
+            self._run_in_scope("{'a': 1}.__iter__()")
+
+    def test_iter_dunder_on_string_blocked(self):
+        """__iter__ on string should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError):
+            self._run_in_scope("'abc'.__iter__()")
+
+    def test_iter_allowed_with_allow_unsafe(self):
+        """__iter__ should be allowed when allow_unsafe=True."""
+        sys.sandbox.allow_unsafe = True
+        try:
+            ns = self._run_in_scope("result = [1, 2, 3].__iter__()")
+            self.assertIsNotNone(ns.get("result"))
+        finally:
+            sys.sandbox.allow_unsafe = False
+
+    def test_for_loop_still_works(self):
+        """for loops should work (use wrapped iterators)."""
+        ns = self._run_in_scope("result = [x for x in [1, 2, 3]]")
+        self.assertEqual(ns.get("result"), [1, 2, 3])
+
+    def test_iter_builtin_still_works(self):
+        """iter() builtin should work (returns wrapped iterator)."""
+        ns = self._run_in_scope("result = list(iter([1, 2, 3]))", {"iter": iter, "list": list})
+        self.assertEqual(ns.get("result"), [1, 2, 3])
+
+
+class V008DescriptorFrozenTests(SandboxTestCase):
+    """Test that descriptor protocol respects frozen state.
+
+    Property setters and __set__/__delete__ descriptors should be blocked
+    when the target object is frozen.
+    """
+
+    def _run_in_scope(self, code_str, extra_globals=None):
+        """Execute code in sandbox scope via compile/exec."""
+        filename = "<sandbox_test>"
+        sys.sandbox.add_filename(filename)
+        try:
+            code = compile(code_str, filename, "exec")
+            ns = {"sys": sys}
+            if extra_globals:
+                ns.update(extra_globals)
+            exec(code, ns)
+            return ns
+        finally:
+            sys.sandbox.remove_filename(filename)
+
+    def test_property_setter_blocked_on_frozen(self):
+        """Property setter should be blocked on frozen objects."""
+        class C:
+            def __init__(self):
+                self._x = 0
+
+            @property
+            def x(self):
+                return self._x
+
+            @x.setter
+            def x(self, v):
+                self._x = v
+
+        obj = C()
+        sys.sandbox.freeze(obj)
+        sys.sandbox.frozen_mode = True
+        try:
+            with self.assertRaises(SandboxAttributeError):
+                self._run_in_scope("obj.x = 5", {"obj": obj})
+        finally:
+            sys.sandbox.frozen_mode = False
+
+    def test_property_deleter_blocked_on_frozen(self):
+        """Property deleter should be blocked on frozen objects."""
+        class C:
+            def __init__(self):
+                self._x = 0
+
+            @property
+            def x(self):
+                return self._x
+
+            @x.deleter
+            def x(self):
+                del self._x
+
+        obj = C()
+        obj._x = 5
+        sys.sandbox.freeze(obj)
+        sys.sandbox.frozen_mode = True
+        try:
+            with self.assertRaises(SandboxAttributeError):
+                self._run_in_scope("del obj.x", {"obj": obj})
+        finally:
+            sys.sandbox.frozen_mode = False
+
+    def test_custom_descriptor_set_blocked_on_frozen(self):
+        """Custom __set__ descriptor should be blocked on frozen objects."""
+        class Desc:
+            def __get__(self, obj, cls):
+                return getattr(obj, '_val', None)
+
+            def __set__(self, obj, value):
+                obj._val = value
+
+        class C:
+            x = Desc()
+
+        obj = C()
+        sys.sandbox.freeze(obj)
+        sys.sandbox.frozen_mode = True
+        try:
+            with self.assertRaises(SandboxAttributeError):
+                self._run_in_scope("obj.x = 10", {"obj": obj})
+        finally:
+            sys.sandbox.frozen_mode = False
+
+    def test_property_setter_works_on_mutable(self):
+        """Property setter should work on mutable objects in frozen mode."""
+        class C:
+            def __init__(self):
+                self._x = 0
+
+            @property
+            def x(self):
+                return self._x
+
+            @x.setter
+            def x(self, v):
+                self._x = v
+
+        obj = C()
+        sys.sandbox.set_mutable(obj, True)
+        sys.sandbox.frozen_mode = True
+        try:
+            self._run_in_scope("obj.x = 5", {"obj": obj})
+            self.assertEqual(obj.x, 5)
+        finally:
+            sys.sandbox.frozen_mode = False
+
+
+class V009GCBlockedTests(SandboxTestCase):
+    """Test that gc module introspection is blocked in sandbox scope.
+
+    gc.get_objects(), gc.get_referrers(), gc.get_referents(), gc.collect(),
+    gc.freeze(), and gc.unfreeze() could be used to access or manipulate
+    internal state. These should be blocked in sandbox scope.
+    """
+
+    def _run_in_scope(self, code_str, extra_globals=None):
+        """Execute code in sandbox scope via compile/exec."""
+        filename = "<sandbox_test>"
+        sys.sandbox.add_filename(filename)
+        try:
+            code = compile(code_str, filename, "exec")
+            ns = {"sys": sys, "gc": gc}
+            if extra_globals:
+                ns.update(extra_globals)
+            exec(code, ns)
+            return ns
+        finally:
+            sys.sandbox.remove_filename(filename)
+
+    def test_gc_get_objects_blocked(self):
+        """gc.get_objects() should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError) as ctx:
+            self._run_in_scope("gc.get_objects()")
+        self.assertIn("gc.get_objects", str(ctx.exception))
+
+    def test_gc_get_referrers_blocked(self):
+        """gc.get_referrers() should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError) as ctx:
+            self._run_in_scope("gc.get_referrers([])")
+        self.assertIn("gc.get_referrers", str(ctx.exception))
+
+    def test_gc_get_referents_blocked(self):
+        """gc.get_referents() should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError) as ctx:
+            self._run_in_scope("gc.get_referents([])")
+        self.assertIn("gc.get_referents", str(ctx.exception))
+
+    def test_gc_collect_blocked(self):
+        """gc.collect() should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError) as ctx:
+            self._run_in_scope("gc.collect()")
+        self.assertIn("gc.collect", str(ctx.exception))
+
+    def test_gc_freeze_blocked(self):
+        """gc.freeze() should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError) as ctx:
+            self._run_in_scope("gc.freeze()")
+        self.assertIn("gc.freeze", str(ctx.exception))
+
+    def test_gc_unfreeze_blocked(self):
+        """gc.unfreeze() should be blocked in sandbox scope."""
+        with self.assertRaises(SandboxSecurityError) as ctx:
+            self._run_in_scope("gc.unfreeze()")
+        self.assertIn("gc.unfreeze", str(ctx.exception))
+
+    def test_gc_allowed_with_allow_unsafe(self):
+        """gc functions should be allowed when allow_unsafe=True."""
+        sys.sandbox.allow_unsafe = True
+        try:
+            ns = self._run_in_scope("result = gc.get_objects()")
+            self.assertIsInstance(ns.get("result"), list)
+        finally:
+            sys.sandbox.allow_unsafe = False
+
+    def test_gc_allowed_outside_scope(self):
+        """gc functions should work outside sandbox scope."""
+        objs = gc.get_objects()
+        self.assertIsInstance(objs, list)
+
+
+class AllowUnsafePropertyTests(SandboxTestCase):
+    """Test the allow_unsafe property functionality."""
+
+    def test_allow_unsafe_default_is_false(self):
+        """allow_unsafe should default to False."""
+        sys.sandbox.reset()
+        self.assertFalse(sys.sandbox.allow_unsafe)
+
+    def test_allow_unsafe_can_be_set(self):
+        """allow_unsafe should be settable."""
+        sys.sandbox.allow_unsafe = True
+        self.assertTrue(sys.sandbox.allow_unsafe)
+        sys.sandbox.allow_unsafe = False
+        self.assertFalse(sys.sandbox.allow_unsafe)
+
+    def test_allow_unsafe_setting_blocked_from_scope(self):
+        """Setting allow_unsafe from scope should raise SandboxSecurityError."""
+        filename = "<sandbox_test>"
+        sys.sandbox.add_filename(filename)
+        try:
+            code = compile("sys.sandbox.allow_unsafe = True", filename, "exec")
+            with self.assertRaises(SandboxSecurityError):
+                exec(code, {"sys": sys})
+        finally:
+            sys.sandbox.remove_filename(filename)
+
+    def test_allow_unsafe_reset_clears_it(self):
+        """reset() should clear allow_unsafe back to False."""
+        sys.sandbox.allow_unsafe = True
+        sys.sandbox.reset()
+        self.assertFalse(sys.sandbox.allow_unsafe)
 
 
 if __name__ == '__main__':

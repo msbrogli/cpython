@@ -1521,6 +1521,10 @@ static Py_ssize_t
 gc_collect_impl(PyObject *module, int generation)
 /*[clinic end generated code: output=b697e633043233c7 input=40720128b682d879]*/
 {
+    if (_PySandbox_CheckUnsafeBlocked("gc.collect") < 0) {
+        return -1;
+    }
+
     PyThreadState *tstate = _PyThreadState_GET();
 
     if (generation < 0 || generation >= NUM_GENERATIONS) {
@@ -1675,6 +1679,10 @@ Return the list of objects that directly refer to any of objs.");
 static PyObject *
 gc_get_referrers(PyObject *self, PyObject *args)
 {
+    if (_PySandbox_CheckUnsafeBlocked("gc.get_referrers") < 0) {
+        return NULL;
+    }
+
     if (PySys_Audit("gc.get_referrers", "(O)", args) < 0) {
         return NULL;
     }
@@ -1708,6 +1716,10 @@ Return the list of objects that are directly referred to by objs.");
 static PyObject *
 gc_get_referents(PyObject *self, PyObject *args)
 {
+    if (_PySandbox_CheckUnsafeBlocked("gc.get_referents") < 0) {
+        return NULL;
+    }
+
     Py_ssize_t i;
     if (PySys_Audit("gc.get_referents", "(O)", args) < 0) {
         return NULL;
@@ -1749,6 +1761,10 @@ static PyObject *
 gc_get_objects_impl(PyObject *module, Py_ssize_t generation)
 /*[clinic end generated code: output=48b35fea4ba6cb0e input=ef7da9df9806754c]*/
 {
+    if (_PySandbox_CheckUnsafeBlocked("gc.get_objects") < 0) {
+        return NULL;
+    }
+
     PyThreadState *tstate = _PyThreadState_GET();
     int i;
     PyObject* result;
@@ -1905,6 +1921,10 @@ static PyObject *
 gc_freeze_impl(PyObject *module)
 /*[clinic end generated code: output=502159d9cdc4c139 input=b602b16ac5febbe5]*/
 {
+    if (_PySandbox_CheckUnsafeBlocked("gc.freeze") < 0) {
+        return NULL;
+    }
+
     GCState *gcstate = get_gc_state();
     for (int i = 0; i < NUM_GENERATIONS; ++i) {
         gc_list_merge(GEN_HEAD(gcstate, i), &gcstate->permanent_generation.head);
@@ -1925,6 +1945,10 @@ static PyObject *
 gc_unfreeze_impl(PyObject *module)
 /*[clinic end generated code: output=1c15f2043b25e169 input=2dd52b170f4cef6c]*/
 {
+    if (_PySandbox_CheckUnsafeBlocked("gc.unfreeze") < 0) {
+        return NULL;
+    }
+
     GCState *gcstate = get_gc_state();
     gc_list_merge(&gcstate->permanent_generation.head,
                   GEN_HEAD(gcstate, NUM_GENERATIONS-1));

@@ -7849,6 +7849,10 @@ slot_tp_descr_get(PyObject *self, PyObject *obj, PyObject *type)
 static int
 slot_tp_descr_set(PyObject *self, PyObject *target, PyObject *value)
 {
+    if (_PySandbox_CheckFrozen(target) < 0) {
+        return -1;
+    }
+
     PyObject* stack[3];
     PyObject *res;
 

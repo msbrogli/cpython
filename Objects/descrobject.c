@@ -1645,6 +1645,10 @@ property_descr_set(PyObject *self, PyObject *obj, PyObject *value)
     propertyobject *gs = (propertyobject *)self;
     PyObject *func, *res;
 
+    if (_PySandbox_CheckFrozen(obj) < 0) {
+        return -1;
+    }
+
     if (value == NULL) {
         func = gs->prop_del;
     }

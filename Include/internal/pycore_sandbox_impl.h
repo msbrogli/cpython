@@ -24,6 +24,42 @@ extern "C" {
  * This allows Python to format and print MemoryError without cascading failures. */
 #define ALLOCATION_GRACE_HEADROOM 1000
 
+/* ============ Thread-safe counter macros ============
+ *
+ * For GIL-enabled builds (default): use regular increments, protected by the GIL.
+ * For free-threading builds (Py_GIL_DISABLED): use atomic operations.
+ *
+ * Performance notes:
+ * - GIL-enabled: zero overhead (plain ++counter)
+ * - Free-threading: ~5-10ns overhead per atomic increment (uncontended)
+ * This overhead is negligible compared to Python bytecode dispatch (~50-100ns).
+ */
+#ifdef Py_GIL_DISABLED
+/* Free-threading build: use atomic operations */
+#  ifdef HAVE_BUILTIN_ATOMIC
+#    define _PySandbox_CounterIncrement(counter) \
+         __atomic_add_fetch(&(counter), 1, __ATOMIC_RELAXED)
+#    define _PySandbox_CounterLoad(counter) \
+         __atomic_load_n(&(counter), __ATOMIC_RELAXED)
+#  elif defined(_MSC_VER)
+#    include <intrin.h>
+#    define _PySandbox_CounterIncrement(counter) \
+         _InterlockedIncrement64((__int64*)&(counter))
+#    define _PySandbox_CounterLoad(counter) \
+         _InterlockedCompareExchange64((__int64*)&(counter), 0, 0)
+#  else
+/* Fallback: volatile operations (not truly atomic but better than nothing) */
+#    define _PySandbox_CounterIncrement(counter) \
+         (++*((volatile uint64_t*)&(counter)))
+#    define _PySandbox_CounterLoad(counter) \
+         (*((volatile uint64_t*)&(counter)))
+#  endif
+#else
+/* GIL-enabled build: GIL provides synchronization, use plain operations */
+#define _PySandbox_CounterIncrement(counter) (++(counter))
+#define _PySandbox_CounterLoad(counter) (counter)
+#endif
+
 /* Maximum allowed value for uint64_t limits to prevent overflow when doing
  * comparisons like `count == max + 1` or `count > max + ALLOCATION_GRACE_HEADROOM`.
  * We use UINT64_MAX - ALLOCATION_GRACE_HEADROOM as the safe maximum. */
@@ -226,8 +262,8 @@ sandbox_check_iteration(void)
 
     /* Iteration counter */
     if (check_iters) {
-        sandbox->counters.iteration_count++;
-        if (sandbox->counters.iteration_count == limits->max_iterations + 1) {
+        _PySandbox_CounterIncrement(sandbox->counters.iteration_count);
+        if (_PySandbox_CounterLoad(sandbox->counters.iteration_count) == limits->max_iterations + 1) {
             sandbox->suppress_checks = 1;
             PyErr_SetString(PyExc_SandboxRuntimeError,
                             "Sandbox iteration limit exceeded");
@@ -238,8 +274,8 @@ sandbox_check_iteration(void)
 
     /* Operation counter (optional, piggybacks on same scope check) */
     if (check_ops) {
-        sandbox->counters.operation_count++;
-        if (sandbox->counters.operation_count == limits->max_operations + 1) {
+        _PySandbox_CounterIncrement(sandbox->counters.operation_count);
+        if (_PySandbox_CounterLoad(sandbox->counters.operation_count) == limits->max_operations + 1) {
             sandbox->suppress_checks = 1;
             PyErr_SetString(PyExc_SandboxRuntimeError,
                             "Sandbox operation limit exceeded");

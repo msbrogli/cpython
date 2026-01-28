@@ -106,6 +106,11 @@ typedef struct {
 
     /* Count iterator yields as operations towards max_operations */
     int count_iterations_as_operations;  /* 0 = off (default), 1 = each yield increments operation_count */
+
+    /* Block unsafe operations: compile(), __iter__(), gc introspection.
+     * When allow_unsafe=0 (default), these are blocked in sandbox scope.
+     * Set allow_unsafe=1 to allow them (less secure). */
+    int allow_unsafe;
 } _PySandboxLimits;
 
 /* Sandbox counters - separated from limits for clarity */
@@ -133,6 +138,7 @@ typedef struct {
     .allow_complex = 1,             \
     .allow_dunder_access = 1,       \
     .count_iterations_as_operations = 0, \
+    .allow_unsafe = 0,              \
 }
 
 #define _PySandboxCounters_INIT { \
@@ -262,6 +268,11 @@ PyAPI_FUNC(int) _PySandbox_CheckIteration(void);
 
 /* Check dunder attribute access - returns -1 and sets exception when blocked */
 PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
+
+/* Check if an unsafe operation is blocked in sandbox scope.
+ * Returns 0 if allowed, -1 if blocked (sets SandboxSecurityError).
+ * Unsafe operations include: compile(), __iter__() access, gc introspection. */
+PyAPI_FUNC(int) _PySandbox_CheckUnsafeBlocked(const char *operation);
 
 /* Check if attribute mutation is blocked on an object.
  * Returns 0 if mutation is allowed, -1 if blocked (sets SandboxAttributeError).

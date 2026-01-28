@@ -2449,6 +2449,40 @@ PyDoc_STRVAR(getsandboxfrozenmode_doc,
 Return True if global sandbox frozen mode is currently active."
 );
 
+/* ============ Sandbox Auto-Mutable Mode ============ */
+
+static PyObject *
+sys_setsandboxautomutable(PyObject *self, PyObject *arg)
+{
+    int mode = PyObject_IsTrue(arg);
+    if (mode < 0) {
+        return NULL;
+    }
+    PySandbox_SetAutoMutableMode(mode);
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(setsandboxautomutable_doc,
+"setsandboxautomutable(enabled)\n\
+\n\
+Enable or disable sandbox auto-mutable mode.\n\
+When enabled alongside frozen mode, newly created functions, classes,\n\
+and instances within sandbox scope are automatically marked as mutable."
+);
+
+static PyObject *
+sys_getsandboxautomutable(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    int mode = PySandbox_GetAutoMutableMode();
+    return PyBool_FromLong(mode);
+}
+
+PyDoc_STRVAR(getsandboxautomutable_doc,
+"getsandboxautomutable() -> bool\n\
+\n\
+Return True if sandbox auto-mutable mode is currently active."
+);
+
 static PyObject *
 sys_setsandboxopcoderestrictmode(PyObject *self, PyObject *arg)
 {
@@ -2647,6 +2681,10 @@ static PyMethodDef sys_methods[] = {
      setsandboxfrozenmode_doc},
     {"getsandboxfrozenmode", sys_getsandboxfrozenmode, METH_NOARGS,
      getsandboxfrozenmode_doc},
+    {"setsandboxautomutable", sys_setsandboxautomutable, METH_O,
+     setsandboxautomutable_doc},
+    {"getsandboxautomutable", sys_getsandboxautomutable, METH_NOARGS,
+     getsandboxautomutable_doc},
     {"sandboxfreezeobject", sys_sandboxfreezeobject, METH_O,
      sandboxfreezeobject_doc},
     {"sandboxisobjectfrozen", sys_sandboxisobjectfrozen, METH_O,

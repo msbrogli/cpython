@@ -517,5 +517,342 @@ except SandboxAttributeError:
                         f"Property setter not blocked: stdout={result.stdout!r} stderr={result.stderr!r}")
 
 
+class AutoMutableTests(unittest.TestCase):
+    """Subprocess tests for auto-mutable mode.
+
+    Auto-mutable mode automatically marks newly created functions, classes,
+    and instances as mutable (Py_OBJFLAGS_MUTABLE) when both frozen_mode
+    and auto_mutable_mode are active, and the creation happens within
+    sandbox scope. Imported modules remain frozen because they have
+    different co_filename values outside the registered scope.
+    """
+
+    def test_api_default_false(self):
+        """Auto-mutable mode should be disabled by default."""
+        code = '''
+import sys
+if sys.getsandboxautomutable():
+    print("FAIL: default should be False")
+    sys.exit(1)
+print("PASS")
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_api_set_get(self):
+        """setsandboxautomutable/getsandboxautomutable should work."""
+        code = '''
+import sys
+sys.setsandboxautomutable(True)
+if not sys.getsandboxautomutable():
+    print("FAIL: should be True after set")
+    sys.exit(1)
+sys.setsandboxautomutable(False)
+if sys.getsandboxautomutable():
+    print("FAIL: should be False after clear")
+    sys.exit(1)
+print("PASS")
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_function_is_mutable(self):
+        """Functions created in sandbox scope should be auto-marked mutable."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+def f():
+    pass
+f.x = 1
+if f.x != 1:
+    print("FAIL: f.x should be 1")
+    sys.exit(1)
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_class_is_mutable(self):
+        """Classes created in sandbox scope should be auto-marked mutable."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+class C:
+    pass
+C.x = 1
+if C.x != 1:
+    print("FAIL: C.x should be 1")
+    sys.exit(1)
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_instance_is_mutable(self):
+        """Instances created in sandbox scope should be auto-marked mutable."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+class C:
+    pass
+obj = C()
+obj.x = 42
+if obj.x != 42:
+    print("FAIL: obj.x should be 42")
+    sys.exit(1)
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_imported_module_stays_frozen(self):
+        """Imported modules should remain frozen (different co_filename)."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+import os
+try:
+    os.NEW_ATTR = 1
+    print("FAIL: should have raised SandboxAttributeError")
+    sys.exit(1)
+except SandboxAttributeError:
+    print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_nested_function_is_mutable(self):
+        """Nested functions should also be auto-marked mutable."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+def outer():
+    def inner():
+        pass
+    inner.tag = 'nested'
+    return inner
+f = outer()
+if f.tag != 'nested':
+    print("FAIL")
+    sys.exit(1)
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_closure_is_mutable(self):
+        """Closure functions should be auto-marked mutable."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+def make_adder(n):
+    def adder(x):
+        return x + n
+    return adder
+add5 = make_adder(5)
+add5.info = 'adds 5'
+if add5.info != 'adds 5':
+    print("FAIL")
+    sys.exit(1)
+if add5(3) != 8:
+    print("FAIL: wrong result")
+    sys.exit(1)
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_decorated_function_is_mutable(self):
+        """Decorated functions should be auto-marked mutable."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+def my_decorator(func):
+    func.decorated = True
+    return func
+
+@my_decorator
+def greet():
+    return 'hello'
+
+if not greet.decorated:
+    print("FAIL: decorator attr not set")
+    sys.exit(1)
+greet.extra = 'ok'
+if greet.extra != 'ok':
+    print("FAIL")
+    sys.exit(1)
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_metaclass_created_class_is_mutable(self):
+        """Classes created via metaclass should be auto-marked mutable."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+class Meta(type):
+    pass
+class MyClass(metaclass=Meta):
+    pass
+MyClass.attr = 'meta'
+if MyClass.attr != 'meta':
+    print("FAIL")
+    sys.exit(1)
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_noop_without_frozen_mode(self):
+        """Auto-mutable alone (without frozen mode) should not break anything."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxautomutable(True)
+# Frozen mode is NOT enabled
+code = compile("""
+class C:
+    pass
+obj = C()
+obj.x = 1
+C.y = 2
+def f():
+    pass
+f.z = 3
+if obj.x != 1 or C.y != 2 or f.z != 3:
+    print("FAIL")
+    sys.exit(1)
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_builtin_instances_are_mutable(self):
+        """Built-in instances (dict, list) created in scope should be mutable."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+d = dict()
+d['key'] = 'value'
+if d['key'] != 'value':
+    print("FAIL: dict")
+    sys.exit(1)
+
+lst = list()
+lst.append(1)
+if lst != [1]:
+    print("FAIL: list")
+    sys.exit(1)
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_full_integration(self):
+        """Full integration: classes, functions, instances mutable; imports frozen."""
+        code = '''
+import sys
+sys.addsandboxfilename('<sandbox>')
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+code = compile("""
+class Foo:
+    pass
+def bar():
+    pass
+obj = Foo()
+obj.x = 42
+bar.tag = 'hello'
+Foo.class_var = 99
+
+if obj.x != 42:
+    print("FAIL: obj.x")
+    sys.exit(1)
+if bar.tag != 'hello':
+    print("FAIL: bar.tag")
+    sys.exit(1)
+if Foo.class_var != 99:
+    print("FAIL: Foo.class_var")
+    sys.exit(1)
+
+# Imported module should stay frozen
+import os
+try:
+    os.NEW = 1
+    print("FAIL: os should be frozen")
+    sys.exit(1)
+except SandboxAttributeError:
+    pass
+
+print("PASS")
+""", '<sandbox>', 'exec')
+exec(code)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+
 if __name__ == '__main__':
     unittest.main()

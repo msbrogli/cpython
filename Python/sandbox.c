@@ -99,6 +99,7 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.creation_hook.in_hook = 0;
 
     interp->sandbox.frozen_mode = 0;
+    interp->sandbox.auto_mutable_mode = 0;
     interp->sandbox.opcode_restrict_mode = 0;
     _PySandbox_OpcodeSet_ZERO(&interp->sandbox.banned_opcodes);
 }
@@ -1266,6 +1267,63 @@ PySandbox_SetObjectMutable(PyObject *obj, int mutable)
     } else {
         obj->ob_flags &= ~Py_OBJFLAGS_MUTABLE;
     }
+}
+
+/* ============ Auto-Mutable Mode ============ */
+
+/* _PySandbox_MaybeMarkMutable - conditionally mark a newly created object
+ * as mutable (Py_OBJFLAGS_MUTABLE) when auto_mutable_mode and frozen_mode
+ * are both active and the current frame is within sandbox scope.
+ *
+ * This is called from MAKE_FUNCTION (ceval.c) and type_call (typeobject.c)
+ * to automatically allow freshly created functions, classes, and instances
+ * to be mutated while keeping imported modules frozen.
+ */
+void
+_PySandbox_MaybeMarkMutable(PyObject *obj)
+{
+    assert(obj != NULL);
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return;
+    }
+    /* Fast path: both flags must be on */
+    if (!interp->sandbox.auto_mutable_mode || !interp->sandbox.frozen_mode) {
+        return;
+    }
+    if (interp->sandbox.limits.suspended) {
+        return;
+    }
+    if (interp->sandbox.limits.registered_filenames.count == 0) {
+        return;
+    }
+    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    if (frame == NULL) {
+        return;
+    }
+    if (!frame_in_sandbox_scope(&interp->sandbox.limits.registered_filenames, frame)) {
+        return;
+    }
+    obj->ob_flags |= Py_OBJFLAGS_MUTABLE;
+}
+
+void
+PySandbox_SetAutoMutableMode(int mode)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp != NULL) {
+        interp->sandbox.auto_mutable_mode = mode ? 1 : 0;
+    }
+}
+
+int
+PySandbox_GetAutoMutableMode(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return 0;
+    }
+    return interp->sandbox.auto_mutable_mode;
 }
 
 /* ============ Opcode Restriction ============ */

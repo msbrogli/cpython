@@ -1122,6 +1122,18 @@ type_call(PyTypeObject *type, PyObject *args, PyObject *kwds)
         obj = _PySandbox_CallCreationHook(obj, type, Py_OBJHOOK_TYPE_CALL);
     }
 
+    /* Auto-mutable: mark new object if in sandbox scope */
+    if (obj != NULL) {
+        _PySandbox_MaybeMarkMutable(obj);
+        /* For class objects, also mark tp_dict so class attrs can be set */
+        if (PyType_Check(obj)) {
+            PyTypeObject *tp = (PyTypeObject *)obj;
+            if (tp->tp_dict != NULL) {
+                _PySandbox_MaybeMarkMutable(tp->tp_dict);
+            }
+        }
+    }
+
     return obj;
 }
 

@@ -7,7 +7,7 @@ This package contains tests split by feature domain:
 - test_scope: Scope management and statement counting
 - test_iterations: Iteration counting and iterator wrapper protection
 - test_dunder_access: Dunder attribute blocking
-- test_frozen_mode: Frozen mode
+- test_frozen_mode: Frozen mode and auto-mutable mode
 - test_integration: Integration tests
 - test_opcodes: Opcode restrictions
 """

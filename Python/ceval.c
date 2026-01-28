@@ -5426,6 +5426,9 @@ handle_eval_breaker:
                 func->func_defaults = POP();
             }
 
+            /* Auto-mutable: mark function if in sandbox scope */
+            _PySandbox_MaybeMarkMutable((PyObject *)func);
+
             PUSH((PyObject *)func);
             DISPATCH();
         }

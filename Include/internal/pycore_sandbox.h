@@ -179,6 +179,7 @@ typedef struct {
     _PySandboxLimits limits;
     _PyObjectCreationHook creation_hook;
     int frozen_mode;  /* 1 = global freeze active (block all attr mutations), 0 = normal */
+    int auto_mutable_mode;  /* 1 = auto-mark created objects as mutable within scope, 0 = off */
     int opcode_restrict_mode;            /* 1 = active, 0 = off */
     _PySandboxOpcodeSet banned_opcodes;  /* bitmap of banned opcodes */
 } _PySandboxState;
@@ -187,6 +188,7 @@ typedef struct {
     .limits = _PySandboxLimits_INIT,        \
     .creation_hook = _PyObjectCreationHook_INIT, \
     .frozen_mode = 0,                       \
+    .auto_mutable_mode = 0,                 \
     .opcode_restrict_mode = 0,              \
     .banned_opcodes = {{0}},                \
 }
@@ -229,6 +231,11 @@ PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
  *         per-instance Py_OBJFLAGS_FROZEN, global frozen_mode.
  * Respects sandbox suspend state. */
 PyAPI_FUNC(int) _PySandbox_CheckFrozen(PyObject *obj);
+
+/* Auto-mutable: mark a newly created object as mutable if auto_mutable_mode
+ * and frozen_mode are both active and the current frame is in sandbox scope.
+ * This is a no-op when either flag is off or the frame is out of scope. */
+PyAPI_FUNC(void) _PySandbox_MaybeMarkMutable(PyObject *obj);
 
 /* Opcode restriction check - called from DO_TRACING in ceval.c.
  * Returns 0 if opcode is allowed, -1 if banned (sets SandboxRuntimeError).
@@ -327,6 +334,12 @@ PyAPI_FUNC(int) PySandbox_IsObjectFrozen(PyObject *obj);
 /* Mark an object as mutable (override frozen mode).
  * If mutable is nonzero, sets Py_OBJFLAGS_MUTABLE; otherwise clears it. */
 PyAPI_FUNC(void) PySandbox_SetObjectMutable(PyObject *obj, int mutable);
+
+/* Set/get auto-mutable mode. When enabled alongside frozen mode,
+ * newly created functions, classes, and instances within sandbox scope
+ * are automatically marked as mutable (Py_OBJFLAGS_MUTABLE). */
+PyAPI_FUNC(void) PySandbox_SetAutoMutableMode(int mode);
+PyAPI_FUNC(int) PySandbox_GetAutoMutableMode(void);
 
 /* Opcode restriction mode: enable/disable runtime opcode checks.
  * When enabled, opcodes in the banned set raise SandboxRuntimeError

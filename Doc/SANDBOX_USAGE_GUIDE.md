@@ -33,10 +33,9 @@ import sys
 sys.sandbox.set_limits(
     max_list_size=10_000,
     max_str_length=10_000,
-    max_scope_statements=50_000,
-    max_scope_iterations=100_000,
-    max_scope_allocations=5_000,
-    max_allocations=100_000,
+    max_statements=50_000,
+    max_iterations=100_000,
+    max_allocations=5_000,
     allow_dunder_access=False,
 )
 
@@ -70,17 +69,18 @@ finally:
 
 The sandbox state is global to the interpreter. All limits, counters, and configuration are shared across all threads within the same interpreter.
 
-### Global vs. Scoped Limits
+### Scoped Limits
 
-- **Global limits** apply to all code regardless of where it runs:
-  - Size limits (`max_list_size`, `max_str_length`, etc.)
-  - Type restrictions (`allow_float`, `allow_complex`)
-  - Global allocation limit (`max_allocations`)
+All sandbox limits are scoped -- they only apply to code whose `co_filename` is registered in the sandbox. This includes:
 
-- **Scoped limits** only apply to code whose `co_filename` is registered:
-  - `max_scope_statements` -- limits executed statements
-  - `max_scope_allocations` -- limits object allocations
-  - `max_scope_iterations` -- limits iterator steps
+- Size limits (`max_list_size`, `max_str_length`, etc.)
+- Type restrictions (`allow_float`, `allow_complex`)
+- `max_statements` -- limits executed statements
+- `max_allocations` -- limits object allocations
+- `max_iterations` -- limits iterator steps
+- `max_operations` -- limits AST-level operations
+
+Code outside the registered filenames (e.g., stdlib, builtins, your harness) is not affected by any sandbox limits.
 
 ### Scope Tracking
 
@@ -162,14 +162,14 @@ sys.sandbox.reset()  # All limits to 0, modes to defaults, counters to 0
 
 ## Scope Management
 
-Scoped limits (statements, scoped allocations, iterations) require registering filenames to determine which code is "in scope".
+All sandbox limits require registering filenames to determine which code is "in scope".
 
 ### Method 1: Using `enter_scope()` (Simple)
 
 For executing code in the current frame's context:
 
 ```python
-sys.sandbox.set_limits(max_scope_statements=10_000)
+sys.sandbox.set_limits(max_statements=10_000)
 
 sys.sandbox.enter_scope()  # Registers current frame's filename + resets counters
 try:
@@ -184,7 +184,7 @@ finally:
 For explicit control over what code is tracked:
 
 ```python
-sys.sandbox.set_limits(max_scope_statements=10_000)
+sys.sandbox.set_limits(max_statements=10_000)
 
 # Register a virtual filename
 sys.sandbox.add_filename("<user-code>")
@@ -238,7 +238,7 @@ sys.sandbox.clear_filenames()               # Remove all filenames
 Prevents infinite loops and long-running code by counting statement executions within scope:
 
 ```python
-sys.sandbox.set_limits(max_scope_statements=1000)
+sys.sandbox.set_limits(max_statements=1000)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -259,7 +259,7 @@ except SandboxRuntimeError as e:
 Prevents excessive iteration even through C builtins like `sum()`, `list()`, `sorted()`:
 
 ```python
-sys.sandbox.set_limits(max_scope_iterations=10_000)
+sys.sandbox.set_limits(max_iterations=10_000)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -275,30 +275,12 @@ except SandboxRuntimeError as e:
     print(e)  # "Sandbox iteration limit exceeded"
 ```
 
-### Allocation Limits
+### Allocation Limit
 
-#### Global Allocation Limit
-
-Limits total GC-tracked object allocations across all code:
+Limits GC-tracked object allocations from code whose filename is registered:
 
 ```python
-sys.sandbox.set_limits(max_allocations=10_000)
-sys.sandbox.reset_counts()
-
-try:
-    items = []
-    for i in range(100_000):
-        items.append([i])  # Each [i] is a GC-tracked allocation
-except SandboxMemoryError:
-    print("Global allocation limit reached")
-```
-
-#### Scoped Allocation Limit
-
-Limits allocations only from code whose filename is registered:
-
-```python
-sys.sandbox.set_limits(max_scope_allocations=500)
+sys.sandbox.set_limits(max_allocations=500)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -311,7 +293,7 @@ for i in range(10000):
 try:
     exec(code)
 except SandboxMemoryError:
-    print("Scoped allocation limit reached")
+    print("Allocation limit reached")
 ```
 
 ### Reading Counters
@@ -320,11 +302,10 @@ Check current counter values at any time:
 
 ```python
 counts = sys.sandbox.get_counts()
-print(f"Global allocations: {counts['allocation_count']}")
-print(f"Scoped allocations: {counts['scope_allocation_count']}")
-print(f"Statements executed: {counts['scope_statement_count']}")
-print(f"Iterator steps: {counts['scope_iteration_count']}")
-print(f"Operations counted: {counts['scope_operation_count']}")
+print(f"Allocations: {counts['allocation_count']}")
+print(f"Statements executed: {counts['statement_count']}")
+print(f"Iterator steps: {counts['iteration_count']}")
+print(f"Operations counted: {counts['operation_count']}")
 ```
 
 ### Resetting Counters
@@ -344,7 +325,7 @@ Operation counting provides an alternative to statement counting that works at t
 ### How It Works
 
 1. **Compile with `PyCF_SANDBOX_COUNT` flag**: Code must be compiled with `flags=0x8000` to enable operation counting.
-2. **Set `max_scope_operations`**: Configure the maximum number of counted operations.
+2. **Set `max_operations`**: Configure the maximum number of counted operations.
 3. **Register filenames and reset counters**: Same as with statement counting.
 
 ### Basic Usage
@@ -354,7 +335,7 @@ import sys
 
 PyCF_SANDBOX_COUNT = 0x8000
 
-sys.sandbox.set_limits(max_scope_operations=1000)
+sys.sandbox.set_limits(max_operations=1000)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -371,7 +352,7 @@ finally:
 
 ### What Gets Counted
 
-Each `SANDBOX_COUNT` opcode increments the `scope_operation_count` counter. The compiler emits one opcode per AST node for:
+Each `SANDBOX_COUNT` opcode increments the `operation_count` counter. The compiler emits one opcode per AST node for:
 
 **Counted Statements:**
 - `Assign`, `AugAssign`, `Delete`
@@ -408,21 +389,51 @@ Each `SANDBOX_COUNT` opcode increments the `scope_operation_count` counter. The 
 
 ```python
 counts = sys.sandbox.get_counts()
-print(f"Operations: {counts['scope_operation_count']}")
+print(f"Operations: {counts['operation_count']}")
 ```
 
 ### Independence from Statement Counting
 
-Operation counting (`max_scope_operations`) and statement counting (`max_scope_statements`) are independent mechanisms. You can use either or both:
+Operation counting (`max_operations`) and statement counting (`max_statements`) are independent mechanisms. You can use either or both:
 
 ```python
 sys.sandbox.set_limits(
-    max_scope_statements=100_000,   # Tracing-based line counting
-    max_scope_operations=50_000,    # Opcode-based AST node counting
+    max_statements=100_000,   # Tracing-based line counting
+    max_operations=50_000,    # Opcode-based AST node counting
 )
 ```
 
-Code compiled **without** `PyCF_SANDBOX_COUNT` has zero operation counting overhead. Code compiled **with** the flag but without `max_scope_operations` set has minimal overhead (one pointer dereference + comparison per counted node).
+Code compiled **without** `PyCF_SANDBOX_COUNT` has zero operation counting overhead. Code compiled **with** the flag but without `max_operations` set has minimal overhead (one pointer dereference + comparison per counted node).
+
+### Counting Iterations as Operations
+
+By default, iterator steps only increment `iteration_count`. When `count_iterations_as_operations` is enabled, each iterator yield also increments `operation_count`, allowing you to enforce a single unified limit via `max_operations` for both AST-level operations and iterator steps:
+
+```python
+sys.sandbox.set_limits(
+    max_operations=10_000,
+    count_iterations_as_operations=True,
+)
+sys.sandbox.add_filename("<sandbox>")
+sys.sandbox.reset_counts()
+
+code = compile("""
+total = sum(range(1_000_000))  # Each iterator step counts as an operation
+""", "<sandbox>", "exec", flags=0x8000)
+
+try:
+    exec(code)
+except SandboxRuntimeError:
+    print("Operation limit exceeded (includes iteration steps)")
+finally:
+    sys.sandbox.clear_filenames()
+```
+
+The flag can also be set as a property:
+
+```python
+sys.sandbox.count_iterations_as_operations = True
+```
 
 ### No-Flag Code Is Not Counted
 
@@ -546,7 +557,7 @@ sys.sandbox.clear_filenames()
 ```
 
 Auto-mutable mode automatically applies `Py_OBJFLAGS_MUTABLE` to objects created via `type.__call__` (classes and instances) and `MAKE_FUNCTION` (function definitions) when:
-- Both `auto_mutable_mode` and `frozen_mode` are active
+- Both `auto_mutable` and `frozen_mode` are active
 - The current frame is within sandbox scope
 - The sandbox is not suspended
 
@@ -903,7 +914,7 @@ except SandboxOverflowError:
 Statement, iteration, and operation limits raise their exception **exactly once** on first violation. This allows `except` and `finally` blocks to execute normally:
 
 ```python
-sys.sandbox.set_limits(max_scope_statements=100)
+sys.sandbox.set_limits(max_statements=100)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -945,10 +956,9 @@ def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
             max_dict_size=10_000,
             max_set_size=10_000,
             max_tuple_size=50_000,
-            max_scope_statements=timeout_statements,
-            max_scope_iterations=500_000,
-            max_scope_allocations=5_000,
-            max_allocations=50_000,
+            max_statements=timeout_statements,
+            max_iterations=500_000,
+            max_allocations=5_000,
             allow_dunder_access=False,
         )
 
@@ -1014,8 +1024,8 @@ def eval_expression(expr):
             allow_float=True,
             allow_complex=False,
             allow_dunder_access=False,
-            max_scope_statements=100,
-            max_scope_iterations=1000,
+            max_statements=100,
+            max_iterations=1000,
         )
 
         # Ban imports
@@ -1078,9 +1088,9 @@ class SandboxRunner:
                 max_dict_size=5_000,
                 max_set_size=5_000,
                 max_tuple_size=10_000,
-                max_scope_statements=self.max_statements,
-                max_scope_iterations=self.max_statements * 10,
-                max_scope_allocations=self.max_allocations,
+                max_statements=self.max_statements,
+                max_iterations=self.max_statements * 10,
+                max_allocations=self.max_allocations,
                 allow_dunder_access=False,
             )
 
@@ -1099,8 +1109,8 @@ class SandboxRunner:
                 "success": True,
                 "namespace": {k: v for k, v in namespace.items()
                              if not k.startswith("_")},
-                "statements": counts["scope_statement_count"],
-                "allocations": counts["scope_allocation_count"],
+                "statements": counts["statement_count"],
+                "allocations": counts["allocation_count"],
             }
 
         except SandboxError as e:
@@ -1108,8 +1118,8 @@ class SandboxRunner:
             return {
                 "success": False,
                 "error": f"{type(e).__name__}: {e}",
-                "statements": counts["scope_statement_count"],
-                "allocations": counts["scope_allocation_count"],
+                "statements": counts["statement_count"],
+                "allocations": counts["allocation_count"],
             }
 
         finally:
@@ -1138,7 +1148,7 @@ print(result)
 
 ### 1. Always Use Scope Tracking
 
-Without scope tracking, scoped limits (statements, iterations, scoped allocations) are not enforced. Always register filenames:
+Without scope tracking, limits (statements, iterations, allocations) are not enforced. Always register filenames:
 
 ```python
 # Good
@@ -1183,9 +1193,9 @@ Statement limits catch Python-level loops, but C builtins like `sum()`, `list()`
 
 ```python
 sys.sandbox.set_limits(
-    max_scope_statements=100_000,   # Catches: while True: pass
-    max_scope_iterations=1_000_000, # Catches: sum(range(10**9))
-    max_scope_operations=50_000,    # AST-level counting (requires PyCF_SANDBOX_COUNT)
+    max_statements=100_000,   # Catches: while True: pass
+    max_iterations=1_000_000, # Catches: sum(range(10**9))
+    max_operations=50_000,    # AST-level counting (requires PyCF_SANDBOX_COUNT)
 )
 ```
 
@@ -1200,13 +1210,12 @@ sys.sandbox.set_limits(
     max_str_length=100_000,
 
     # Execution limits
-    max_scope_statements=100_000,
-    max_scope_iterations=1_000_000,
-    max_scope_operations=50_000,   # Requires PyCF_SANDBOX_COUNT at compile time
+    max_statements=100_000,
+    max_iterations=1_000_000,
+    max_operations=50_000,   # Requires PyCF_SANDBOX_COUNT at compile time
 
     # Memory limits
-    max_scope_allocations=10_000,
-    max_allocations=100_000,
+    max_allocations=10_000,
 
     # Access control
     allow_dunder_access=False,
@@ -1323,11 +1332,11 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `max_dict_size` | int | 0 | Max dict entries |
 | `max_set_size` | int | 0 | Max set members |
 | `max_tuple_size` | int | 0 | Max tuple items |
-| `max_allocations` | int | 0 | Max total GC-tracked allocations |
-| `max_scope_statements` | int | 0 | Max statements in scope |
-| `max_scope_allocations` | int | 0 | Max allocations in scope |
-| `max_scope_iterations` | int | 0 | Max iterator steps in scope |
-| `max_scope_operations` | int | 0 | Max AST operations in scope (requires `PyCF_SANDBOX_COUNT`) |
+| `max_statements` | int | 0 | Max statements in scope |
+| `max_allocations` | int | 0 | Max allocations in scope |
+| `max_iterations` | int | 0 | Max iterator steps in scope |
+| `max_operations` | int | 0 | Max AST operations in scope (requires `PyCF_SANDBOX_COUNT`) |
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | True | Allow `__dunder__` attributes |
+| `count_iterations_as_operations` | bool | False | Count iterator yields toward `operation_count` |

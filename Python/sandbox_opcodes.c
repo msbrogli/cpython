@@ -14,8 +14,8 @@
 
 /* _PySandbox_CheckOpcode - Check if an opcode is banned in sandbox scope
  *
- * Called from the DO_TRACING handler in ceval.c for every opcode dispatch
- * when tracing is active (which includes sandbox mode).
+ * Called from _PySandbox_CheckOpcodeDispatch() in ceval.c DISPATCH() macro
+ * when the opcode is in the banned_opcodes bitmap.
  *
  * Fast exits:
  * - opcode_restrict_mode == 0 (not active)
@@ -91,7 +91,6 @@ PySandbox_SetOpcodeRestrictMode(int mode)
         return;
     }
     interp->sandbox.opcode_restrict_mode = mode ? 1 : 0;
-    _PyThreadState_UpdateTracingState(tstate);
 }
 
 int

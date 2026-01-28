@@ -1323,11 +1323,40 @@ eval_frame_handle_pending(PyThreadState *tstate)
 #endif
 
 
+/* Inline sandbox opcode restriction check for DISPATCH().
+ * Returns 0 if allowed, -1 if banned (error already set).
+ * Fast path: single branch when opcode_restrict_mode == 0. */
+static inline int
+_PySandbox_CheckOpcodeDispatch(int opcode, PyInterpreterState *interp)
+{
+    _PySandboxState *sandbox = &interp->sandbox;
+    /* Fast exit: mode not active (common case, single branch) */
+    if (!sandbox->opcode_restrict_mode) {
+        return 0;
+    }
+    if (sandbox->suspended || sandbox->suppress_checks) {
+        return 0;
+    }
+    /* De-optimize specialized opcodes to base form for bitmap check */
+    int deopt = _PyOpcode_Deopt[opcode];
+    if (!_PySandbox_OpcodeSet_HAS(&sandbox->banned_opcodes, deopt)) {
+        return 0;
+    }
+    /* Slow path: scope check + error */
+    return _PySandbox_CheckOpcode(deopt);
+}
+
+
 /* Do interpreter dispatch accounting for tracing and instrumentation */
 #define DISPATCH() \
     { \
         NEXTOPARG(); \
         PRE_DISPATCH_GOTO(); \
+        if (_PySandbox_CheckOpcodeDispatch(opcode, tstate->interp) < 0) { \
+            frame->prev_instr = next_instr; \
+            next_instr++; \
+            goto error; \
+        } \
         assert(cframe.use_tracing == 0 || cframe.use_tracing == 255); \
         opcode |= cframe.use_tracing OR_DTRACE_LINE; \
         DISPATCH_GOTO(); \
@@ -5714,13 +5743,6 @@ handle_eval_breaker:
             }
         }
         TRACING_NEXTOPARG();
-        /* Sandbox opcode restriction check - skip if mode is off */
-        if (tstate->interp->sandbox.opcode_restrict_mode) {
-            if (_PySandbox_CheckOpcode(opcode) < 0) {
-                next_instr++;
-                goto error;
-            }
-        }
         PRE_DISPATCH_GOTO();
         DISPATCH_GOTO();
     }

@@ -44,15 +44,6 @@ typedef struct {
 #define _PySandbox_OpcodeSet_ZERO(set) \
     memset((set)->bits, 0, sizeof((set)->bits))
 
-/* Registered filenames set for scope tracking.
- * Tracks sandbox scope by co_filename values rather than frame pointers.
- * Code compiled with a registered filename counts toward scope limits. */
-typedef struct {
-    PyObject **filenames;    /* Array of filename strings (strong refs) */
-    size_t capacity;         /* Array capacity */
-    size_t count;            /* Number of registered filenames */
-} _PySandboxFilenameSet;
-
 /* Sandbox limits structure - stored in PyInterpreterState */
 typedef struct {
     /* Integer limits: max number of internal digits (each ~30 bits) */
@@ -164,11 +155,12 @@ typedef struct {
     int opcode_restrict_mode;            /* 1 = active, 0 = off */
     _PySandboxOpcodeSet banned_opcodes;  /* bitmap of banned opcodes */
 
-    /* Sandbox scope tracking - set of registered filenames.
+    /* Sandbox scope tracking - Python set of registered filenames.
      * Code with a registered co_filename counts toward scope limits.
      * This is simpler than frame-based tracking and works reliably
-     * across function calls within the same code context. */
-    _PySandboxFilenameSet registered_filenames;
+     * across function calls within the same code context.
+     * NULL when no filenames are registered (lazy-initialized). */
+    PyObject *registered_filenames;
 
     /* Recursion prevention - nonzero during limit check (to avoid recursive
        checks when error handling creates strings/integers) */
@@ -186,7 +178,7 @@ typedef struct {
     .auto_mutable_mode = 0,                 \
     .opcode_restrict_mode = 0,              \
     .banned_opcodes = {{0}},                \
-    .registered_filenames = {.filenames = NULL, .capacity = 0, .count = 0}, \
+    .registered_filenames = NULL, \
     .in_check = 0,                          \
     .suspended = 0,                         \
 }

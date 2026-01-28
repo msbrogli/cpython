@@ -361,6 +361,15 @@ PyAPI_FUNC(int) PySandbox_GetOpcodeRestrictMode(void);
 PyAPI_FUNC(int) PySandbox_SetBannedOpcodes(PyObject *opcode_set);
 PyAPI_FUNC(PyObject *) PySandbox_GetBannedOpcodes(void);
 
+/* ============ sys.sandbox namespace object ============ */
+
+/* Create the sys.sandbox singleton object (_PySandboxObject type).
+ * Returns a new reference. */
+PyAPI_FUNC(PyObject *) _PySandbox_NewObject(void);
+
+/* Reset all sandbox state to defaults (limits, counters, modes, scope, hooks). */
+PyAPI_FUNC(void) _PySandbox_Reset(PyInterpreterState *interp);
+
 #ifdef __cplusplus
 }
 #endif

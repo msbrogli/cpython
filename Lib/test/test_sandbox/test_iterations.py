@@ -18,41 +18,41 @@ class ScopedIterationCountTests(unittest.TestCase):
     def setUp(self):
         # Ensure clean scope state from any previous tests
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.resetsandboxcounters()
+        sys.sandbox.reset_counts()
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
-        sys.resetsandboxcounters()
+        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.reset_counts()
 
     def test_set_and_get_scope_max_iterations(self):
         """Setting and getting scope_max_iterations should work."""
-        sys.setsandboxlimits(scope_max_iterations=50000)
-        limits = sys.getsandboxlimits()
-        self.assertEqual(limits['scope_max_iterations'], 50000)
+        sys.sandbox.set_limits(max_scope_iterations=50000)
+        limits = sys.sandbox.get_limits()
+        self.assertEqual(limits['max_scope_iterations'], 50000)
 
     def test_iteration_count_tracked_with_sum(self):
         """Iteration count should be tracked when using sum()."""
         from itertools import islice, cycle
-        sys.setsandboxlimits(scope_max_iterations=1000000)
-        sys.resetsandboxcounters()
-        sys.entersandboxscope()
+        sys.sandbox.set_limits(max_scope_iterations=1000000)
+        sys.sandbox.reset_counts()
+        sys.sandbox.enter_scope()
 
         # Use sum() which calls PyIter_Next
         _ = sum(islice(cycle([1, 2, 3]), 100))
 
-        counts = sys.getsandboxcounts()
+        counts = sys.sandbox.get_counts()
         self.assertGreater(counts['scope_iteration_count'], 0)
-        sys.exitsandboxscope()
+        sys.sandbox.exit_scope()
 
     def test_exceeding_iteration_limit_raises_runtime_error(self):
         """Exceeding iteration limit should raise SandboxRuntimeError."""
@@ -60,9 +60,9 @@ class ScopedIterationCountTests(unittest.TestCase):
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=1000)
-sys.resetsandboxcounters()
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=1000)
+sys.sandbox.reset_counts()
+sys.sandbox.enter_scope()
 try:
     # This should raise SandboxRuntimeError when iteration limit is exceeded
     sum(cycle([0, 1]))
@@ -77,7 +77,7 @@ except Exception as e:
     print(f"Wrong exception type: {type(e).__name__}: {e}", file=sys.stderr)
     sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -86,16 +86,16 @@ finally:
     def test_normal_iteration_within_limit_works(self):
         """Normal iteration within limits should work fine."""
         from itertools import islice, cycle
-        sys.setsandboxlimits(scope_max_iterations=1000000)
-        sys.resetsandboxcounters()
-        sys.entersandboxscope()
+        sys.sandbox.set_limits(max_scope_iterations=1000000)
+        sys.sandbox.reset_counts()
+        sys.sandbox.enter_scope()
 
         # This should work fine
         # cycle([1, 2, 3]) for 999 items: 333 complete cycles of (1+2+3=6) = 1998
         result = sum(islice(cycle([1, 2, 3]), 999))
         self.assertEqual(result, 1998)
 
-        sys.exitsandboxscope()
+        sys.sandbox.exit_scope()
 
     def test_iteration_limit_protects_sum_with_infinite_iterator(self):
         """Iteration limit should protect against sum() with infinite iterator."""
@@ -103,8 +103,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=500)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=500)
+sys.sandbox.enter_scope()
 try:
     sum(cycle([0]))  # Infinite iterator
     print("FAIL: No exception raised")
@@ -113,7 +113,7 @@ except SandboxRuntimeError:
     print("PASS: SandboxRuntimeError raised")
     sys.exit(0)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -122,47 +122,47 @@ finally:
     def test_reset_scope_iteration_count(self):
         """resetsandboxcounters should reset scope iteration counter."""
         from itertools import islice, cycle
-        sys.setsandboxlimits(scope_max_iterations=1000000)
+        sys.sandbox.set_limits(max_scope_iterations=1000000)
 
-        sys.entersandboxscope()
+        sys.sandbox.enter_scope()
         _ = sum(islice(cycle([1]), 100))
-        sys.exitsandboxscope()
+        sys.sandbox.exit_scope()
 
-        count_before = sys.getsandboxcounts()['scope_iteration_count']
+        count_before = sys.sandbox.get_counts()['scope_iteration_count']
         self.assertGreater(count_before, 0)
 
-        sys.resetsandboxcounters()
-        count_after = sys.getsandboxcounts()['scope_iteration_count']
+        sys.sandbox.reset_counts()
+        count_after = sys.sandbox.get_counts()['scope_iteration_count']
         self.assertEqual(count_after, 0)
 
     def test_no_iteration_limit_allows_many_iterations(self):
         """With no iteration limit (0), many iterations should be allowed."""
         from itertools import islice, cycle
-        sys.setsandboxlimits(scope_max_iterations=0)
-        sys.resetsandboxcounters()
-        sys.entersandboxscope()
+        sys.sandbox.set_limits(max_scope_iterations=0)
+        sys.sandbox.reset_counts()
+        sys.sandbox.enter_scope()
 
         # This should work with no limit
         result = sum(islice(cycle([1]), 10000))
         self.assertEqual(result, 10000)
 
-        sys.exitsandboxscope()
+        sys.sandbox.exit_scope()
 
     def test_enter_scope_resets_iteration_count(self):
         """entersandboxscope should reset iteration counters."""
         from itertools import islice, cycle
-        sys.setsandboxlimits(scope_max_iterations=1000000)
+        sys.sandbox.set_limits(max_scope_iterations=1000000)
 
         # First scope with some iterations
-        sys.entersandboxscope()
+        sys.sandbox.enter_scope()
         _ = sum(islice(cycle([1]), 100))
-        count1 = sys.getsandboxcounts()['scope_iteration_count']
-        sys.exitsandboxscope()
+        count1 = sys.sandbox.get_counts()['scope_iteration_count']
+        sys.sandbox.exit_scope()
 
         # Second scope should start fresh
-        sys.entersandboxscope()
-        count2 = sys.getsandboxcounts()['scope_iteration_count']
-        sys.exitsandboxscope()
+        sys.sandbox.enter_scope()
+        count2 = sys.sandbox.get_counts()['scope_iteration_count']
+        sys.sandbox.exit_scope()
 
         self.assertGreater(count1, 0)
         self.assertEqual(count2, 0)
@@ -181,9 +181,9 @@ class IteratorWrapperProtectionTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
 
@@ -193,8 +193,8 @@ class IteratorWrapperProtectionTests(unittest.TestCase):
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = list(cycle([0, 1]))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -207,7 +207,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -219,8 +219,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = tuple(cycle([0, 1]))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -233,7 +233,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -245,8 +245,8 @@ finally:
 import sys
 from itertools import count
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = set(count())  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -259,7 +259,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -271,8 +271,8 @@ finally:
 import sys
 from itertools import count
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = frozenset(count())  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -285,7 +285,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -297,8 +297,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = all(cycle([True]))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -311,7 +311,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -323,8 +323,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = any(cycle([False]))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -337,7 +337,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -349,8 +349,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     for x in cycle([0]):  # Should hit iteration limit
         pass
@@ -364,7 +364,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -376,8 +376,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = list(enumerate(cycle([0])))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -390,7 +390,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -402,8 +402,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = list(zip(cycle([0]), cycle([1])))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -416,7 +416,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -428,8 +428,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = list(map(lambda x: x, cycle([0])))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -442,7 +442,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -454,8 +454,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = list(filter(lambda x: True, cycle([0])))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -468,7 +468,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -480,8 +480,8 @@ finally:
 import sys
 from itertools import count
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = sorted(count())  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -494,7 +494,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -506,8 +506,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = min(cycle([1, 2, 3]))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -520,7 +520,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -532,8 +532,8 @@ finally:
 import sys
 from itertools import cycle
 
-sys.setsandboxlimits(scope_max_iterations=100)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=100)
+sys.sandbox.enter_scope()
 try:
     result = max(cycle([1, 2, 3]))  # Should hit iteration limit
     print("FAIL: No exception raised")
@@ -546,7 +546,7 @@ except SandboxRuntimeError as e:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -557,8 +557,8 @@ finally:
         code = '''
 import sys
 
-sys.setsandboxlimits(scope_max_iterations=1000)
-sys.entersandboxscope()
+sys.sandbox.set_limits(max_scope_iterations=1000)
+sys.sandbox.enter_scope()
 try:
     # These should all work fine
     result1 = list(range(50))
@@ -576,7 +576,7 @@ except Exception as e:
     print(f"FAIL: Unexpected error: {e}")
     sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -587,7 +587,7 @@ finally:
         from itertools import islice, cycle
 
         # Outside sandbox scope, iteration should work without limit check
-        sys.setsandboxlimits(scope_max_iterations=10)
+        sys.sandbox.set_limits(max_scope_iterations=10)
         # NOT entering scope
 
         # This should work even though limit is 10, because we're not in scope

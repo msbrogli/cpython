@@ -13,34 +13,34 @@ class IntegrationTests(unittest.TestCase):
     def setUp(self):
         # Ensure clean scope state from any previous tests
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_sandbox_exec_with_all_limits(self):
         """Test running sandboxed code with all limit types."""
         code = '''
 import sys
-sys.setsandboxlimits(
+sys.sandbox.set_limits(
     max_int_digits=100,
     max_str_length=10000,
     max_list_size=1000,
-    global_max_allocations=100000,
-    scope_max_statements=10000,
-    scope_max_allocations=5000,
+    max_allocations=100000,
+    max_scope_statements=10000,
+    max_scope_allocations=5000,
 )
-sys.resetsandboxcounters()
-sys.entersandboxscope()
+sys.sandbox.reset_counts()
+sys.sandbox.enter_scope()
 try:
     exec("""
 result = []
@@ -53,7 +53,7 @@ except Exception as e:
     print(f"Unexpected error: {e}", file=sys.stderr)
     sys.exit(1)
 finally:
-    sys.exitsandboxscope()
+    sys.sandbox.exit_scope()
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],

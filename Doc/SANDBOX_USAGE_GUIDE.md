@@ -30,21 +30,21 @@ The sandbox is accessed through the `sys` module. Here is a minimal example that
 import sys
 
 # 1. Set resource limits
-sys.setsandboxlimits(
+sys.sandbox.set_limits(
     max_list_size=10_000,
     max_str_length=10_000,
-    scope_max_statements=50_000,
-    scope_max_iterations=100_000,
-    scope_max_allocations=5_000,
-    global_max_allocations=100_000,
+    max_scope_statements=50_000,
+    max_scope_iterations=100_000,
+    max_scope_allocations=5_000,
+    max_allocations=100_000,
     allow_dunder_access=False,
 )
 
 # 2. Register a filename for scope tracking
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.add_filename("<sandbox>")
 
 # 3. Reset counters before each execution
-sys.resetsandboxcounters()
+sys.sandbox.reset_counts()
 
 # 4. Compile and execute untrusted code
 untrusted_code = """
@@ -59,7 +59,7 @@ try:
 except SandboxError as e:
     print(f"Sandbox violation: {e}")
 finally:
-    sys.clearsandboxfilenames()
+    sys.sandbox.clear_filenames()
 ```
 
 ---
@@ -75,12 +75,12 @@ The sandbox state is global to the interpreter. All limits, counters, and config
 - **Global limits** apply to all code regardless of where it runs:
   - Size limits (`max_list_size`, `max_str_length`, etc.)
   - Type restrictions (`allow_float`, `allow_complex`)
-  - Global allocation limit (`global_max_allocations`)
+  - Global allocation limit (`max_allocations`)
 
 - **Scoped limits** only apply to code whose `co_filename` is registered:
-  - `scope_max_statements` -- limits executed statements
-  - `scope_max_allocations` -- limits object allocations
-  - `scope_max_iterations` -- limits iterator steps
+  - `max_scope_statements` -- limits executed statements
+  - `max_scope_allocations` -- limits object allocations
+  - `max_scope_iterations` -- limits iterator steps
 
 ### Scope Tracking
 
@@ -99,7 +99,7 @@ All numeric limit values default to `0`, which means no limit. You must explicit
 Control the maximum size of built-in data types:
 
 ```python
-sys.setsandboxlimits(
+sys.sandbox.set_limits(
     max_int_digits=100,       # Max internal digits (~9 decimal digits each)
     max_str_length=100_000,   # Max string characters
     max_bytes_length=100_000, # Max bytes length
@@ -113,7 +113,7 @@ sys.setsandboxlimits(
 When a limit is exceeded, a `SandboxOverflowError` is raised:
 
 ```python
-sys.setsandboxlimits(max_list_size=10)
+sys.sandbox.set_limits(max_list_size=10)
 try:
     big_list = list(range(100))
 except SandboxOverflowError as e:
@@ -125,7 +125,7 @@ except SandboxOverflowError as e:
 Forbid creation of specific types:
 
 ```python
-sys.setsandboxlimits(
+sys.sandbox.set_limits(
     allow_float=False,    # Forbid float creation
     allow_complex=False,  # Forbid complex creation
 )
@@ -134,7 +134,7 @@ sys.setsandboxlimits(
 Attempting to create a forbidden type raises `SandboxTypeError`:
 
 ```python
-sys.setsandboxlimits(allow_float=False)
+sys.sandbox.set_limits(allow_float=False)
 try:
     x = 1.0  # SandboxTypeError: float type is forbidden in sandbox
 except SandboxTypeError:
@@ -144,18 +144,18 @@ except SandboxTypeError:
 ### Reading Current Limits
 
 ```python
-limits = sys.getsandboxlimits()
+limits = sys.sandbox.get_limits()
 # Returns dict with all current limit values:
 # {'max_int_digits': 100, 'max_str_length': 100000, ...,
 #  'allow_float': True, 'allow_complex': True, 'allow_dunder_access': True}
 ```
 
-### Resetting Limits
+### Resetting All State
 
-Set all values to 0 (no limit) to disable the sandbox:
+Reset all limits, counters, modes, scope, and hooks to defaults:
 
 ```python
-sys.setsandboxlimits()  # All defaults are 0/True = no limits
+sys.sandbox.reset()  # All limits to 0, modes to defaults, counters to 0
 ```
 
 ---
@@ -164,19 +164,19 @@ sys.setsandboxlimits()  # All defaults are 0/True = no limits
 
 Scoped limits (statements, scoped allocations, iterations) require registering filenames to determine which code is "in scope".
 
-### Method 1: Using `entersandboxscope()` (Simple)
+### Method 1: Using `enter_scope()` (Simple)
 
 For executing code in the current frame's context:
 
 ```python
-sys.setsandboxlimits(scope_max_statements=10_000)
+sys.sandbox.set_limits(max_scope_statements=10_000)
 
-sys.entersandboxscope()  # Registers current frame's filename + resets counters
+sys.sandbox.enter_scope()  # Registers current frame's filename + resets counters
 try:
     # Code executed here and below is in scope
     exec(some_code)
 finally:
-    sys.exitsandboxscope()  # Clears all registered filenames
+    sys.sandbox.exit_scope()  # Clears all registered filenames
 ```
 
 ### Method 2: Using Filenames (Recommended)
@@ -184,11 +184,11 @@ finally:
 For explicit control over what code is tracked:
 
 ```python
-sys.setsandboxlimits(scope_max_statements=10_000)
+sys.sandbox.set_limits(max_scope_statements=10_000)
 
 # Register a virtual filename
-sys.addsandboxfilename("<user-code>")
-sys.resetsandboxcounters()
+sys.sandbox.add_filename("<user-code>")
+sys.sandbox.reset_counts()
 
 # Compile untrusted code with that filename
 code = compile(user_source, "<user-code>", "exec")
@@ -197,7 +197,7 @@ try:
 except SandboxRuntimeError:
     print("Statement limit exceeded")
 finally:
-    sys.clearsandboxfilenames()
+    sys.sandbox.clear_filenames()
 ```
 
 This approach is preferred because:
@@ -205,28 +205,28 @@ This approach is preferred because:
 - The stdlib and builtins don't count toward scoped limits
 - You have fine-grained control over what is tracked
 
-### Method 3: Using `addsandboxframe()`
+### Method 3: Using `add_frame()`
 
 Register the current frame's filename without resetting counters:
 
 ```python
-sys.addsandboxframe()  # Adds current frame's co_filename to tracked set
+sys.sandbox.add_frame()  # Adds current frame's co_filename to tracked set
 ```
 
 ### Checking Scope Status
 
 ```python
-if sys.issandboxinscope():
+if sys.sandbox.in_scope():
     print("Currently executing in sandbox scope")
 ```
 
 ### Managing Filenames
 
 ```python
-sys.addsandboxfilename("<module-a>")
-sys.addsandboxfilename("<module-b>")
-sys.removesandboxfilename("<module-a>")  # Remove specific filename
-sys.clearsandboxfilenames()               # Remove all filenames
+sys.sandbox.add_filename("<module-a>")
+sys.sandbox.add_filename("<module-b>")
+sys.sandbox.remove_filename("<module-a>")  # Remove specific filename
+sys.sandbox.clear_filenames()               # Remove all filenames
 ```
 
 ---
@@ -238,9 +238,9 @@ sys.clearsandboxfilenames()               # Remove all filenames
 Prevents infinite loops and long-running code by counting statement executions within scope:
 
 ```python
-sys.setsandboxlimits(scope_max_statements=1000)
-sys.addsandboxfilename("<sandbox>")
-sys.resetsandboxcounters()
+sys.sandbox.set_limits(max_scope_statements=1000)
+sys.sandbox.add_filename("<sandbox>")
+sys.sandbox.reset_counts()
 
 code = compile("""
 x = 0
@@ -259,9 +259,9 @@ except SandboxRuntimeError as e:
 Prevents excessive iteration even through C builtins like `sum()`, `list()`, `sorted()`:
 
 ```python
-sys.setsandboxlimits(scope_max_iterations=10_000)
-sys.addsandboxfilename("<sandbox>")
-sys.resetsandboxcounters()
+sys.sandbox.set_limits(max_scope_iterations=10_000)
+sys.sandbox.add_filename("<sandbox>")
+sys.sandbox.reset_counts()
 
 code = compile("""
 # Even though sum() runs in C, the iterator is wrapped
@@ -282,8 +282,8 @@ except SandboxRuntimeError as e:
 Limits total GC-tracked object allocations across all code:
 
 ```python
-sys.setsandboxlimits(global_max_allocations=10_000)
-sys.resetsandboxcounters()
+sys.sandbox.set_limits(max_allocations=10_000)
+sys.sandbox.reset_counts()
 
 try:
     items = []
@@ -298,9 +298,9 @@ except SandboxMemoryError:
 Limits allocations only from code whose filename is registered:
 
 ```python
-sys.setsandboxlimits(scope_max_allocations=500)
-sys.addsandboxfilename("<sandbox>")
-sys.resetsandboxcounters()
+sys.sandbox.set_limits(max_scope_allocations=500)
+sys.sandbox.add_filename("<sandbox>")
+sys.sandbox.reset_counts()
 
 code = compile("""
 items = []
@@ -319,8 +319,8 @@ except SandboxMemoryError:
 Check current counter values at any time:
 
 ```python
-counts = sys.getsandboxcounts()
-print(f"Global allocations: {counts['global_allocation_count']}")
+counts = sys.sandbox.get_counts()
+print(f"Global allocations: {counts['allocation_count']}")
 print(f"Scoped allocations: {counts['scope_allocation_count']}")
 print(f"Statements executed: {counts['scope_statement_count']}")
 print(f"Iterator steps: {counts['scope_iteration_count']}")
@@ -332,7 +332,7 @@ print(f"Operations counted: {counts['scope_operation_count']}")
 Reset all counters to 0 before each execution:
 
 ```python
-sys.resetsandboxcounters()
+sys.sandbox.reset_counts()
 ```
 
 ---
@@ -344,7 +344,7 @@ Operation counting provides an alternative to statement counting that works at t
 ### How It Works
 
 1. **Compile with `PyCF_SANDBOX_COUNT` flag**: Code must be compiled with `flags=0x8000` to enable operation counting.
-2. **Set `scope_max_operations`**: Configure the maximum number of counted operations.
+2. **Set `max_scope_operations`**: Configure the maximum number of counted operations.
 3. **Register filenames and reset counters**: Same as with statement counting.
 
 ### Basic Usage
@@ -354,9 +354,9 @@ import sys
 
 PyCF_SANDBOX_COUNT = 0x8000
 
-sys.setsandboxlimits(scope_max_operations=1000)
-sys.addsandboxfilename("<sandbox>")
-sys.resetsandboxcounters()
+sys.sandbox.set_limits(max_scope_operations=1000)
+sys.sandbox.add_filename("<sandbox>")
+sys.sandbox.reset_counts()
 
 # Compile with the SANDBOX_COUNT flag
 code = compile(user_source, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
@@ -366,7 +366,7 @@ try:
 except SandboxRuntimeError as e:
     print(e)  # "Sandbox operation limit exceeded"
 finally:
-    sys.clearsandboxfilenames()
+    sys.sandbox.clear_filenames()
 ```
 
 ### What Gets Counted
@@ -407,22 +407,22 @@ Each `SANDBOX_COUNT` opcode increments the `scope_operation_count` counter. The 
 ### Reading the Operation Counter
 
 ```python
-counts = sys.getsandboxcounts()
+counts = sys.sandbox.get_counts()
 print(f"Operations: {counts['scope_operation_count']}")
 ```
 
 ### Independence from Statement Counting
 
-Operation counting (`scope_max_operations`) and statement counting (`scope_max_statements`) are independent mechanisms. You can use either or both:
+Operation counting (`max_scope_operations`) and statement counting (`max_scope_statements`) are independent mechanisms. You can use either or both:
 
 ```python
-sys.setsandboxlimits(
-    scope_max_statements=100_000,   # Tracing-based line counting
-    scope_max_operations=50_000,    # Opcode-based AST node counting
+sys.sandbox.set_limits(
+    max_scope_statements=100_000,   # Tracing-based line counting
+    max_scope_operations=50_000,    # Opcode-based AST node counting
 )
 ```
 
-Code compiled **without** `PyCF_SANDBOX_COUNT` has zero operation counting overhead. Code compiled **with** the flag but without `scope_max_operations` set has minimal overhead (one pointer dereference + comparison per counted node).
+Code compiled **without** `PyCF_SANDBOX_COUNT` has zero operation counting overhead. Code compiled **with** the flag but without `max_scope_operations` set has minimal overhead (one pointer dereference + comparison per counted node).
 
 ### No-Flag Code Is Not Counted
 
@@ -448,10 +448,10 @@ Block all attribute mutations within sandbox scope:
 
 ```python
 # Set up scope first
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.add_filename("<sandbox>")
 
 # Enable frozen mode
-sys.setsandboxfrozenmode(True)
+sys.sandbox.frozen_mode = True
 
 code = compile("""
 class Foo:
@@ -465,8 +465,8 @@ try:
 except SandboxAttributeError as e:
     print(e)
 finally:
-    sys.setsandboxfrozenmode(False)
-    sys.clearsandboxfilenames()
+    sys.sandbox.frozen_mode = False
+    sys.sandbox.clear_filenames()
 ```
 
 ### Per-Object Freezing
@@ -482,7 +482,7 @@ config.api_key = "secret"
 config.timeout = 30
 
 # Freeze this specific object
-sys.sandboxfreezeobject(config)
+sys.sandbox.freeze(config)
 
 # Now even without global frozen mode:
 try:
@@ -491,7 +491,7 @@ except SandboxAttributeError:
     print("Cannot modify frozen config")
 
 # Check if frozen
-print(sys.sandboxisobjectfrozen(config))  # True
+print(sys.sandbox.is_frozen(config))  # True
 ```
 
 ### Mutable Override
@@ -501,10 +501,10 @@ Mark specific objects as always mutable, even when global frozen mode is active:
 ```python
 # Create an output object that sandboxed code CAN modify
 output = type('Output', (), {})()
-sys.sandboxsetobjectmutable(output)
+sys.sandbox.set_mutable(output)
 
-sys.setsandboxfrozenmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.frozen_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
 output.result = 42  # Allowed because output is marked mutable
@@ -514,7 +514,7 @@ exec(code, {"output": output})
 print(output.result)  # 42
 
 # Remove mutable flag if needed
-sys.sandboxsetobjectmutable(output, False)
+sys.sandbox.set_mutable(output, False)
 ```
 
 ### Auto-Mutable Mode
@@ -523,9 +523,9 @@ When frozen mode is active, sandboxed code cannot modify any objects -- includin
 
 ```python
 # Enable both frozen mode and auto-mutable mode
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
+sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
 class Foo:
@@ -537,12 +537,12 @@ obj.x = 42  # Allowed - obj was created in sandbox scope and auto-marked mutable
 exec(code)
 
 # Check the mode
-print(sys.getsandboxautomutable())  # True
+print(sys.sandbox.auto_mutable)  # True
 
 # Clean up
-sys.setsandboxautomutable(False)
-sys.setsandboxfrozenmode(False)
-sys.clearsandboxfilenames()
+sys.sandbox.auto_mutable = False
+sys.sandbox.frozen_mode = False
+sys.sandbox.clear_filenames()
 ```
 
 Auto-mutable mode automatically applies `Py_OBJFLAGS_MUTABLE` to objects created via `type.__call__` (classes and instances) and `MAKE_FUNCTION` (function definitions) when:
@@ -557,8 +557,8 @@ This allows sandboxed code to define and use its own classes and functions natur
 Frozen mode is scope-aware. Only code with registered filenames is restricted:
 
 ```python
-sys.addsandboxfilename("<sandbox>")
-sys.setsandboxfrozenmode(True)
+sys.sandbox.add_filename("<sandbox>")
+sys.sandbox.frozen_mode = True
 
 # Your harness code (not in scope) can still modify objects
 class Container:
@@ -583,8 +583,8 @@ Block access to double-underscore (`__dunder__`) attributes from sandboxed code.
 ### Enabling Dunder Blocking
 
 ```python
-sys.setsandboxlimits(allow_dunder_access=False)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
 x = {}
@@ -620,8 +620,8 @@ Single underscore attributes (`_private`) are not affected.
 Dunder blocking only applies within sandbox scope. Your harness code can freely use dunder attributes:
 
 ```python
-sys.setsandboxlimits(allow_dunder_access=False)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.add_filename("<sandbox>")
 
 # Your code (not in scope) - works fine
 print(dict.__bases__)
@@ -652,9 +652,9 @@ banned = {
     dis.opmap['IMPORT_STAR'],
 }
 
-sys.setsandboxbannedopcodes(banned)
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.banned_opcodes = banned
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
 import os  # SandboxRuntimeError: Opcode N is not allowed in sandbox scope
@@ -665,8 +665,8 @@ try:
 except SandboxRuntimeError as e:
     print(e)
 finally:
-    sys.setsandboxopcoderestrictmode(False)
-    sys.setsandboxbannedopcodes(None)  # Clear all banned opcodes
+    sys.sandbox.opcode_restrict_mode = False
+    sys.sandbox.banned_opcodes = None  # Clear all banned opcodes
 ```
 
 ### Common Opcode Sets to Ban
@@ -698,10 +698,10 @@ EXCEPTION_OPCODES = {
 ### Reading Current Banned Opcodes
 
 ```python
-banned = sys.getsandboxbannedopcodes()  # Returns frozenset of ints
+banned = sys.sandbox.banned_opcodes  # Returns frozenset of ints
 print(f"Banned opcodes: {banned}")
 
-mode = sys.getsandboxopcoderestrictmode()
+mode = sys.sandbox.opcode_restrict_mode
 print(f"Opcode restriction active: {mode}")
 ```
 
@@ -719,14 +719,14 @@ def creation_hook(obj, type_, frame, context):
     print(f"Created: {type_.__name__}")
     return obj  # Return original object
 
-sys.setobjectcreationhook(creation_hook)
+sys.sandbox.creation_hook = creation_hook
 
 class Foo:
     pass
 
 instance = Foo()  # Prints: Created Foo
 
-sys.setobjectcreationhook(None)  # Remove hook
+sys.sandbox.creation_hook = None  # Remove hook
 ```
 
 ### Blocking Object Creation
@@ -738,7 +738,7 @@ def block_types(obj, type_, frame, context):
         raise SandboxTypeError(f"Cannot create {type_.__name__} in sandbox")
     return obj
 
-sys.setobjectcreationhook(block_types)
+sys.sandbox.creation_hook = block_types
 ```
 
 ### Replacing Objects
@@ -751,13 +751,13 @@ def replace_hook(obj, type_, frame, context):
         return ReadOnlyDict(obj)
     return obj
 
-sys.setobjectcreationhook(replace_hook)
+sys.sandbox.creation_hook = replace_hook
 ```
 
 ### Reading Current Hook
 
 ```python
-hook = sys.getobjectcreationhook()
+hook = sys.sandbox.creation_hook
 if hook is not None:
     print(f"Hook active: {hook}")
 ```
@@ -771,12 +771,12 @@ Temporarily bypass all sandbox limits when executing trusted code.
 ### Basic Usage
 
 ```python
-sys.setsandboxlimits(max_list_size=10)
+sys.sandbox.set_limits(max_list_size=10)
 
 # Create a large list in trusted code
-count = sys.suspendsandboxlimits()  # Returns 1
+count = sys.sandbox.suspend()  # Returns 1
 large_list = list(range(1000))       # Works - limits suspended
-sys.resumesandboxlimits()            # Limits active again
+sys.sandbox.resume()            # Limits active again
 
 # Now this would fail
 try:
@@ -790,16 +790,16 @@ except SandboxOverflowError:
 Suspend calls nest. Limits resume only when the count reaches 0:
 
 ```python
-sys.suspendsandboxlimits()  # count = 1
-sys.suspendsandboxlimits()  # count = 2
-sys.resumesandboxlimits()   # count = 1 (still suspended)
-sys.resumesandboxlimits()   # count = 0 (limits active again)
+sys.sandbox.suspend()  # count = 1
+sys.sandbox.suspend()  # count = 2
+sys.sandbox.resume()   # count = 1 (still suspended)
+sys.sandbox.resume()   # count = 0 (limits active again)
 ```
 
 ### Check Suspend Status
 
 ```python
-if sys.issandboxsuspended():
+if sys.sandbox.suspended:
     print("Limits are currently suspended")
 ```
 
@@ -812,11 +812,11 @@ from contextlib import contextmanager
 
 @contextmanager
 def sandbox_suspended():
-    sys.suspendsandboxlimits()
+    sys.sandbox.suspend()
     try:
         yield
     finally:
-        sys.resumesandboxlimits()
+        sys.sandbox.resume()
 
 # Usage:
 with sandbox_suspended():
@@ -903,9 +903,9 @@ except SandboxOverflowError:
 Statement, iteration, and operation limits raise their exception **exactly once** on first violation. This allows `except` and `finally` blocks to execute normally:
 
 ```python
-sys.setsandboxlimits(scope_max_statements=100)
-sys.addsandboxfilename("<sandbox>")
-sys.resetsandboxcounters()
+sys.sandbox.set_limits(max_scope_statements=100)
+sys.sandbox.add_filename("<sandbox>")
+sys.sandbox.reset_counts()
 
 code = compile("""
 try:
@@ -933,11 +933,11 @@ import sys
 def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
     """Safely evaluate Python code with sandbox limits."""
     # Save original limits
-    original = sys.getsandboxlimits()
+    original = sys.sandbox.get_limits()
 
     try:
         # Configure sandbox
-        sys.setsandboxlimits(
+        sys.sandbox.set_limits(
             max_int_digits=50,
             max_str_length=50_000,
             max_bytes_length=50_000,
@@ -945,23 +945,23 @@ def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
             max_dict_size=10_000,
             max_set_size=10_000,
             max_tuple_size=50_000,
-            scope_max_statements=timeout_statements,
-            scope_max_iterations=500_000,
-            scope_max_allocations=5_000,
-            global_max_allocations=50_000,
+            max_scope_statements=timeout_statements,
+            max_scope_iterations=500_000,
+            max_scope_allocations=5_000,
+            max_allocations=50_000,
             allow_dunder_access=False,
         )
 
         # Set up scope
-        sys.addsandboxfilename("<safe-eval>")
-        sys.resetsandboxcounters()
+        sys.sandbox.add_filename("<safe-eval>")
+        sys.sandbox.reset_counts()
 
         # Enable frozen mode to protect shared state
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
 
         # Enable auto-mutable so sandboxed code can define and use its own
         # classes, functions, and instances without manual mutable marking
-        sys.setsandboxautomutable(True)
+        sys.sandbox.auto_mutable = True
 
         # Prepare namespace
         namespace = {"__builtins__": __builtins__}
@@ -969,7 +969,7 @@ def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
             namespace.update(allowed_globals)
 
         # Mark namespace as mutable so sandboxed code can write results
-        sys.sandboxsetobjectmutable(namespace)
+        sys.sandbox.set_mutable(namespace)
 
         # Compile and execute
         code = compile(source, "<safe-eval>", "exec")
@@ -981,11 +981,11 @@ def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
         return {"error": f"{type(e).__name__}: {e}"}
 
     finally:
-        sys.setsandboxautomutable(False)
-        sys.setsandboxfrozenmode(False)
-        sys.clearsandboxfilenames()
-        sys.setsandboxlimits(**original)
-        sys.resetsandboxcounters()
+        sys.sandbox.auto_mutable = False
+        sys.sandbox.frozen_mode = False
+        sys.sandbox.clear_filenames()
+        sys.sandbox.set_limits(**original)
+        sys.sandbox.reset_counts()
 
 
 # Usage
@@ -1004,18 +1004,18 @@ import dis
 
 def eval_expression(expr):
     """Evaluate a mathematical expression with strong restrictions."""
-    original = sys.getsandboxlimits()
+    original = sys.sandbox.get_limits()
 
     try:
         # Strict limits for expressions
-        sys.setsandboxlimits(
+        sys.sandbox.set_limits(
             max_int_digits=20,
             max_str_length=1000,
             allow_float=True,
             allow_complex=False,
             allow_dunder_access=False,
-            scope_max_statements=100,
-            scope_max_iterations=1000,
+            max_scope_statements=100,
+            max_scope_iterations=1000,
         )
 
         # Ban imports
@@ -1024,12 +1024,12 @@ def eval_expression(expr):
             dis.opmap['IMPORT_FROM'],
             dis.opmap['IMPORT_STAR'],
         }
-        sys.setsandboxbannedopcodes(banned)
-        sys.setsandboxopcoderestrictmode(True)
+        sys.sandbox.banned_opcodes = banned
+        sys.sandbox.opcode_restrict_mode = True
 
         # Set up scope
-        sys.addsandboxfilename("<expr>")
-        sys.resetsandboxcounters()
+        sys.sandbox.add_filename("<expr>")
+        sys.sandbox.reset_counts()
 
         # Compile as eval (expression only, no statements)
         code = compile(expr, "<expr>", "eval")
@@ -1040,11 +1040,11 @@ def eval_expression(expr):
         raise ValueError(f"Expression error: {e}") from e
 
     finally:
-        sys.setsandboxopcoderestrictmode(False)
-        sys.setsandboxbannedopcodes(None)
-        sys.clearsandboxfilenames()
-        sys.setsandboxlimits(**original)
-        sys.resetsandboxcounters()
+        sys.sandbox.opcode_restrict_mode = False
+        sys.sandbox.banned_opcodes = None
+        sys.sandbox.clear_filenames()
+        sys.sandbox.set_limits(**original)
+        sys.sandbox.reset_counts()
 
 
 # Usage
@@ -1067,10 +1067,10 @@ class SandboxRunner:
     def run(self, tenant_id, source):
         """Run source code for a tenant, return results or error."""
         filename = f"<tenant-{tenant_id}>"
-        original = sys.getsandboxlimits()
+        original = sys.sandbox.get_limits()
 
         try:
-            sys.setsandboxlimits(
+            sys.sandbox.set_limits(
                 max_int_digits=50,
                 max_str_length=10_000,
                 max_bytes_length=10_000,
@@ -1078,23 +1078,23 @@ class SandboxRunner:
                 max_dict_size=5_000,
                 max_set_size=5_000,
                 max_tuple_size=10_000,
-                scope_max_statements=self.max_statements,
-                scope_max_iterations=self.max_statements * 10,
-                scope_max_allocations=self.max_allocations,
+                max_scope_statements=self.max_statements,
+                max_scope_iterations=self.max_statements * 10,
+                max_scope_allocations=self.max_allocations,
                 allow_dunder_access=False,
             )
 
-            sys.addsandboxfilename(filename)
-            sys.resetsandboxcounters()
-            sys.setsandboxfrozenmode(True)
+            sys.sandbox.add_filename(filename)
+            sys.sandbox.reset_counts()
+            sys.sandbox.frozen_mode = True
 
             namespace = {"__builtins__": __builtins__}
-            sys.sandboxsetobjectmutable(namespace)
+            sys.sandbox.set_mutable(namespace)
 
             code = compile(source, filename, "exec")
             exec(code, namespace)
 
-            counts = sys.getsandboxcounts()
+            counts = sys.sandbox.get_counts()
             return {
                 "success": True,
                 "namespace": {k: v for k, v in namespace.items()
@@ -1104,7 +1104,7 @@ class SandboxRunner:
             }
 
         except SandboxError as e:
-            counts = sys.getsandboxcounts()
+            counts = sys.sandbox.get_counts()
             return {
                 "success": False,
                 "error": f"{type(e).__name__}: {e}",
@@ -1113,10 +1113,10 @@ class SandboxRunner:
             }
 
         finally:
-            sys.setsandboxfrozenmode(False)
-            sys.clearsandboxfilenames()
-            sys.setsandboxlimits(**original)
-            sys.resetsandboxcounters()
+            sys.sandbox.frozen_mode = False
+            sys.sandbox.clear_filenames()
+            sys.sandbox.set_limits(**original)
+            sys.sandbox.reset_counts()
 
 
 # Usage
@@ -1142,7 +1142,7 @@ Without scope tracking, scoped limits (statements, iterations, scoped allocation
 
 ```python
 # Good
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.add_filename("<sandbox>")
 code = compile(source, "<sandbox>", "exec")
 
 # Bad - scoped limits won't apply
@@ -1153,7 +1153,7 @@ code = compile(source, "<string>", "exec")
 ### 2. Reset Counters Before Each Execution
 
 ```python
-sys.resetsandboxcounters()  # Always reset before running untrusted code
+sys.sandbox.reset_counts()  # Always reset before running untrusted code
 exec(code)
 ```
 
@@ -1162,19 +1162,19 @@ exec(code)
 Always restore sandbox state, even if execution fails:
 
 ```python
-original = sys.getsandboxlimits()
+original = sys.sandbox.get_limits()
 try:
-    sys.setsandboxlimits(...)
-    sys.addsandboxfilename("<sandbox>")
+    sys.sandbox.set_limits(...)
+    sys.sandbox.add_filename("<sandbox>")
     exec(code)
 finally:
-    sys.setsandboxautomutable(False)
-    sys.setsandboxfrozenmode(False)
-    sys.setsandboxopcoderestrictmode(False)
-    sys.setsandboxbannedopcodes(None)
-    sys.clearsandboxfilenames()
-    sys.setsandboxlimits(**original)
-    sys.resetsandboxcounters()
+    sys.sandbox.auto_mutable = False
+    sys.sandbox.frozen_mode = False
+    sys.sandbox.opcode_restrict_mode = False
+    sys.sandbox.banned_opcodes = None
+    sys.sandbox.clear_filenames()
+    sys.sandbox.set_limits(**original)
+    sys.sandbox.reset_counts()
 ```
 
 ### 4. Use Multiple Execution Limits
@@ -1182,10 +1182,10 @@ finally:
 Statement limits catch Python-level loops, but C builtins like `sum()`, `list()`, `sorted()` bypass the statement counter. Use iteration limits to catch these. Operation limits provide precise AST-level counting with zero tracing overhead:
 
 ```python
-sys.setsandboxlimits(
-    scope_max_statements=100_000,   # Catches: while True: pass
-    scope_max_iterations=1_000_000, # Catches: sum(range(10**9))
-    scope_max_operations=50_000,    # AST-level counting (requires PyCF_SANDBOX_COUNT)
+sys.sandbox.set_limits(
+    max_scope_statements=100_000,   # Catches: while True: pass
+    max_scope_iterations=1_000_000, # Catches: sum(range(10**9))
+    max_scope_operations=50_000,    # AST-level counting (requires PyCF_SANDBOX_COUNT)
 )
 ```
 
@@ -1194,30 +1194,30 @@ sys.setsandboxlimits(
 No single limit is sufficient. Use multiple layers:
 
 ```python
-sys.setsandboxlimits(
+sys.sandbox.set_limits(
     # Data size limits
     max_list_size=100_000,
     max_str_length=100_000,
 
     # Execution limits
-    scope_max_statements=100_000,
-    scope_max_iterations=1_000_000,
-    scope_max_operations=50_000,   # Requires PyCF_SANDBOX_COUNT at compile time
+    max_scope_statements=100_000,
+    max_scope_iterations=1_000_000,
+    max_scope_operations=50_000,   # Requires PyCF_SANDBOX_COUNT at compile time
 
     # Memory limits
-    scope_max_allocations=10_000,
-    global_max_allocations=100_000,
+    max_scope_allocations=10_000,
+    max_allocations=100_000,
 
     # Access control
     allow_dunder_access=False,
 )
 
 # Plus frozen mode for shared state protection
-sys.setsandboxfrozenmode(True)
+sys.sandbox.frozen_mode = True
 
 # Plus opcode restrictions for import blocking
-sys.setsandboxbannedopcodes({dis.opmap['IMPORT_NAME'], ...})
-sys.setsandboxopcoderestrictmode(True)
+sys.sandbox.banned_opcodes = {dis.opmap['IMPORT_NAME'], ...}
+sys.sandbox.opcode_restrict_mode = True
 ```
 
 ### 6. Use Mutable Objects for Output
@@ -1226,7 +1226,7 @@ When frozen mode is active, mark output containers as mutable:
 
 ```python
 output = {}
-sys.sandboxsetobjectmutable(output)
+sys.sandbox.set_mutable(output)
 # Sandboxed code can write to output even in frozen mode
 ```
 
@@ -1248,58 +1248,58 @@ The sandbox limits are designed for resource protection, not as a complete secur
 
 | Function | Description |
 |----------|-------------|
-| `sys.setsandboxlimits(**kwargs)` | Set resource limits |
-| `sys.getsandboxlimits() -> dict` | Get current limits |
-| `sys.getsandboxcounts() -> dict` | Get current counters |
-| `sys.resetsandboxcounters()` | Reset all counters to 0 |
+| `sys.sandbox.set_limits(**kwargs)` | Set resource limits |
+| `sys.sandbox.get_limits() -> dict` | Get current limits |
+| `sys.sandbox.get_counts() -> dict` | Get current counters |
+| `sys.sandbox.reset_counts()` | Reset all counters to 0 |
 
 ### Scope Management
 
 | Function | Description |
 |----------|-------------|
-| `sys.entersandboxscope()` | Register current frame + reset counters |
-| `sys.exitsandboxscope()` | Clear all registered filenames |
-| `sys.issandboxinscope() -> bool` | Check if current code is in scope |
-| `sys.addsandboxframe()` | Register current frame's filename |
-| `sys.addsandboxfilename(name)` | Register a filename |
-| `sys.removesandboxfilename(name)` | Remove a filename |
-| `sys.clearsandboxfilenames()` | Clear all filenames |
+| `sys.sandbox.enter_scope()` | Register current frame + reset counters |
+| `sys.sandbox.exit_scope()` | Clear all registered filenames |
+| `sys.sandbox.in_scope() -> bool` | Check if current code is in scope |
+| `sys.sandbox.add_frame()` | Register current frame's filename |
+| `sys.sandbox.add_filename(name)` | Register a filename |
+| `sys.sandbox.remove_filename(name)` | Remove a filename |
+| `sys.sandbox.clear_filenames()` | Clear all filenames |
 
 ### Frozen Mode
 
 | Function | Description |
 |----------|-------------|
-| `sys.setsandboxfrozenmode(bool)` | Enable/disable global freeze |
-| `sys.getsandboxfrozenmode() -> bool` | Check global freeze status |
-| `sys.sandboxfreezeobject(obj)` | Freeze a specific object |
-| `sys.sandboxisobjectfrozen(obj) -> bool` | Check if object is frozen |
-| `sys.sandboxsetobjectmutable(obj, bool)` | Set/clear mutable flag |
-| `sys.setsandboxautomutable(bool)` | Enable/disable auto-mutable mode |
-| `sys.getsandboxautomutable() -> bool` | Check auto-mutable mode status |
+| `sys.sandbox.frozen_mode = bool` | Enable/disable global freeze |
+| `sys.sandbox.frozen_mode -> bool` | Check global freeze status |
+| `sys.sandbox.freeze(obj)` | Freeze a specific object |
+| `sys.sandbox.is_frozen(obj) -> bool` | Check if object is frozen |
+| `sys.sandbox.set_mutable(obj, bool)` | Set/clear mutable flag |
+| `sys.sandbox.auto_mutable = bool` | Enable/disable auto-mutable mode |
+| `sys.sandbox.auto_mutable -> bool` | Check auto-mutable mode status |
 
 ### Opcode Restrictions
 
 | Function | Description |
 |----------|-------------|
-| `sys.setsandboxopcoderestrictmode(bool)` | Enable/disable opcode checking |
-| `sys.getsandboxopcoderestrictmode() -> bool` | Check mode status |
-| `sys.setsandboxbannedopcodes(set/None)` | Set banned opcodes |
-| `sys.getsandboxbannedopcodes() -> frozenset` | Get banned opcodes |
+| `sys.sandbox.opcode_restrict_mode = bool` | Enable/disable opcode checking |
+| `sys.sandbox.opcode_restrict_mode -> bool` | Check mode status |
+| `sys.sandbox.banned_opcodes = set/None` | Set banned opcodes |
+| `sys.sandbox.banned_opcodes -> frozenset` | Get banned opcodes |
 
 ### Object Creation Hook
 
 | Function | Description |
 |----------|-------------|
-| `sys.setobjectcreationhook(callable/None)` | Set/remove creation hook |
-| `sys.getobjectcreationhook() -> callable` | Get current hook |
+| `sys.sandbox.creation_hook = callable/None` | Set/remove creation hook |
+| `sys.sandbox.creation_hook -> callable` | Get current hook |
 
 ### Suspend/Resume
 
 | Function | Description |
 |----------|-------------|
-| `sys.suspendsandboxlimits() -> int` | Suspend limits |
-| `sys.resumesandboxlimits() -> int` | Resume limits |
-| `sys.issandboxsuspended() -> bool` | Check suspend status |
+| `sys.sandbox.suspend() -> int` | Suspend limits |
+| `sys.sandbox.resume() -> int` | Resume limits |
+| `sys.sandbox.suspended -> bool` | Check suspend status |
 
 ### Exceptions
 
@@ -1312,7 +1312,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `SandboxTypeError` | Forbidden type creation |
 | `SandboxAttributeError` | Frozen mode or dunder access blocked |
 
-### `setsandboxlimits` Parameters
+### `set_limits()` Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -1323,11 +1323,11 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `max_dict_size` | int | 0 | Max dict entries |
 | `max_set_size` | int | 0 | Max set members |
 | `max_tuple_size` | int | 0 | Max tuple items |
-| `global_max_allocations` | int | 0 | Max total GC-tracked allocations |
-| `scope_max_statements` | int | 0 | Max statements in scope |
-| `scope_max_allocations` | int | 0 | Max allocations in scope |
-| `scope_max_iterations` | int | 0 | Max iterator steps in scope |
-| `scope_max_operations` | int | 0 | Max AST operations in scope (requires `PyCF_SANDBOX_COUNT`) |
+| `max_allocations` | int | 0 | Max total GC-tracked allocations |
+| `max_scope_statements` | int | 0 | Max statements in scope |
+| `max_scope_allocations` | int | 0 | Max allocations in scope |
+| `max_scope_iterations` | int | 0 | Max iterator steps in scope |
+| `max_scope_operations` | int | 0 | Max AST operations in scope (requires `PyCF_SANDBOX_COUNT`) |
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | True | Allow `__dunder__` attributes |

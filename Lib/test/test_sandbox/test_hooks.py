@@ -8,25 +8,25 @@ class ObjectCreationHookTests(unittest.TestCase):
     """Test object creation hook functionality."""
 
     def setUp(self):
-        self.original_hook = sys.getobjectcreationhook()
+        self.original_hook = sys.sandbox.creation_hook
 
     def tearDown(self):
-        sys.setobjectcreationhook(self.original_hook)
+        sys.sandbox.creation_hook = self.original_hook
 
     def test_getobjectcreationhook_default_none(self):
         """Default hook should be None."""
-        sys.setobjectcreationhook(None)
-        self.assertIsNone(sys.getobjectcreationhook())
+        sys.sandbox.creation_hook = None
+        self.assertIsNone(sys.sandbox.creation_hook)
 
     def test_setobjectcreationhook_requires_callable(self):
         """setobjectcreationhook should require a callable."""
         with self.assertRaises(TypeError):
-            sys.setobjectcreationhook("not callable")
+            sys.sandbox.creation_hook = "not callable"
 
     def test_setobjectcreationhook_accepts_none(self):
         """setobjectcreationhook should accept None."""
-        sys.setobjectcreationhook(None)
-        self.assertIsNone(sys.getobjectcreationhook())
+        sys.sandbox.creation_hook = None
+        self.assertIsNone(sys.sandbox.creation_hook)
 
     def test_hook_called_on_object_creation(self):
         """Hook should be called when creating objects."""
@@ -36,7 +36,7 @@ class ObjectCreationHookTests(unittest.TestCase):
             created_objects.append((type_.__name__, context))
             return obj
 
-        sys.setobjectcreationhook(hook)
+        sys.sandbox.creation_hook = hook
 
         class MyClass:
             pass
@@ -54,7 +54,7 @@ class ObjectCreationHookTests(unittest.TestCase):
                 raise ValueError("Creation blocked by hook")
             return obj
 
-        sys.setobjectcreationhook(blocking_hook)
+        sys.sandbox.creation_hook = blocking_hook
 
         class BlockedClass:
             pass

@@ -21,18 +21,18 @@ class FrozenModeTests(unittest.TestCase):
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
-        sys.entersandboxscope()
+        sys.sandbox.enter_scope()
 
     def tearDown(self):
         # Ensure frozen mode is disabled
-        sys.setsandboxfrozenmode(False)
+        sys.sandbox.frozen_mode = False
         # Ensure limits are resumed
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
-        sys.setsandboxlimits(**self.original_limits)
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
+        sys.sandbox.set_limits(**self.original_limits)
         # Exit sandbox scope
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
 
@@ -40,20 +40,20 @@ class FrozenModeTests(unittest.TestCase):
 
     def test_getsandboxfrozenmode_default_false(self):
         """Global frozen mode should be disabled by default."""
-        self.assertFalse(sys.getsandboxfrozenmode())
+        self.assertFalse(sys.sandbox.frozen_mode)
 
     def test_setsandboxfrozenmode_enables(self):
         """setsandboxfrozenmode(True) should enable frozen mode."""
-        sys.setsandboxfrozenmode(True)
-        is_frozen = sys.getsandboxfrozenmode()
-        sys.setsandboxfrozenmode(False)
+        sys.sandbox.frozen_mode = True
+        is_frozen = sys.sandbox.frozen_mode
+        sys.sandbox.frozen_mode = False
         self.assertTrue(is_frozen)
 
     def test_setsandboxfrozenmode_disables(self):
         """setsandboxfrozenmode(False) should disable frozen mode."""
-        sys.setsandboxfrozenmode(True)
-        sys.setsandboxfrozenmode(False)
-        self.assertFalse(sys.getsandboxfrozenmode())
+        sys.sandbox.frozen_mode = True
+        sys.sandbox.frozen_mode = False
+        self.assertFalse(sys.sandbox.frozen_mode)
 
     # --- Global frozen mode: blocks attribute set ---
 
@@ -64,7 +64,7 @@ class FrozenModeTests(unittest.TestCase):
         obj = Foo()
         obj.x = 1  # Before freeze
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError) as cm:
             obj.y = 2
         self.assertIn("frozen mode", str(cm.exception))
@@ -76,7 +76,7 @@ class FrozenModeTests(unittest.TestCase):
         obj = Foo()
         obj.x = 1
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError) as cm:
             del obj.x
         self.assertIn("frozen mode", str(cm.exception))
@@ -86,7 +86,7 @@ class FrozenModeTests(unittest.TestCase):
         class Foo:
             pass
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError) as cm:
             Foo.class_var = 42
         self.assertIn("frozen mode", str(cm.exception))
@@ -97,11 +97,11 @@ class FrozenModeTests(unittest.TestCase):
             pass
         obj = Foo()
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError):
             obj.x = 1
 
-        sys.setsandboxfrozenmode(False)
+        sys.sandbox.frozen_mode = False
         obj.x = 1  # Should succeed now
         self.assertEqual(obj.x, 1)
 
@@ -111,7 +111,7 @@ class FrozenModeTests(unittest.TestCase):
             pass
         obj = Foo()
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError):
             setattr(obj, 'x', 1)
 
@@ -122,7 +122,7 @@ class FrozenModeTests(unittest.TestCase):
         obj = Foo()
         obj.x = 1
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError):
             delattr(obj, 'x')
 
@@ -135,8 +135,8 @@ class FrozenModeTests(unittest.TestCase):
         obj = Foo()
         obj.a = 10
 
-        sys.sandboxfreezeobject(obj)
-        self.assertTrue(sys.sandboxisobjectfrozen(obj))
+        sys.sandbox.freeze(obj)
+        self.assertTrue(sys.sandbox.is_frozen(obj))
 
         with self.assertRaises(SandboxAttributeError) as cm:
             obj.b = 20
@@ -147,7 +147,7 @@ class FrozenModeTests(unittest.TestCase):
         class Foo:
             pass
         obj = Foo()
-        self.assertFalse(sys.sandboxisobjectfrozen(obj))
+        self.assertFalse(sys.sandbox.is_frozen(obj))
 
     def test_per_instance_freeze_without_global_mode(self):
         """Per-instance freeze should work without global frozen mode."""
@@ -156,8 +156,8 @@ class FrozenModeTests(unittest.TestCase):
         obj = Foo()
         obj.a = 1
 
-        self.assertFalse(sys.getsandboxfrozenmode())
-        sys.sandboxfreezeobject(obj)
+        self.assertFalse(sys.sandbox.frozen_mode)
+        sys.sandbox.freeze(obj)
 
         with self.assertRaises(SandboxAttributeError):
             obj.b = 2
@@ -169,7 +169,7 @@ class FrozenModeTests(unittest.TestCase):
         obj = Foo()
         obj.a = 1
 
-        sys.sandboxfreezeobject(obj)
+        sys.sandbox.freeze(obj)
         with self.assertRaises(SandboxAttributeError):
             del obj.a
 
@@ -180,7 +180,7 @@ class FrozenModeTests(unittest.TestCase):
         obj1 = Foo()
         obj2 = Foo()
 
-        sys.sandboxfreezeobject(obj1)
+        sys.sandbox.freeze(obj1)
 
         # obj1 is frozen
         with self.assertRaises(SandboxAttributeError):
@@ -198,8 +198,8 @@ class FrozenModeTests(unittest.TestCase):
             pass
         obj = Foo()
 
-        sys.setsandboxfrozenmode(True)
-        sys.sandboxsetobjectmutable(obj)
+        sys.sandbox.frozen_mode = True
+        sys.sandbox.set_mutable(obj)
 
         obj.x = 42  # Should succeed
         self.assertEqual(obj.x, 42)
@@ -210,11 +210,11 @@ class FrozenModeTests(unittest.TestCase):
             pass
         obj = Foo()
 
-        sys.sandboxsetobjectmutable(obj)
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.set_mutable(obj)
+        sys.sandbox.frozen_mode = True
         obj.x = 1  # Should succeed
 
-        sys.sandboxsetobjectmutable(obj, False)
+        sys.sandbox.set_mutable(obj, False)
         with self.assertRaises(SandboxAttributeError):
             obj.y = 2
 
@@ -224,8 +224,8 @@ class FrozenModeTests(unittest.TestCase):
             pass
         obj = Foo()
 
-        sys.sandboxfreezeobject(obj)
-        sys.sandboxsetobjectmutable(obj)
+        sys.sandbox.freeze(obj)
+        sys.sandbox.set_mutable(obj)
 
         obj.x = 1  # Should succeed despite frozen flag
         self.assertEqual(obj.x, 1)
@@ -238,14 +238,14 @@ class FrozenModeTests(unittest.TestCase):
             pass
         obj = Foo()
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError):
             obj.x = 1
 
-        sys.suspendsandboxlimits()
+        sys.sandbox.suspend()
         obj.x = 1  # Should succeed while suspended
 
-        sys.resumesandboxlimits()
+        sys.sandbox.resume()
         with self.assertRaises(SandboxAttributeError):
             obj.y = 2
         self.assertEqual(obj.x, 1)
@@ -257,15 +257,15 @@ class FrozenModeTests(unittest.TestCase):
         obj = Foo()
         obj.a = 1
 
-        sys.sandboxfreezeobject(obj)
+        sys.sandbox.freeze(obj)
         with self.assertRaises(SandboxAttributeError):
             obj.b = 2
 
-        sys.suspendsandboxlimits()
+        sys.sandbox.suspend()
         obj.b = 2  # Should succeed while suspended
         self.assertEqual(obj.b, 2)
 
-        sys.resumesandboxlimits()
+        sys.sandbox.resume()
         with self.assertRaises(SandboxAttributeError):
             obj.c = 3
 
@@ -275,16 +275,16 @@ class FrozenModeTests(unittest.TestCase):
             pass
         obj = Foo()
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
 
-        sys.suspendsandboxlimits()
-        sys.suspendsandboxlimits()
+        sys.sandbox.suspend()
+        sys.sandbox.suspend()
         obj.x = 1  # Should succeed
 
-        sys.resumesandboxlimits()
+        sys.sandbox.resume()
         obj.y = 2  # Should still succeed (still suspended once)
 
-        sys.resumesandboxlimits()
+        sys.sandbox.resume()
         with self.assertRaises(SandboxAttributeError):
             obj.z = 3  # Should fail (fully resumed)
 
@@ -296,7 +296,7 @@ class FrozenModeTests(unittest.TestCase):
             pass
         obj = Foo()
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError) as cm:
             obj.x = 1
         msg = str(cm.exception)
@@ -308,7 +308,7 @@ class FrozenModeTests(unittest.TestCase):
         class Foo:
             pass
         obj = Foo()
-        sys.sandboxfreezeobject(obj)
+        sys.sandbox.freeze(obj)
 
         with self.assertRaises(SandboxAttributeError) as cm:
             obj.x = 1
@@ -323,7 +323,7 @@ class FrozenModeTests(unittest.TestCase):
         import types
         mod = types.ModuleType('testmod')
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError):
             mod.x = 1
 
@@ -332,7 +332,7 @@ class FrozenModeTests(unittest.TestCase):
         def func():
             pass
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         with self.assertRaises(SandboxAttributeError):
             func.custom_attr = 42
 
@@ -341,7 +341,7 @@ class FrozenModeTests(unittest.TestCase):
         class Foo:
             pass
 
-        sys.sandboxfreezeobject(Foo)
+        sys.sandbox.freeze(Foo)
         with self.assertRaises(SandboxAttributeError):
             Foo.class_var = 1
 
@@ -354,7 +354,7 @@ class FrozenModeTests(unittest.TestCase):
         obj = Foo()
         obj.x = 42
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         val = obj.x  # Reading should work
         self.assertEqual(val, 42)
 
@@ -365,7 +365,7 @@ class FrozenModeTests(unittest.TestCase):
                 return "hello"
         obj = Foo()
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         result = obj.greet()
         self.assertEqual(result, "hello")
 
@@ -375,9 +375,9 @@ class FrozenModeTests(unittest.TestCase):
             pass
         obj = Foo()
         obj.x = 1
-        sys.sandboxsetobjectmutable(obj)
+        sys.sandbox.set_mutable(obj)
 
-        sys.setsandboxfrozenmode(True)
+        sys.sandbox.frozen_mode = True
         del obj.x  # Should succeed
         self.assertFalse(hasattr(obj, 'x'))
 
@@ -391,13 +391,13 @@ class FrozenModeSubprocessTests(unittest.TestCase):
         """Frozen mode should block _PyObject_StoreInstanceAttribute."""
         code = '''
 import sys
-sys.entersandboxscope()
+sys.sandbox.enter_scope()
 
 class Foo:
     pass
 
 obj = Foo()
-sys.setsandboxfrozenmode(True)
+sys.sandbox.frozen_mode = True
 
 try:
     obj.x = 1
@@ -418,16 +418,16 @@ except SandboxAttributeError as e:
         """Frozen mode should work in exec'd code."""
         code = '''
 import sys
-sys.entersandboxscope()
+sys.sandbox.enter_scope()
 
 class Box:
     pass
 
 box = Box()
 box.value = 10
-sys.sandboxsetobjectmutable(box)
+sys.sandbox.set_mutable(box)
 
-sys.setsandboxfrozenmode(True)
+sys.sandbox.frozen_mode = True
 
 # exec'd code should also be affected by frozen mode
 exec("""
@@ -451,7 +451,7 @@ else:
     sys.exit(1)
 """)
 
-sys.setsandboxfrozenmode(False)
+sys.sandbox.frozen_mode = False
 sys.exit(0)
 '''
         result = _run_sandboxed_code(code)
@@ -462,13 +462,13 @@ sys.exit(0)
         """SandboxAttributeError from frozen mode should be a SandboxError."""
         code = '''
 import sys
-sys.entersandboxscope()
+sys.sandbox.enter_scope()
 
 class Foo:
     pass
 
 obj = Foo()
-sys.setsandboxfrozenmode(True)
+sys.sandbox.frozen_mode = True
 
 try:
     obj.x = 1
@@ -486,7 +486,7 @@ except SandboxError:
         """Frozen mode should block property setters."""
         code = '''
 import sys
-sys.entersandboxscope()
+sys.sandbox.enter_scope()
 
 class Foo:
     def __init__(self):
@@ -503,7 +503,7 @@ class Foo:
 obj = Foo()
 obj.x = 10  # Works before freeze
 
-sys.setsandboxfrozenmode(True)
+sys.sandbox.frozen_mode = True
 try:
     obj.x = 20  # Should be blocked
     print("FAIL")
@@ -531,7 +531,7 @@ class AutoMutableTests(unittest.TestCase):
         """Auto-mutable mode should be disabled by default."""
         code = '''
 import sys
-if sys.getsandboxautomutable():
+if sys.sandbox.auto_mutable:
     print("FAIL: default should be False")
     sys.exit(1)
 print("PASS")
@@ -544,12 +544,12 @@ print("PASS")
         """setsandboxautomutable/getsandboxautomutable should work."""
         code = '''
 import sys
-sys.setsandboxautomutable(True)
-if not sys.getsandboxautomutable():
+sys.sandbox.auto_mutable = True
+if not sys.sandbox.auto_mutable:
     print("FAIL: should be True after set")
     sys.exit(1)
-sys.setsandboxautomutable(False)
-if sys.getsandboxautomutable():
+sys.sandbox.auto_mutable = False
+if sys.sandbox.auto_mutable:
     print("FAIL: should be False after clear")
     sys.exit(1)
 print("PASS")
@@ -562,9 +562,9 @@ print("PASS")
         """Functions created in sandbox scope should be auto-marked mutable."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 def f():
     pass
@@ -584,9 +584,9 @@ exec(code)
         """Classes created in sandbox scope should be auto-marked mutable."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 class C:
     pass
@@ -606,9 +606,9 @@ exec(code)
         """Instances created in sandbox scope should be auto-marked mutable."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 class C:
     pass
@@ -629,9 +629,9 @@ exec(code)
         """Imported modules should remain frozen (different co_filename)."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 import os
 try:
@@ -651,9 +651,9 @@ exec(code)
         """Nested functions should also be auto-marked mutable."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 def outer():
     def inner():
@@ -676,9 +676,9 @@ exec(code)
         """Closure functions should be auto-marked mutable."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 def make_adder(n):
     def adder(x):
@@ -704,9 +704,9 @@ exec(code)
         """Decorated functions should be auto-marked mutable."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 def my_decorator(func):
     func.decorated = True
@@ -735,9 +735,9 @@ exec(code)
         """Classes created via metaclass should be auto-marked mutable."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 class Meta(type):
     pass
@@ -759,8 +759,8 @@ exec(code)
         """Auto-mutable alone (without frozen mode) should not break anything."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.auto_mutable = True
 # Frozen mode is NOT enabled
 code = compile("""
 class C:
@@ -786,9 +786,9 @@ exec(code)
         """Built-in instances (dict, list) created in scope should be mutable."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 d = dict()
 d['key'] = 'value'
@@ -813,9 +813,9 @@ exec(code)
         """Full integration: classes, functions, instances mutable; imports frozen."""
         code = '''
 import sys
-sys.addsandboxfilename('<sandbox>')
-sys.setsandboxfrozenmode(True)
-sys.setsandboxautomutable(True)
+sys.sandbox.add_filename('<sandbox>')
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
 code = compile("""
 class Foo:
     pass

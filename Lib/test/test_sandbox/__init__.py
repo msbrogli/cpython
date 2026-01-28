@@ -53,12 +53,14 @@ def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
 
 def _get_settable_limits():
     """Get current limits for restoring in tearDown."""
-    return sys.getsandboxlimits()
+    return sys.sandbox.get_limits()
 
 
 def load_tests(loader, tests, pattern):
     """Load tests from all modules in this package."""
     this_dir = os.path.dirname(__file__)
+    saved_path = sys.path[:]
     package_tests = loader.discover(start_dir=this_dir, pattern='test*.py')
+    sys.path[:] = saved_path
     tests.addTests(package_tests)
     return tests

@@ -1440,6 +1440,9 @@ restrict operations, and control attribute access during code execution. This
 is useful for preventing resource exhaustion attacks when executing untrusted
 code or limiting resource usage in multi-tenant environments.
 
+All sandbox functionality is accessed through the :data:`sys.sandbox` namespace
+object.
+
 .. warning::
 
    Sandbox limits are not a security boundary. They are intended to prevent
@@ -1464,13 +1467,13 @@ All sandbox violations raise exceptions from a dedicated hierarchy:
 
 .. exception:: SandboxMemoryError
 
-   Raised when an allocation limit is exceeded (``global_max_allocations`` or
-   ``scope_max_allocations``). Subclass of :exc:`SandboxError`.
+   Raised when an allocation limit is exceeded (``max_allocations`` or
+   ``max_scope_allocations``). Subclass of :exc:`SandboxError`.
 
 .. exception:: SandboxRuntimeError
 
-   Raised when a runtime limit is exceeded (``scope_max_statements``,
-   ``scope_max_iterations``) or when a banned opcode is executed. Subclass of
+   Raised when a runtime limit is exceeded (``max_scope_statements``,
+   ``max_scope_iterations``) or when a banned opcode is executed. Subclass of
    :exc:`SandboxError`.
 
 .. exception:: SandboxTypeError
@@ -1486,21 +1489,37 @@ All sandbox violations raise exceptions from a dedicated hierarchy:
 All sandbox exceptions are available as builtins.
 
 
+The ``sys.sandbox`` Object
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. data:: sandbox
+
+   A namespace object providing all sandbox configuration, inspection, and
+   control. This is a singleton instance of an internal type.
+
+   .. impl-detail::
+
+      The ``sys.sandbox`` object is specific to CPython and may not be
+      available in other Python implementations.
+
+   .. versionadded:: 3.12
+
+
 Limit Configuration
 ^^^^^^^^^^^^^^^^^^^
 
-.. function:: setsandboxlimits(*, max_int_digits=0, max_str_length=0, max_bytes_length=0, max_list_size=0, max_dict_size=0, max_set_size=0, max_tuple_size=0, global_max_allocations=0, scope_max_statements=0, scope_max_allocations=0, scope_max_iterations=0, allow_float=True, allow_complex=True, allow_dunder_access=True)
+.. method:: sys.sandbox.set_limits(*, max_int_digits=..., max_str_length=..., max_bytes_length=..., max_list_size=..., max_dict_size=..., max_set_size=..., max_tuple_size=..., max_allocations=..., max_scope_statements=..., max_scope_allocations=..., max_scope_iterations=..., max_scope_operations=..., allow_float=..., allow_complex=..., allow_dunder_access=...)
 
-   Set sandbox limits for the current interpreter. A value of ``0`` means
-   no limit for that resource. The limits apply to new object creation only;
-   existing objects are not affected.
+   Update sandbox limits for the current interpreter using **merge semantics**:
+   only the keyword arguments you pass are updated; all other limits are
+   preserved. A value of ``0`` means no limit for that resource. Limits apply
+   to new object creation only; existing objects are not affected.
 
    **Data size limits** (raise :exc:`SandboxOverflowError` when exceeded):
 
    *max_int_digits*
       Maximum number of internal digits (~30 bits each) allowed when creating
-      a new integer. This prevents attacks that create extremely large integers
-      which consume excessive memory and CPU time during operations.
+      a new integer.
 
    *max_str_length*
       Maximum length (in characters) allowed when creating a new string.
@@ -1522,28 +1541,25 @@ Limit Configuration
 
    **Allocation limits** (raise :exc:`SandboxMemoryError` when exceeded):
 
-   *global_max_allocations*
-      Maximum number of GC-tracked object allocations allowed globally. This
-      limits the total number of objects (lists, dicts, sets, tuples,
-      user-defined class instances, etc.) that can be created. Use
-      :func:`resetsandboxcounters` to reset the counter before executing
-      untrusted code.
+   *max_allocations*
+      Maximum number of GC-tracked object allocations allowed globally.
 
-   *scope_max_allocations*
+   *max_scope_allocations*
       Maximum allocations from sandboxed code only (code with a registered
       ``co_filename``). Does NOT count allocations from stdlib or builtins.
-      Requires scope tracking (see :func:`addsandboxfilename`).
+      Requires scope tracking (see :meth:`~sys.sandbox.add_filename`).
 
    **Execution limits** (raise :exc:`SandboxRuntimeError` when exceeded):
 
-   *scope_max_statements*
-      Maximum number of statement executions within sandbox scope. Prevents
-      infinite loops at the Python level. Requires scope tracking.
+   *max_scope_statements*
+      Maximum number of statement executions within sandbox scope.
 
-   *scope_max_iterations*
+   *max_scope_iterations*
       Maximum number of iterator steps (``tp_iternext`` calls) within sandbox
-      scope. Prevents infinite iteration through C builtins like :func:`sum`,
-      :func:`list`, :func:`sorted`, etc. Requires scope tracking.
+      scope.
+
+   *max_scope_operations*
+      Maximum number of SANDBOX_COUNT opcode operations within sandbox scope.
 
    **Type restrictions** (raise :exc:`SandboxTypeError` when violated):
 
@@ -1559,54 +1575,76 @@ Limit Configuration
 
    *allow_dunder_access*
       If ``False``, blocks access to double-underscore (``__dunder__``)
-      attributes within sandbox scope. Prevents introspection-based escapes
-      like ``obj.__class__.__subclasses__()``. Defaults to ``True``.
+      attributes within sandbox scope. Defaults to ``True``.
 
    Example of setting basic limits::
 
       >>> import sys
-      >>> sys.setsandboxlimits(
+      >>> sys.sandbox.set_limits(
       ...     max_int_digits=100,
       ...     max_str_length=100000,
       ...     max_list_size=1000000,
-      ...     global_max_allocations=1000000,
-      ...     scope_max_statements=100000,
-      ...     scope_max_iterations=1000000,
+      ...     max_allocations=1000000,
+      ...     max_scope_statements=100000,
+      ...     max_scope_iterations=1000000,
       ...     allow_dunder_access=False,
       ... )
 
-   .. impl-detail::
-
-      This function is specific to CPython and may not be available in
-      other Python implementations.
-
    .. versionadded:: 3.12
 
+All limit values are also available as read/write properties on the
+``sys.sandbox`` object:
 
-.. function:: getsandboxlimits()
+.. attribute:: sys.sandbox.max_int_digits
+.. attribute:: sys.sandbox.max_str_length
+.. attribute:: sys.sandbox.max_bytes_length
+.. attribute:: sys.sandbox.max_list_size
+.. attribute:: sys.sandbox.max_dict_size
+.. attribute:: sys.sandbox.max_set_size
+.. attribute:: sys.sandbox.max_tuple_size
+.. attribute:: sys.sandbox.max_allocations
+.. attribute:: sys.sandbox.max_scope_allocations
+.. attribute:: sys.sandbox.max_scope_statements
+.. attribute:: sys.sandbox.max_scope_iterations
+.. attribute:: sys.sandbox.max_scope_operations
+.. attribute:: sys.sandbox.allow_float
+.. attribute:: sys.sandbox.allow_complex
+.. attribute:: sys.sandbox.allow_dunder_access
+
+   Individual limit properties. Can be read and assigned directly::
+
+      >>> sys.sandbox.max_int_digits = 100
+      >>> sys.sandbox.max_int_digits
+      100
+
+
+.. method:: sys.sandbox.get_limits()
 
    Return the current sandbox limits as a dictionary. The dictionary contains
-   the same keys as the parameters to :func:`setsandboxlimits`.
+   the same keys as the parameters to :meth:`~sys.sandbox.set_limits`.
 
    Example::
 
-      >>> import sys
-      >>> sys.getsandboxlimits()
+      >>> sys.sandbox.get_limits()
       {'max_int_digits': 0, 'max_str_length': 0, 'max_bytes_length': 0,
        'max_list_size': 0, 'max_dict_size': 0, 'max_set_size': 0,
-       'max_tuple_size': 0, 'global_max_allocations': 0,
-       'scope_max_statements': 0, 'scope_max_allocations': 0,
-       'scope_max_iterations': 0, 'allow_float': True,
-       'allow_complex': True, 'allow_dunder_access': True}
+       'max_tuple_size': 0, 'max_allocations': 0,
+       'max_scope_statements': 0, 'max_scope_allocations': 0,
+       'max_scope_iterations': 0, 'max_scope_operations': 0,
+       'allow_float': True, 'allow_complex': True,
+       'allow_dunder_access': True}
 
    .. versionadded:: 3.12
 
 
-.. function:: getsandboxcounts()
+Counters
+^^^^^^^^
+
+.. method:: sys.sandbox.get_counts()
 
    Return the current sandbox counters as a dictionary containing:
 
-   *global_allocation_count*
+   *allocation_count*
       Total GC-tracked object allocations.
 
    *scope_allocation_count*
@@ -1618,31 +1656,44 @@ Limit Configuration
    *scope_iteration_count*
       Iterator steps within sandbox scope.
 
+   *scope_operation_count*
+      SANDBOX_COUNT operations within sandbox scope.
+
    Example::
 
-      >>> import sys
-      >>> sys.getsandboxcounts()
-      {'global_allocation_count': 12345, 'scope_allocation_count': 0,
-       'scope_statement_count': 0, 'scope_iteration_count': 0}
+      >>> sys.sandbox.get_counts()
+      {'allocation_count': 12345, 'scope_allocation_count': 0,
+       'scope_statement_count': 0, 'scope_iteration_count': 0,
+       'scope_operation_count': 0}
 
    .. versionadded:: 3.12
 
 
-.. function:: resetsandboxcounters()
+.. method:: sys.sandbox.reset_counts()
 
-   Reset all sandbox counters to ``0``. This resets ``global_allocation_count``,
-   ``scope_allocation_count``, ``scope_statement_count``, and
-   ``scope_iteration_count``.
+   Reset all sandbox counters to ``0``.
 
    Call this before executing untrusted code to track resource usage
    from that code only.
 
-   Example::
+   .. versionadded:: 3.12
 
-      >>> import sys
-      >>> sys.setsandboxlimits(global_max_allocations=1000)
-      >>> sys.resetsandboxcounters()
-      >>> # Now execute untrusted code with fresh counters
+Counter values are also available as read-only properties:
+
+.. attribute:: sys.sandbox.allocation_count
+.. attribute:: sys.sandbox.scope_allocation_count
+.. attribute:: sys.sandbox.scope_statement_count
+.. attribute:: sys.sandbox.scope_iteration_count
+.. attribute:: sys.sandbox.scope_operation_count
+
+   Read-only counter properties.
+
+
+.. method:: sys.sandbox.reset()
+
+   Reset all sandbox state to defaults: all limits to ``0``, all counters to
+   ``0``, all mode flags to their defaults, clear registered filenames, and
+   clear the creation hook.
 
    .. versionadded:: 3.12
 
@@ -1650,21 +1701,22 @@ Limit Configuration
 Scope Management
 ^^^^^^^^^^^^^^^^
 
-Scoped limits (``scope_max_statements``, ``scope_max_allocations``,
-``scope_max_iterations``) only apply to code whose ``co_filename`` is
-registered in the sandbox filename set. This allows the sandbox to
-distinguish between untrusted user code and trusted framework/stdlib code.
+Scoped limits (``max_scope_statements``, ``max_scope_allocations``,
+``max_scope_iterations``, ``max_scope_operations``) only apply to code whose
+``co_filename`` is registered in the sandbox filename set. This allows the
+sandbox to distinguish between untrusted user code and trusted
+framework/stdlib code.
 
-.. function:: entersandboxscope()
+.. method:: sys.sandbox.enter_scope()
 
    Mark the current frame as the sandbox entry point by registering the
    current frame's ``co_filename``. Automatically resets scope counters.
-   Use :func:`exitsandboxscope` when done.
+   Use :meth:`~sys.sandbox.exit_scope` when done.
 
    .. versionadded:: 3.12
 
 
-.. function:: exitsandboxscope()
+.. method:: sys.sandbox.exit_scope()
 
    Clear all registered filenames and exit sandbox scope.
    Call this after running sandboxed code.
@@ -1672,7 +1724,7 @@ distinguish between untrusted user code and trusted framework/stdlib code.
    .. versionadded:: 3.12
 
 
-.. function:: issandboxinscope()
+.. method:: sys.sandbox.in_scope()
 
    Return ``True`` if the current executing code is within sandbox scope
    (i.e., its ``co_filename`` is registered).
@@ -1680,16 +1732,16 @@ distinguish between untrusted user code and trusted framework/stdlib code.
    .. versionadded:: 3.12
 
 
-.. function:: addsandboxframe()
+.. method:: sys.sandbox.add_frame()
 
    Add the current frame's ``co_filename`` to the set of registered filenames
-   for sandbox scope tracking. Unlike :func:`entersandboxscope`, this does
-   not reset counters.
+   for sandbox scope tracking. Unlike :meth:`~sys.sandbox.enter_scope`, this
+   does not reset counters.
 
    .. versionadded:: 3.12
 
 
-.. function:: addsandboxfilename(filename)
+.. method:: sys.sandbox.add_filename(filename)
 
    Register a filename string for sandbox scope tracking. All code compiled
    with a registered ``co_filename`` counts toward scope limits.
@@ -1697,17 +1749,17 @@ distinguish between untrusted user code and trusted framework/stdlib code.
    Use this with :func:`compile` + :func:`exec` for explicit control over
    what code is tracked::
 
-      >>> sys.addsandboxfilename('<my-sandbox>')
+      >>> sys.sandbox.add_filename('<my-sandbox>')
       >>> code = compile(source, '<my-sandbox>', 'exec')
       >>> exec(code)
 
-   Filenames persist until :func:`exitsandboxscope` or
-   :func:`clearsandboxfilenames` is called.
+   Filenames persist until :meth:`~sys.sandbox.exit_scope` or
+   :meth:`~sys.sandbox.clear_filenames` is called.
 
    .. versionadded:: 3.12
 
 
-.. function:: removesandboxfilename(filename)
+.. method:: sys.sandbox.remove_filename(filename)
 
    Remove a filename from the set of registered filenames. Code with this
    ``co_filename`` will no longer count toward scope limits.
@@ -1715,10 +1767,22 @@ distinguish between untrusted user code and trusted framework/stdlib code.
    .. versionadded:: 3.12
 
 
-.. function:: clearsandboxfilenames()
+.. method:: sys.sandbox.clear_filenames()
 
    Clear all registered filenames for sandbox scope. Equivalent to
-   :func:`exitsandboxscope` but does not reset counters.
+   :meth:`~sys.sandbox.exit_scope` but does not reset counters.
+
+   .. versionadded:: 3.12
+
+
+.. method:: sys.sandbox.scope()
+
+   Return a context manager for sandbox scope. The context manager calls
+   :meth:`~sys.sandbox.enter_scope` on entry and :meth:`~sys.sandbox.exit_scope`
+   on exit::
+
+      >>> with sys.sandbox.scope():
+      ...     exec(code)  # Scoped limits apply here
 
    .. versionadded:: 3.12
 
@@ -1726,15 +1790,15 @@ distinguish between untrusted user code and trusted framework/stdlib code.
 Suspend/Resume
 ^^^^^^^^^^^^^^
 
-.. function:: suspendsandboxlimits()
+.. method:: sys.sandbox.suspend()
 
    Temporarily suspend all sandbox limits. Returns the new suspend count.
    Limits are only active when the suspend count is ``0``.
 
-   This function is useful when trusted code needs to perform operations
+   This method is useful when trusted code needs to perform operations
    that might exceed the sandbox limits. Calls can be nested; each call
-   to :func:`suspendsandboxlimits` must be balanced by a call to
-   :func:`resumesandboxlimits`.
+   to :meth:`~sys.sandbox.suspend` must be balanced by a call to
+   :meth:`~sys.sandbox.resume`.
 
    Suspend bypasses all sandbox restrictions: size limits, type restrictions,
    allocation counting, statement counting, iteration counting, frozen mode,
@@ -1742,16 +1806,15 @@ Suspend/Resume
 
    Example::
 
-      >>> import sys
-      >>> sys.setsandboxlimits(max_list_size=10)
-      >>> count = sys.suspendsandboxlimits()  # Returns 1
+      >>> sys.sandbox.set_limits(max_list_size=10)
+      >>> count = sys.sandbox.suspend()  # Returns 1
       >>> large_list = list(range(1000))  # Works because limits are suspended
-      >>> sys.resumesandboxlimits()  # Limits are active again
+      >>> sys.sandbox.resume()  # Limits are active again
 
    .. versionadded:: 3.12
 
 
-.. function:: resumesandboxlimits()
+.. method:: sys.sandbox.resume()
 
    Resume sandbox limits after a suspend. Returns the new suspend count.
    Limits become active again when the suspend count reaches ``0``.
@@ -1759,10 +1822,21 @@ Suspend/Resume
    .. versionadded:: 3.12
 
 
-.. function:: issandboxsuspended()
+.. attribute:: sys.sandbox.suspended
 
-   Return ``True`` if sandbox limits are currently suspended, ``False``
-   otherwise.
+   Read-only property. ``True`` if sandbox limits are currently suspended,
+   ``False`` otherwise.
+
+   .. versionadded:: 3.12
+
+
+.. method:: sys.sandbox.suspended_limits()
+
+   Return a context manager that suspends limits on entry and resumes on
+   exit::
+
+      >>> with sys.sandbox.suspended_limits():
+      ...     large_list = list(range(1000))  # Limits bypassed
 
    .. versionadded:: 3.12
 
@@ -1774,11 +1848,11 @@ Frozen mode prevents attribute modifications (set/delete) on objects within
 sandbox scope. It supports both a global freeze flag and per-object
 freeze/mutable overrides.
 
-.. function:: setsandboxfrozenmode(enabled)
+.. attribute:: sys.sandbox.frozen_mode
 
-   Enable or disable global sandbox frozen mode. When enabled, all attribute
-   modifications are blocked within sandbox scope unless the target object
-   has been marked as mutable with :func:`sandboxsetobjectmutable`.
+   Read/write property. Enable or disable global sandbox frozen mode. When
+   enabled, all attribute modifications are blocked within sandbox scope
+   unless the target object has been marked as mutable.
 
    Raises :exc:`SandboxAttributeError` when a blocked modification is
    attempted.
@@ -1786,14 +1860,16 @@ freeze/mutable overrides.
    .. versionadded:: 3.12
 
 
-.. function:: getsandboxfrozenmode()
+.. attribute:: sys.sandbox.auto_mutable
 
-   Return ``True`` if global sandbox frozen mode is currently active.
+   Read/write property. Enable or disable auto-mutable mode. When enabled
+   alongside frozen mode, newly created functions, classes, and instances
+   within sandbox scope are automatically marked as mutable.
 
    .. versionadded:: 3.12
 
 
-.. function:: sandboxfreezeobject(obj)
+.. method:: sys.sandbox.freeze(obj)
 
    Freeze a specific object, preventing all attribute modifications on it.
    This is enforced regardless of global frozen mode --- even when global
@@ -1804,15 +1880,15 @@ freeze/mutable overrides.
    .. versionadded:: 3.12
 
 
-.. function:: sandboxisobjectfrozen(obj)
+.. method:: sys.sandbox.is_frozen(obj)
 
    Return ``True`` if the object has been individually frozen with
-   :func:`sandboxfreezeobject`.
+   :meth:`~sys.sandbox.freeze`.
 
    .. versionadded:: 3.12
 
 
-.. function:: sandboxsetobjectmutable(obj, mutable=True)
+.. method:: sys.sandbox.set_mutable(obj, mutable=True)
 
    Mark an object as mutable, allowing attribute modifications on it even
    when global sandbox frozen mode is active or the object has been frozen.
@@ -1829,41 +1905,24 @@ Opcode Restrictions
 Ban specific bytecode opcodes from executing within sandbox scope. This
 allows fine-grained control over what operations sandboxed code can perform.
 
-.. function:: setsandboxopcoderestrictmode(enabled)
+.. attribute:: sys.sandbox.opcode_restrict_mode
 
-   Enable or disable sandbox opcode restriction mode. When enabled, opcodes
-   in the banned set raise :exc:`SandboxRuntimeError` when executed within
-   sandbox scope.
-
-   .. versionadded:: 3.12
-
-
-.. function:: getsandboxopcoderestrictmode()
-
-   Return ``True`` if sandbox opcode restriction mode is currently active.
+   Read/write property. Enable or disable sandbox opcode restriction mode.
+   When enabled, opcodes in the banned set raise :exc:`SandboxRuntimeError`
+   when executed within sandbox scope.
 
    .. versionadded:: 3.12
 
 
-.. function:: setsandboxbannedopcodes(opcode_set)
+.. attribute:: sys.sandbox.banned_opcodes
 
-   Set the banned opcodes from an iterable of opcode integers.
-   Pass ``None`` to clear all banned opcodes. Each value must be in range
-   0--255.
-
-   Example of banning import opcodes::
+   Read/write property. The set of banned opcodes as a :class:`frozenset` of
+   integers. Assign a set, frozenset, or ``None`` to update::
 
       >>> import dis
       >>> banned = {dis.opmap['IMPORT_NAME'], dis.opmap['IMPORT_FROM']}
-      >>> sys.setsandboxbannedopcodes(banned)
-      >>> sys.setsandboxopcoderestrictmode(True)
-
-   .. versionadded:: 3.12
-
-
-.. function:: getsandboxbannedopcodes()
-
-   Return the currently banned opcodes as a :class:`frozenset` of integers.
+      >>> sys.sandbox.banned_opcodes = banned
+      >>> sys.sandbox.opcode_restrict_mode = True
 
    .. versionadded:: 3.12
 
@@ -1871,10 +1930,11 @@ allows fine-grained control over what operations sandboxed code can perform.
 Object Creation Hook
 ^^^^^^^^^^^^^^^^^^^^
 
-.. function:: setobjectcreationhook(hook)
+.. attribute:: sys.sandbox.creation_hook
 
-   Set a callback to be called when objects are created via :meth:`type.__call__`.
-   The hook receives four arguments: ``(obj, type, frame, context)`` where:
+   Read/write property. A callback to be called when objects are created via
+   :meth:`type.__call__`. The hook receives four arguments:
+   ``(obj, type, frame, context)`` where:
 
    *obj*
       The newly created object.
@@ -1889,20 +1949,13 @@ Object Creation Hook
       Reserved for future use, currently ``None``.
 
    The hook should return the object (either the original or a replacement)
-   or raise an exception to block object creation. Pass ``None`` to remove
+   or raise an exception to block object creation. Assign ``None`` to remove
    the hook.
 
    .. warning::
 
       The hook is called for every object created via :meth:`type.__call__`,
       which can have significant performance impact. Use sparingly.
-
-   .. versionadded:: 3.12
-
-
-.. function:: getobjectcreationhook()
-
-   Return the current object creation hook, or ``None`` if no hook is set.
 
    .. versionadded:: 3.12
 

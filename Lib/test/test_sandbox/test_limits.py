@@ -23,36 +23,36 @@ class SandboxLimitsTests(unittest.TestCase):
 
     def tearDown(self):
         # Restore original limits
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
         # Exit scope if entered
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
 
     def test_getsandboxlimits_returns_dict(self):
         """getsandboxlimits should return a dictionary with all limit keys."""
-        limits = sys.getsandboxlimits()
+        limits = sys.sandbox.get_limits()
         self.assertIsInstance(limits, dict)
         expected_keys = {
             'max_int_digits', 'max_str_length', 'max_bytes_length',
             'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
-            'global_max_allocations', 'scope_max_statements', 'scope_max_allocations',
-            'scope_max_iterations', 'scope_max_operations',
+            'max_allocations', 'max_scope_statements', 'max_scope_allocations',
+            'max_scope_iterations', 'max_scope_operations',
             'allow_float', 'allow_complex', 'allow_dunder_access'
         }
         self.assertEqual(set(limits.keys()), expected_keys)
 
     def test_getsandboxcounts_returns_dict(self):
         """getsandboxcounts should return a dictionary with count keys."""
-        counts = sys.getsandboxcounts()
+        counts = sys.sandbox.get_counts()
         self.assertIsInstance(counts, dict)
-        expected_keys = {'global_allocation_count', 'scope_allocation_count', 'scope_statement_count', 'scope_iteration_count', 'scope_operation_count'}
+        expected_keys = {'allocation_count', 'scope_allocation_count', 'scope_statement_count', 'scope_iteration_count', 'scope_operation_count'}
         self.assertEqual(set(counts.keys()), expected_keys)
 
     def test_default_limits_are_zero(self):
         """Default limits should be 0 (no limit) and types allowed."""
-        limits = sys.getsandboxlimits()
+        limits = sys.sandbox.get_limits()
         self.assertEqual(limits['max_int_digits'], 0)
         self.assertEqual(limits['max_str_length'], 0)
         self.assertEqual(limits['max_bytes_length'], 0)
@@ -60,17 +60,17 @@ class SandboxLimitsTests(unittest.TestCase):
         self.assertEqual(limits['max_dict_size'], 0)
         self.assertEqual(limits['max_set_size'], 0)
         self.assertEqual(limits['max_tuple_size'], 0)
-        self.assertEqual(limits['global_max_allocations'], 0)
-        self.assertEqual(limits['scope_max_statements'], 0)
-        self.assertEqual(limits['scope_max_allocations'], 0)
+        self.assertEqual(limits['max_allocations'], 0)
+        self.assertEqual(limits['max_scope_statements'], 0)
+        self.assertEqual(limits['max_scope_allocations'], 0)
         self.assertTrue(limits['allow_float'])
         self.assertTrue(limits['allow_complex'])
         self.assertTrue(limits['allow_dunder_access'])
 
     def test_setsandboxlimits_updates_limits(self):
         """setsandboxlimits should update the limits."""
-        sys.setsandboxlimits(max_int_digits=100, max_str_length=1000)
-        limits = sys.getsandboxlimits()
+        sys.sandbox.set_limits(max_int_digits=100, max_str_length=1000)
+        limits = sys.sandbox.get_limits()
         self.assertEqual(limits['max_int_digits'], 100)
         self.assertEqual(limits['max_str_length'], 1000)
 
@@ -86,17 +86,17 @@ class IntegerLimitsTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_integers_allowed(self):
         """Small integers should always be allowed."""
-        sys.setsandboxlimits(max_int_digits=TEST_INT_DIGITS_LIMIT)
+        sys.sandbox.set_limits(max_int_digits=TEST_INT_DIGITS_LIMIT)
         x = 12345
         self.assertEqual(x, 12345)
 
     def test_large_integers_blocked(self):
         """Large integers exceeding limit should raise SandboxOverflowError."""
-        sys.setsandboxlimits(max_int_digits=TEST_INT_DIGITS_LIMIT)
+        sys.sandbox.set_limits(max_int_digits=TEST_INT_DIGITS_LIMIT)
         # 10^50 requires about 6 internal digits
         with self.assertRaises(SandboxOverflowError) as cm:
             x = 10 ** 50
@@ -104,7 +104,7 @@ class IntegerLimitsTests(unittest.TestCase):
 
     def test_no_limit_allows_large_integers(self):
         """With no limit (0), large integers should be allowed."""
-        sys.setsandboxlimits(max_int_digits=0)
+        sys.sandbox.set_limits(max_int_digits=0)
         x = 10 ** 100  # Should work
         self.assertIsInstance(x, int)
 
@@ -116,17 +116,17 @@ class StringLimitsTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_strings_allowed(self):
         """Small strings should always be allowed."""
-        sys.setsandboxlimits(max_str_length=TEST_STR_LIMIT)
+        sys.sandbox.set_limits(max_str_length=TEST_STR_LIMIT)
         s = "hello world"
         self.assertEqual(s, "hello world")
 
     def test_large_strings_blocked(self):
         """Large strings exceeding limit should raise SandboxOverflowError."""
-        sys.setsandboxlimits(max_str_length=TEST_STR_LIMIT)
+        sys.sandbox.set_limits(max_str_length=TEST_STR_LIMIT)
         with self.assertRaises(SandboxOverflowError) as cm:
             # Use join to trigger PyUnicode_New
             s = ''.join(['x' for _ in range(200)])
@@ -140,17 +140,17 @@ class ListLimitsTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_lists_allowed(self):
         """Small lists should always be allowed."""
-        sys.setsandboxlimits(max_list_size=100)
+        sys.sandbox.set_limits(max_list_size=100)
         lst = [1, 2, 3, 4, 5]
         self.assertEqual(len(lst), 5)
 
     def test_large_lists_blocked(self):
         """Large lists exceeding limit via append should raise SandboxOverflowError."""
-        sys.setsandboxlimits(max_list_size=100)
+        sys.sandbox.set_limits(max_list_size=100)
         lst = []
         with self.assertRaises(SandboxOverflowError) as cm:
             for i in range(150):
@@ -165,17 +165,17 @@ class DictLimitsTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_dicts_allowed(self):
         """Small dicts should always be allowed."""
-        sys.setsandboxlimits(max_dict_size=TEST_DICT_LIMIT)
+        sys.sandbox.set_limits(max_dict_size=TEST_DICT_LIMIT)
         d = {'a': 1, 'b': 2}
         self.assertEqual(len(d), 2)
 
     def test_large_dicts_blocked(self):
         """Large dicts exceeding limit should raise SandboxOverflowError."""
-        sys.setsandboxlimits(max_dict_size=TEST_DICT_LIMIT)
+        sys.sandbox.set_limits(max_dict_size=TEST_DICT_LIMIT)
         d = {}
         with self.assertRaises(SandboxOverflowError) as cm:
             for i in range(600):
@@ -190,17 +190,17 @@ class SetLimitsTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_sets_allowed(self):
         """Small sets should always be allowed."""
-        sys.setsandboxlimits(max_set_size=TEST_SET_LIMIT)
+        sys.sandbox.set_limits(max_set_size=TEST_SET_LIMIT)
         s = {1, 2, 3}
         self.assertEqual(len(s), 3)
 
     def test_large_sets_blocked(self):
         """Large sets exceeding limit should raise SandboxOverflowError."""
-        sys.setsandboxlimits(max_set_size=TEST_SET_LIMIT)
+        sys.sandbox.set_limits(max_set_size=TEST_SET_LIMIT)
         s = set()
         with self.assertRaises(SandboxOverflowError) as cm:
             for i in range(600):
@@ -215,17 +215,17 @@ class TupleLimitsTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_small_tuples_allowed(self):
         """Small tuples should always be allowed."""
-        sys.setsandboxlimits(max_tuple_size=TEST_TUPLE_LIMIT)
+        sys.sandbox.set_limits(max_tuple_size=TEST_TUPLE_LIMIT)
         t = (1, 2, 3, 4, 5)
         self.assertEqual(len(t), 5)
 
     def test_large_tuples_blocked(self):
         """Large tuples exceeding limit should raise SandboxOverflowError."""
-        sys.setsandboxlimits(max_tuple_size=TEST_TUPLE_LIMIT)
+        sys.sandbox.set_limits(max_tuple_size=TEST_TUPLE_LIMIT)
         with self.assertRaises(SandboxOverflowError) as cm:
             t = tuple(range(600))
         self.assertIn("sandbox limit", str(cm.exception))
@@ -238,7 +238,7 @@ class TypeRestrictionTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_float_allowed_by_default(self):
         """Float creation should be allowed by default."""
@@ -247,7 +247,7 @@ class TypeRestrictionTests(unittest.TestCase):
 
     def test_float_blocked_when_disabled(self):
         """Float creation should raise SandboxTypeError when disabled."""
-        sys.setsandboxlimits(allow_float=False)
+        sys.sandbox.set_limits(allow_float=False)
         with self.assertRaises(SandboxTypeError) as cm:
             f = float(1)
         self.assertIn("forbidden", str(cm.exception))
@@ -259,7 +259,7 @@ class TypeRestrictionTests(unittest.TestCase):
 
     def test_complex_blocked_when_disabled(self):
         """Complex creation should raise SandboxTypeError when disabled."""
-        sys.setsandboxlimits(allow_complex=False)
+        sys.sandbox.set_limits(allow_complex=False)
         with self.assertRaises(SandboxTypeError) as cm:
             c = complex(1, 2)
         self.assertIn("forbidden", str(cm.exception))
@@ -283,11 +283,11 @@ class MinimalSafeLimitsTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_minimal_limits_allow_imports(self):
         """Minimal limits should allow standard library imports."""
-        sys.setsandboxlimits(**self.MINIMAL_LIMITS)
+        sys.sandbox.set_limits(**self.MINIMAL_LIMITS)
 
         # These imports use internal strings, dicts, lists
         import json
@@ -298,7 +298,7 @@ class MinimalSafeLimitsTests(unittest.TestCase):
 
     def test_minimal_limits_allow_basic_operations(self):
         """Minimal limits should allow basic Python operations."""
-        sys.setsandboxlimits(**self.MINIMAL_LIMITS)
+        sys.sandbox.set_limits(**self.MINIMAL_LIMITS)
 
         # Create containers within limits
         d = {str(i): i for i in range(1000)}
@@ -313,7 +313,7 @@ class MinimalSafeLimitsTests(unittest.TestCase):
 
     def test_minimal_limits_block_excessive_resources(self):
         """Minimal limits should block excessive resource usage."""
-        sys.setsandboxlimits(**self.MINIMAL_LIMITS)
+        sys.sandbox.set_limits(**self.MINIMAL_LIMITS)
 
         # Should block very large integers
         with self.assertRaises(SandboxOverflowError):
@@ -332,21 +332,21 @@ class SuspendResumeLimitsTests(unittest.TestCase):
 
     def tearDown(self):
         # Ensure limits are resumed
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
-        sys.setsandboxlimits(**self.original_limits)
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_suspend_bypasses_limits(self):
         """Suspended limits should allow exceeding normal limits."""
-        sys.setsandboxlimits(max_list_size=10)
+        sys.sandbox.set_limits(max_list_size=10)
 
         # Should fail with limits active
         with self.assertRaises(SandboxOverflowError):
             list(range(20))
 
         # Suspend and try again
-        sys.suspendsandboxlimits()
-        self.assertTrue(sys.issandboxsuspended())
+        sys.sandbox.suspend()
+        self.assertTrue(sys.sandbox.suspended)
 
         # Should succeed while suspended
         lst = list(range(20))
@@ -354,16 +354,16 @@ class SuspendResumeLimitsTests(unittest.TestCase):
 
     def test_resume_reactivates_limits(self):
         """Resumed limits should block operations again."""
-        sys.setsandboxlimits(max_list_size=10)
-        sys.suspendsandboxlimits()
+        sys.sandbox.set_limits(max_list_size=10)
+        sys.sandbox.suspend()
 
         # Works while suspended
         lst = list(range(20))
         self.assertEqual(len(lst), 20)
 
         # Resume limits
-        sys.resumesandboxlimits()
-        self.assertFalse(sys.issandboxsuspended())
+        sys.sandbox.resume()
+        self.assertFalse(sys.sandbox.suspended)
 
         # Should fail again
         with self.assertRaises(SandboxOverflowError):
@@ -371,30 +371,30 @@ class SuspendResumeLimitsTests(unittest.TestCase):
 
     def test_nested_suspend_resume(self):
         """Nested suspend/resume should work correctly."""
-        sys.setsandboxlimits(max_list_size=10)
+        sys.sandbox.set_limits(max_list_size=10)
 
         # First suspend
-        count1 = sys.suspendsandboxlimits()
+        count1 = sys.sandbox.suspend()
         self.assertEqual(count1, 1)
-        self.assertTrue(sys.issandboxsuspended())
+        self.assertTrue(sys.sandbox.suspended)
 
         # Nested suspend
-        count2 = sys.suspendsandboxlimits()
+        count2 = sys.sandbox.suspend()
         self.assertEqual(count2, 2)
 
         # First resume - still suspended
-        count3 = sys.resumesandboxlimits()
+        count3 = sys.sandbox.resume()
         self.assertEqual(count3, 1)
-        self.assertTrue(sys.issandboxsuspended())
+        self.assertTrue(sys.sandbox.suspended)
 
         # Should still work
         lst = list(range(20))
         self.assertEqual(len(lst), 20)
 
         # Second resume - now active
-        count4 = sys.resumesandboxlimits()
+        count4 = sys.sandbox.resume()
         self.assertEqual(count4, 0)
-        self.assertFalse(sys.issandboxsuspended())
+        self.assertFalse(sys.sandbox.suspended)
 
         # Should fail now
         with self.assertRaises(SandboxOverflowError):

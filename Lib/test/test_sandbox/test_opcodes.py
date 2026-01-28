@@ -84,51 +84,51 @@ class OpcodeRestrictionAPITests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxopcoderestrictmode(False)
-        sys.setsandboxbannedopcodes(None)
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        sys.sandbox.opcode_restrict_mode = False
+        sys.sandbox.banned_opcodes = None
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_get_set_opcode_restrict_mode(self):
         """Setting and getting opcode restrict mode should work."""
-        self.assertFalse(sys.getsandboxopcoderestrictmode())
-        sys.setsandboxopcoderestrictmode(True)
-        self.assertTrue(sys.getsandboxopcoderestrictmode())
-        sys.setsandboxopcoderestrictmode(False)
-        self.assertFalse(sys.getsandboxopcoderestrictmode())
+        self.assertFalse(sys.sandbox.opcode_restrict_mode)
+        sys.sandbox.opcode_restrict_mode = True
+        self.assertTrue(sys.sandbox.opcode_restrict_mode)
+        sys.sandbox.opcode_restrict_mode = False
+        self.assertFalse(sys.sandbox.opcode_restrict_mode)
 
     def test_get_set_banned_opcodes(self):
         """Setting and getting banned opcodes should work."""
-        opcodes = sys.getsandboxbannedopcodes()
+        opcodes = sys.sandbox.banned_opcodes
         self.assertEqual(len(opcodes), 0)
 
-        sys.setsandboxbannedopcodes(YIELD_OPCODES)
-        result = sys.getsandboxbannedopcodes()
+        sys.sandbox.banned_opcodes = YIELD_OPCODES
+        result = sys.sandbox.banned_opcodes
         self.assertIsInstance(result, frozenset)
         self.assertEqual(result, frozenset(YIELD_OPCODES))
 
     def test_clear_banned_opcodes_with_none(self):
         """Passing None should clear all banned opcodes."""
-        sys.setsandboxbannedopcodes(YIELD_OPCODES)
-        sys.setsandboxbannedopcodes(None)
-        self.assertEqual(len(sys.getsandboxbannedopcodes()), 0)
+        sys.sandbox.banned_opcodes = YIELD_OPCODES
+        sys.sandbox.banned_opcodes = None
+        self.assertEqual(len(sys.sandbox.banned_opcodes), 0)
 
     def test_banned_opcodes_invalid_range(self):
         """Opcode out of range 0..255 should raise ValueError."""
         with self.assertRaises(ValueError):
-            sys.setsandboxbannedopcodes({300})
+            sys.sandbox.banned_opcodes = {300}
         with self.assertRaises(ValueError):
-            sys.setsandboxbannedopcodes({-1})
+            sys.sandbox.banned_opcodes = {-1}
 
     def test_set_all_banned_opcodes(self):
         """Setting all banned opcodes should work."""
-        sys.setsandboxbannedopcodes(ALL_BANNED_OPCODES)
-        result = sys.getsandboxbannedopcodes()
+        sys.sandbox.banned_opcodes = ALL_BANNED_OPCODES
+        result = sys.sandbox.banned_opcodes
         self.assertEqual(result, frozenset(ALL_BANNED_OPCODES))
         self.assertEqual(len(result), 25)
 
@@ -140,15 +140,15 @@ class OpcodeRestrictionEnforcementTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxopcoderestrictmode(False)
-        sys.setsandboxbannedopcodes(None)
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        sys.sandbox.opcode_restrict_mode = False
+        sys.sandbox.banned_opcodes = None
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     # --- yield blocked ---
 
@@ -157,9 +157,9 @@ class OpcodeRestrictionEnforcementTests(unittest.TestCase):
         banned = _opcode_set_literal(YIELD_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 try:
     exec(compile("""
@@ -191,9 +191,9 @@ except SandboxRuntimeError as e:
         )
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 try:
     exec(compile("""
@@ -224,9 +224,9 @@ except SandboxRuntimeError as e:
         banned = _opcode_set_literal(WITH_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 try:
     exec(compile("""
@@ -262,9 +262,9 @@ except SandboxRuntimeError as e:
         banned = _opcode_set_literal(TRY_EXCEPT_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 try:
     exec(compile("""
@@ -293,9 +293,9 @@ except SandboxRuntimeError as e:
         banned = _opcode_set_literal(GLOBAL_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 try:
     exec(compile("""
@@ -325,9 +325,9 @@ except SandboxRuntimeError as e:
         banned = _opcode_set_literal(IMPORT_STAR_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 try:
     exec(compile("""
@@ -353,9 +353,9 @@ except SandboxRuntimeError as e:
         banned = _opcode_set_literal(MATCH_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 try:
     exec(compile("""
@@ -385,24 +385,24 @@ class OpcodeRestrictionBypassTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxopcoderestrictmode(False)
-        sys.setsandboxbannedopcodes(None)
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        sys.sandbox.opcode_restrict_mode = False
+        sys.sandbox.banned_opcodes = None
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
 
     def test_not_enforced_when_mode_off(self):
         """Banned opcodes should NOT be enforced when mode is off."""
         banned = _opcode_set_literal(YIELD_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
+sys.sandbox.banned_opcodes = {banned}
 # Mode stays off
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.add_filename("<sandbox>")
 
 exec(compile("""
 def gen():
@@ -423,8 +423,8 @@ sys.exit(0)
         banned = _opcode_set_literal(YIELD_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
 # No scope registered
 
 def gen():
@@ -444,10 +444,10 @@ sys.exit(0)
         banned = _opcode_set_literal(YIELD_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
-sys.suspendsandboxlimits()
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
+sys.sandbox.suspend()
 
 exec(compile("""
 def gen():
@@ -456,7 +456,7 @@ def gen():
 
 result = list(gen())
 """, "<sandbox>", "exec"))
-sys.resumesandboxlimits()
+sys.sandbox.resume()
 print("PASS")
 sys.exit(0)
 '''
@@ -469,9 +469,9 @@ sys.exit(0)
         banned = _opcode_set_literal(YIELD_OPCODES)
         code = f'''
 import sys
-sys.setsandboxbannedopcodes({banned})
-sys.setsandboxopcoderestrictmode(True)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.add_filename("<sandbox>")
 
 exec(compile("""
 # Normal code should work fine

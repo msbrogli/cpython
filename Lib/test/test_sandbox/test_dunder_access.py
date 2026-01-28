@@ -13,23 +13,23 @@ class DunderAccessBlockingTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.setsandboxlimits(**self.original_limits)
+        sys.sandbox.set_limits(**self.original_limits)
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
 
     def test_default_allows_dunder(self):
         """Default should allow dunder access."""
-        limits = sys.getsandboxlimits()
+        limits = sys.sandbox.get_limits()
         self.assertTrue(limits['allow_dunder_access'])
 
     def test_dunder_read_blocked(self):
         """Reading dunder attributes blocked when configured."""
         code = '''
 import sys
-sys.setsandboxlimits(allow_dunder_access=False)
-sys.entersandboxscope()
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.enter_scope()
 x = {}
 try:
     d = x.__class__
@@ -44,8 +44,8 @@ except SandboxAttributeError as e:
         """Writing dunder attributes blocked when configured."""
         code = '''
 import sys
-sys.setsandboxlimits(allow_dunder_access=False)
-sys.entersandboxscope()
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.enter_scope()
 class Foo:
     pass
 try:
@@ -61,8 +61,8 @@ except SandboxAttributeError as e:
         """Deleting dunder attributes blocked when configured."""
         code = '''
 import sys
-sys.setsandboxlimits(allow_dunder_access=False)
-sys.entersandboxscope()
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.enter_scope()
 class Foo:
     __doc__ = "test"
 try:
@@ -78,8 +78,8 @@ except SandboxAttributeError as e:
         """Normal attributes still allowed when dunder blocked."""
         code = '''
 import sys
-sys.setsandboxlimits(allow_dunder_access=False)
-sys.entersandboxscope()
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.enter_scope()
 class Foo:
     pass
 Foo.bar = 42
@@ -92,7 +92,7 @@ print("OK:", Foo.bar)
         """Dunder access allowed outside sandbox scope."""
         code = '''
 import sys
-sys.setsandboxlimits(allow_dunder_access=False)
+sys.sandbox.set_limits(allow_dunder_access=False)
 # NOT entering sandbox scope
 x = {}
 print("OK:", x.__class__.__name__)
@@ -104,8 +104,8 @@ print("OK:", x.__class__.__name__)
         """Dunder blocking should work with filename-based scope tracking."""
         code = '''
 import sys
-sys.setsandboxlimits(allow_dunder_access=False)
-sys.addsandboxfilename("<sandbox>")
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.add_filename("<sandbox>")
 
 try:
     exec(compile("""
@@ -123,8 +123,8 @@ except SandboxAttributeError as e:
         """Dunder access allowed when allow_dunder_access is True."""
         code = '''
 import sys
-sys.setsandboxlimits(allow_dunder_access=True)
-sys.entersandboxscope()
+sys.sandbox.set_limits(allow_dunder_access=True)
+sys.sandbox.enter_scope()
 x = {}
 print("OK:", x.__class__.__name__)
 '''
@@ -135,8 +135,8 @@ print("OK:", x.__class__.__name__)
         """Single underscore attributes should still be allowed."""
         code = '''
 import sys
-sys.setsandboxlimits(allow_dunder_access=False)
-sys.entersandboxscope()
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.enter_scope()
 class Foo:
     pass
 Foo._private = 42

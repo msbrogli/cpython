@@ -22,13 +22,13 @@ def _compile_sandboxed(source, filename=SANDBOX_FILENAME):
 
 def _run_and_count(source, max_ops=100000):
     """Compile with sandbox flag, execute, and return operation count."""
-    sys.setsandboxlimits(scope_max_operations=max_ops)
-    sys.addsandboxfilename(SANDBOX_FILENAME)
-    sys.resetsandboxcounters()
+    sys.sandbox.set_limits(max_scope_operations=max_ops)
+    sys.sandbox.add_filename(SANDBOX_FILENAME)
+    sys.sandbox.reset_counts()
     code = _compile_sandboxed(source)
     exec(code, {"__builtins__": __builtins__})
-    count = sys.getsandboxcounts()["scope_operation_count"]
-    sys.clearsandboxfilenames()
+    count = sys.sandbox.get_counts()["scope_operation_count"]
+    sys.sandbox.clear_filenames()
     return count
 
 
@@ -37,56 +37,56 @@ class OperationCountingAPITests(unittest.TestCase):
 
     def setUp(self):
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
-        sys.clearsandboxfilenames()
+        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.clear_filenames()
 
     def test_scope_max_operations_in_limits(self):
         """scope_max_operations should appear in getsandboxlimits."""
-        limits = sys.getsandboxlimits()
-        self.assertIn("scope_max_operations", limits)
-        self.assertEqual(limits["scope_max_operations"], 0)
+        limits = sys.sandbox.get_limits()
+        self.assertIn("max_scope_operations", limits)
+        self.assertEqual(limits["max_scope_operations"], 0)
 
     def test_scope_operation_count_in_counts(self):
         """scope_operation_count should appear in getsandboxcounts."""
-        counts = sys.getsandboxcounts()
+        counts = sys.sandbox.get_counts()
         self.assertIn("scope_operation_count", counts)
 
     def test_set_scope_max_operations(self):
         """setsandboxlimits should accept scope_max_operations."""
-        sys.setsandboxlimits(scope_max_operations=500)
-        limits = sys.getsandboxlimits()
-        self.assertEqual(limits["scope_max_operations"], 500)
+        sys.sandbox.set_limits(max_scope_operations=500)
+        limits = sys.sandbox.get_limits()
+        self.assertEqual(limits["max_scope_operations"], 500)
 
     def test_no_counting_without_flag(self):
         """Code compiled without PyCF_SANDBOX_COUNT should not be counted."""
-        sys.setsandboxlimits(scope_max_operations=100000)
-        sys.addsandboxfilename(SANDBOX_FILENAME)
-        sys.resetsandboxcounters()
+        sys.sandbox.set_limits(max_scope_operations=100000)
+        sys.sandbox.add_filename(SANDBOX_FILENAME)
+        sys.sandbox.reset_counts()
         code = compile("a = 1\nb = 2\nc = 3", SANDBOX_FILENAME, "exec")
         exec(code)
-        count = sys.getsandboxcounts()["scope_operation_count"]
+        count = sys.sandbox.get_counts()["scope_operation_count"]
         self.assertEqual(count, 0)
 
     def test_no_counting_without_registered_filename(self):
         """Code with unregistered filename should not be counted."""
-        sys.setsandboxlimits(scope_max_operations=100000)
-        sys.clearsandboxfilenames()
-        sys.resetsandboxcounters()
+        sys.sandbox.set_limits(max_scope_operations=100000)
+        sys.sandbox.clear_filenames()
+        sys.sandbox.reset_counts()
         code = _compile_sandboxed("a = 1", "<unregistered>")
         exec(code)
-        count = sys.getsandboxcounts()["scope_operation_count"]
+        count = sys.sandbox.get_counts()["scope_operation_count"]
         self.assertEqual(count, 0)
 
 
@@ -95,20 +95,20 @@ class StatementOperationCountTests(unittest.TestCase):
 
     def setUp(self):
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
-        sys.clearsandboxfilenames()
+        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.clear_filenames()
 
     def test_assign(self):
         """Assign statement counts 1."""
@@ -200,20 +200,20 @@ class ExpressionOperationCountTests(unittest.TestCase):
 
     def setUp(self):
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
-        sys.clearsandboxfilenames()
+        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.clear_filenames()
 
     def test_call_single(self):
         """Single Call counts 1."""
@@ -274,20 +274,20 @@ class CombinedCountTests(unittest.TestCase):
 
     def setUp(self):
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
-        sys.clearsandboxfilenames()
+        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.clear_filenames()
 
     def test_assign_with_call(self):
         """a = f(x) -> Assign(1) + Call(1) = 2."""
@@ -336,26 +336,26 @@ class OperationLimitTests(unittest.TestCase):
 
     def setUp(self):
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        while sys.issandboxsuspended():
-            sys.resumesandboxlimits()
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
         try:
-            sys.exitsandboxscope()
+            sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.setsandboxlimits(**self.original_limits)
-        sys.clearsandboxfilenames()
+        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.clear_filenames()
 
     def test_operation_limit_exceeded(self):
         """Exceeding scope_max_operations should raise SandboxRuntimeError."""
-        sys.setsandboxlimits(scope_max_operations=3)
-        sys.addsandboxfilename(SANDBOX_FILENAME)
-        sys.resetsandboxcounters()
+        sys.sandbox.set_limits(max_scope_operations=3)
+        sys.sandbox.add_filename(SANDBOX_FILENAME)
+        sys.sandbox.reset_counts()
 
         # This should exceed the limit of 3
         source = "a = 1\nb = 2\nc = 3\nd = 4"  # 4 Assign ops
@@ -366,30 +366,30 @@ class OperationLimitTests(unittest.TestCase):
 
     def test_operation_limit_not_exceeded(self):
         """Code within the operation limit should run normally."""
-        sys.setsandboxlimits(scope_max_operations=10)
-        sys.addsandboxfilename(SANDBOX_FILENAME)
-        sys.resetsandboxcounters()
+        sys.sandbox.set_limits(max_scope_operations=10)
+        sys.sandbox.add_filename(SANDBOX_FILENAME)
+        sys.sandbox.reset_counts()
 
         source = "a = 1\nb = 2"  # 2 Assign ops
         code = _compile_sandboxed(source)
         exec(code, {"__builtins__": __builtins__})
-        count = sys.getsandboxcounts()["scope_operation_count"]
+        count = sys.sandbox.get_counts()["scope_operation_count"]
         self.assertEqual(count, 2)
 
     def test_both_mechanisms_independent(self):
         """scope_max_operations and scope_max_statements are independent."""
         # Set both limits
-        sys.setsandboxlimits(
-            scope_max_statements=100000,
-            scope_max_operations=100000
+        sys.sandbox.set_limits(
+            max_scope_statements=100000,
+            max_scope_operations=100000
         )
-        sys.addsandboxfilename(SANDBOX_FILENAME)
-        sys.resetsandboxcounters()
+        sys.sandbox.add_filename(SANDBOX_FILENAME)
+        sys.sandbox.reset_counts()
 
         source = "a = 1\nb = 2\nc = 3"
         code = _compile_sandboxed(source)
         exec(code, {"__builtins__": __builtins__})
-        counts = sys.getsandboxcounts()
+        counts = sys.sandbox.get_counts()
         # Operation count should reflect SANDBOX_COUNT opcodes
         self.assertEqual(counts["scope_operation_count"], 3)
         # Statement count should reflect tracing (if enabled)
@@ -397,20 +397,20 @@ class OperationLimitTests(unittest.TestCase):
 
     def test_reset_clears_operation_count(self):
         """resetsandboxcounters should reset scope_operation_count."""
-        sys.setsandboxlimits(scope_max_operations=100000)
-        sys.addsandboxfilename(SANDBOX_FILENAME)
+        sys.sandbox.set_limits(max_scope_operations=100000)
+        sys.sandbox.add_filename(SANDBOX_FILENAME)
 
         # First exec
-        sys.resetsandboxcounters()
+        sys.sandbox.reset_counts()
         code = _compile_sandboxed("a = 1")
         exec(code, {"__builtins__": __builtins__})
-        self.assertEqual(sys.getsandboxcounts()["scope_operation_count"], 1)
+        self.assertEqual(sys.sandbox.get_counts()["scope_operation_count"], 1)
 
         # Reset and exec again
-        sys.resetsandboxcounters()
-        self.assertEqual(sys.getsandboxcounts()["scope_operation_count"], 0)
+        sys.sandbox.reset_counts()
+        self.assertEqual(sys.sandbox.get_counts()["scope_operation_count"], 0)
         exec(code, {"__builtins__": __builtins__})
-        self.assertEqual(sys.getsandboxcounts()["scope_operation_count"], 1)
+        self.assertEqual(sys.sandbox.get_counts()["scope_operation_count"], 1)
 
 
 if __name__ == "__main__":

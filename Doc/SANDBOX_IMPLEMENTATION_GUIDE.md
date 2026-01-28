@@ -12,17 +12,19 @@ This comprehensive document describes the complete implementation of the sandbox
 6. [Limit Types and Enforcement](#limit-types-and-enforcement)
 7. [Scope Tracking](#scope-tracking)
 8. [Iteration Limits and Iterator Wrapper](#iteration-limits-and-iterator-wrapper)
-9. [Dunder Access Control](#dunder-access-control)
-10. [Frozen Mode](#frozen-mode)
-11. [Opcode Restrictions](#opcode-restrictions)
-12. [Object Creation Hooks](#object-creation-hooks)
-13. [Suspend/Resume](#suspendresume)
-14. [Integration Points](#integration-points)
-15. [Python API Reference](#python-api-reference)
-16. [C API Reference](#c-api-reference)
-17. [Implementation Files](#implementation-files)
-18. [Porting Guide](#porting-guide)
-19. [Testing](#testing)
+9. [Operation Counting](#operation-counting)
+10. [Dunder Access Control](#dunder-access-control)
+11. [Frozen Mode](#frozen-mode)
+12. [Auto-Mutable Mode](#auto-mutable-mode)
+13. [Opcode Restrictions](#opcode-restrictions)
+14. [Object Creation Hooks](#object-creation-hooks)
+15. [Suspend/Resume](#suspendresume)
+16. [Integration Points](#integration-points)
+17. [Python API Reference](#python-api-reference)
+18. [C API Reference](#c-api-reference)
+19. [Implementation Files](#implementation-files)
+20. [Porting Guide](#porting-guide)
+21. [Testing](#testing)
 
 ---
 
@@ -37,8 +39,10 @@ The CPython sandbox provides mechanisms for limiting resource usage, monitoring 
 - **Allocation Limits**: Limit total object allocations (global and scoped)
 - **Statement Limits**: Limit number of statements executed (prevents infinite loops)
 - **Iteration Limits**: Limit number of iterator steps (prevents abuse via C builtins)
+- **Operation Counting**: Limit AST-level operations via compiler-emitted `SANDBOX_COUNT` opcodes
 - **Dunder Access Control**: Block access to double-underscore attributes in sandbox scope
 - **Frozen Mode**: Prevent attribute mutations globally or per-object
+- **Auto-Mutable Mode**: Automatically mark newly created objects as mutable in sandbox scope
 - **Opcode Restrictions**: Ban specific bytecode opcodes from executing in sandbox scope
 - **Scope Tracking**: Track limits only for specific code (by filename)
 - **Object Creation Hooks**: Intercept and optionally replace objects at creation time
@@ -65,6 +69,7 @@ The CPython sandbox provides mechanisms for limiting resource usage, monitoring 
 | `scope_max_allocations` | Max allocations in sandbox scope | `SandboxMemoryError` |
 | `scope_max_statements` | Max statements in sandbox scope | `SandboxRuntimeError` |
 | `scope_max_iterations` | Max iterator steps in sandbox scope | `SandboxRuntimeError` |
+| `scope_max_operations` | Max AST operations via `SANDBOX_COUNT` opcode | `SandboxRuntimeError` |
 | Frozen mode (global) | Block all attribute mutations | `SandboxAttributeError` |
 | Frozen mode (per-object) | Block mutations on specific objects | `SandboxAttributeError` |
 | Opcode restrictions | Ban specific bytecode opcodes | `SandboxRuntimeError` |
@@ -82,7 +87,7 @@ Exception
  +-- SandboxError
       +-- SandboxOverflowError    (size/length limit exceeded)
       +-- SandboxMemoryError      (allocation limit exceeded)
-      +-- SandboxRuntimeError     (statement/iteration limit, banned opcode)
+      +-- SandboxRuntimeError     (statement/iteration/operation limit, banned opcode)
       +-- SandboxTypeError        (forbidden type creation)
       +-- SandboxAttributeError   (frozen mode, dunder access blocked)
 ```
@@ -105,6 +110,7 @@ Exception
 | `scope_max_allocations` | `SandboxMemoryError` | "Sandbox scoped allocation limit exceeded" |
 | `scope_max_statements` | `SandboxRuntimeError` | "Sandbox statement limit exceeded" |
 | `scope_max_iterations` | `SandboxRuntimeError` | "Sandbox iteration limit exceeded" |
+| `scope_max_operations` | `SandboxRuntimeError` | "Sandbox operation limit exceeded" |
 | Frozen mode (global) | `SandboxAttributeError` | "cannot modify 'type' object: sandbox frozen mode is active" |
 | Frozen mode (per-object) | `SandboxAttributeError` | "cannot modify frozen object 'type'" |
 | Banned opcode | `SandboxRuntimeError` | "Opcode N is not allowed in sandbox scope" |
@@ -293,6 +299,8 @@ typedef struct {
     uint64_t scope_allocation_count;    /* Allocations in scope */
     uint64_t scope_max_iterations;      /* 0 = no limit */
     uint64_t scope_iteration_count;     /* Iterator calls in scope */
+    uint64_t scope_max_operations;      /* 0 = no limit */
+    uint64_t scope_operation_count;     /* Counted operations (SANDBOX_COUNT opcode) in scope */
 
     /* Sandbox scope tracking - set of registered filenames */
     _PySandboxFilenameSet registered_filenames;
@@ -334,6 +342,7 @@ typedef struct {
     _PySandboxLimits limits;
     _PyObjectCreationHook creation_hook;
     int frozen_mode;                     /* 1 = global freeze active, 0 = normal */
+    int auto_mutable_mode;               /* 1 = auto-mark created objects as mutable, 0 = off */
     int opcode_restrict_mode;            /* 1 = active, 0 = off */
     _PySandboxOpcodeSet banned_opcodes;  /* bitmap of banned opcodes */
 } _PySandboxState;
@@ -358,6 +367,8 @@ typedef struct {
     .scope_allocation_count = 0,    \
     .scope_max_iterations = 0,      \
     .scope_iteration_count = 0,     \
+    .scope_max_operations = 0,      \
+    .scope_operation_count = 0,     \
     .registered_filenames = {.filenames = NULL, .capacity = 0, .count = 0}, \
     .allow_float = 1,               \
     .allow_complex = 1,             \
@@ -377,6 +388,7 @@ typedef struct {
     .limits = _PySandboxLimits_INIT,        \
     .creation_hook = _PyObjectCreationHook_INIT, \
     .frozen_mode = 0,                       \
+    .auto_mutable_mode = 0,                 \
     .opcode_restrict_mode = 0,              \
     .banned_opcodes = {{0}},                \
 }
@@ -785,6 +797,133 @@ The wrapper type (`_PySandboxIteratorWrapper_Type`) is initialized lazily on fir
 
 ---
 
+## Operation Counting
+
+### Purpose
+
+Provide precise AST-level operation counting with zero tracing overhead. Unlike statement counting (which relies on line tracing and counts every line execution), operation counting uses a dedicated `SANDBOX_COUNT` opcode emitted by the compiler at specific AST nodes. This counts only semantically meaningful operations (calls, arithmetic, attribute access, etc.).
+
+### How It Works
+
+1. **Compile Flag**: Code must be compiled with `PyCF_SANDBOX_COUNT` (0x8000). Without this flag, no `SANDBOX_COUNT` opcodes are emitted, so there is zero overhead.
+2. **Compiler Emission**: During compilation, `ADDOP_SANDBOX_COUNT(c)` is inserted at each counted AST node.
+3. **Runtime Check**: Each `SANDBOX_COUNT` opcode calls `_PySandbox_CheckScopeOperation()`, which increments `scope_operation_count` and checks against `scope_max_operations`.
+
+### Compile Flag
+
+Defined in `Include/cpython/compile.h`:
+
+```c
+#define PyCF_SANDBOX_COUNT 0x8000
+```
+
+Added to `PyCF_MASK` so the compiler accepts it:
+
+```c
+#define PyCF_MASK (... | PyCF_SANDBOX_COUNT)
+```
+
+### Compiler Integration
+
+In `Python/compile.c`, a macro emits the opcode conditionally:
+
+```c
+#define ADDOP_SANDBOX_COUNT(C) { \
+    if ((C)->c_flags->cf_flags & PyCF_SANDBOX_COUNT) { \
+        ADDOP((C), SANDBOX_COUNT); \
+    } \
+}
+```
+
+This macro is placed at the start of each counted AST node visitor:
+
+**Counted Statements**: `Assign`, `AugAssign`, `Delete`, `Pass`, `Break`, `Continue`, `Return`, `If`, `For`, `While`, `Try`, `Import`, `ImportFrom`, `Assert`, `FunctionDef`, `ClassDef`
+
+**Counted Expressions**: `Call`, `BinOp`, `UnaryOp`, `Compare`, `BoolOp`, `Attribute`, `Subscript`
+
+**Not Counted**: `Expr` (statement wrapper), `Global`, `Nonlocal` (compile-time directives), literal values, `Name` loads
+
+### Opcode Definition
+
+In `Lib/opcode.py` and `Include/opcode.h`:
+
+```c
+#define SANDBOX_COUNT  181
+```
+
+### Runtime Handler
+
+In `Python/ceval.c`:
+
+```c
+TARGET(SANDBOX_COUNT) {
+    PyInterpreterState *interp = tstate->interp;
+    if (interp->sandbox.limits.scope_max_operations > 0 &&
+        !interp->sandbox.limits.suspended) {
+        if (_PySandbox_CheckScopeOperation() < 0) {
+            goto error;
+        }
+    }
+    DISPATCH();
+}
+```
+
+### Check Function
+
+In `Python/sandbox.c`:
+
+```c
+int
+_PySandbox_CheckScopeOperation(void)
+{
+    /* ... thread/interpreter state checks ... */
+    _PySandboxLimits *limits = &interp->sandbox.limits;
+
+    if (limits->scope_max_operations == 0 ||
+        limits->in_check || limits->suspended) {
+        return 0;
+    }
+
+    if (limits->registered_filenames.count == 0) {
+        return 0;
+    }
+
+    _PyInterpreterFrame *current = get_current_interpreter_frame();
+    if (!frame_in_sandbox_scope(&limits->registered_filenames, current)) {
+        return 0;
+    }
+
+    limits->scope_operation_count++;
+
+    /* Only raise error ONCE at exactly max+1 */
+    if (limits->scope_operation_count == limits->scope_max_operations + 1) {
+        limits->in_check = 1;
+        PyErr_SetString(PyExc_SandboxRuntimeError,
+                        "Sandbox operation limit exceeded");
+        limits->in_check = 0;
+        return -1;
+    }
+
+    return 0;
+}
+```
+
+### Performance
+
+- Code compiled **without** `PyCF_SANDBOX_COUNT`: zero overhead (no `SANDBOX_COUNT` opcodes present).
+- Code compiled **with** the flag but no operation limit set (`scope_max_operations == 0`): one pointer dereference + comparison per counted node (predicted not-taken branch).
+- Code with the flag and an active limit: one scope check + counter increment per counted node.
+
+### Independence from Statement Counting
+
+Operation counting is fully independent from statement counting:
+- Different counters: `scope_operation_count` vs `scope_statement_count`
+- Different limits: `scope_max_operations` vs `scope_max_statements`
+- Different mechanisms: compiler-emitted opcode vs line tracing
+- Both can be used simultaneously
+
+---
+
 ## Dunder Access Control
 
 ### Purpose
@@ -924,6 +1063,65 @@ _PySandbox_CheckFrozen(PyObject *obj)
                  Py_TYPE(obj)->tp_name);
     return -1;
 }
+```
+
+---
+
+## Auto-Mutable Mode
+
+### Purpose
+
+When frozen mode is active, sandboxed code cannot modify any objects -- including ones it creates itself (classes, instances, functions). Auto-mutable mode solves this by automatically marking newly created objects with `Py_OBJFLAGS_MUTABLE` when created within sandbox scope.
+
+### Configuration
+
+- Enable: `sys.setsandboxautomutable(True)`
+- Disable: `sys.setsandboxautomutable(False)`
+- Check: `sys.getsandboxautomutable() -> bool`
+
+Both `auto_mutable_mode` and `frozen_mode` must be active for auto-marking to occur.
+
+### Implementation
+
+In `Python/sandbox.c`:
+
+```c
+void
+_PySandbox_MaybeMarkMutable(PyObject *obj)
+{
+    assert(obj != NULL);
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return;
+    }
+    /* Fast path: both flags must be on */
+    if (!interp->sandbox.auto_mutable_mode || !interp->sandbox.frozen_mode) {
+        return;
+    }
+    if (interp->sandbox.limits.suspended) {
+        return;
+    }
+
+    /* Check if current frame is in sandbox scope */
+    /* ... frame scope check ... */
+
+    /* Mark the object as mutable */
+    ((PyObject *)obj)->ob_flags |= Py_OBJFLAGS_MUTABLE;
+}
+```
+
+### Enforcement Points
+
+`_PySandbox_MaybeMarkMutable()` is called from:
+- `Objects/typeobject.c` in `type_call()` -- marks newly created instances and classes
+- `Python/ceval.c` in `MAKE_FUNCTION` -- marks newly created function objects
+
+### C API
+
+```c
+PyAPI_FUNC(void) PySandbox_SetAutoMutableMode(int mode);
+PyAPI_FUNC(int) PySandbox_GetAutoMutableMode(void);
+PyAPI_FUNC(void) _PySandbox_MaybeMarkMutable(PyObject *obj);
 ```
 
 ---
@@ -1111,13 +1309,16 @@ Suspend also bypasses frozen mode checks and opcode restrictions.
 |------|---------|
 | `Include/internal/pycore_sandbox.h` | Data structures and API declarations |
 | `Include/internal/pycore_interp.h` | Add `_PySandboxState sandbox` to `PyInterpreterState` |
+| `Include/cpython/compile.h` | Add `PyCF_SANDBOX_COUNT` flag |
+| `Include/opcode.h` | Add `SANDBOX_COUNT` opcode (181) |
 | `Include/object.h` | Add `ob_flags` field, `Py_OBJFLAGS_*` macros |
 | `Include/pyerrors.h` | Declare `PyExc_Sandbox*` exception types |
 | `Include/patchlevel.h` | Version string update (`3.11.14+sandbox`) |
 | `Python/sandbox.c` | Core implementation |
 | `Python/sysmodule.c` | Python API (sys module functions) |
 | `Python/pystate.c` | State initialization |
-| `Python/ceval.c` | Statement tracing, opcode checking |
+| `Python/ceval.c` | Statement tracing, opcode checking, `SANDBOX_COUNT` handler |
+| `Python/compile.c` | Emit `SANDBOX_COUNT` at AST nodes (`PyCF_SANDBOX_COUNT`) |
 | `Modules/gcmodule.c` | Allocation counting |
 | `Objects/longobject.c` | Integer size check |
 | `Objects/unicodeobject.c` | String length check |
@@ -1183,6 +1384,7 @@ _PySandbox_Fini(interp);   /* During interpreter finalization */
 - `scope_max_statements` (int): Max statements in sandbox scope. Default: 0
 - `scope_max_allocations` (int): Max allocations in sandbox scope. Default: 0
 - `scope_max_iterations` (int): Max iterator steps in sandbox scope. Default: 0
+- `scope_max_operations` (int): Max AST operations (requires `PyCF_SANDBOX_COUNT`). Default: 0
 - `allow_float` (bool): Allow float creation. Default: True
 - `allow_complex` (bool): Allow complex creation. Default: True
 - `allow_dunder_access` (bool): Allow `__dunder__` attribute access. Default: True
@@ -1192,6 +1394,7 @@ _PySandbox_Fini(interp);   /* During interpreter finalization */
 - `scope_allocation_count`: Allocations within sandbox scope
 - `scope_statement_count`: Statements executed within sandbox scope
 - `scope_iteration_count`: Iterator steps within sandbox scope
+- `scope_operation_count`: Operations counted via `SANDBOX_COUNT` opcode
 
 ### Counter Reset
 
@@ -1235,6 +1438,8 @@ _PySandbox_Fini(interp);   /* During interpreter finalization */
 | `sys.sandboxfreezeobject(obj)` | Freeze a specific object |
 | `sys.sandboxisobjectfrozen(obj) -> bool` | Check if object is individually frozen |
 | `sys.sandboxsetobjectmutable(obj, mutable=True)` | Mark object as mutable (overrides freeze) |
+| `sys.setsandboxautomutable(enabled)` | Enable/disable auto-mutable mode |
+| `sys.getsandboxautomutable() -> bool` | Check if auto-mutable mode is active |
 
 ### Opcode Restrictions
 
@@ -1263,6 +1468,7 @@ PyAPI_FUNC(int) _PySandbox_CheckTypeAllowed(PyTypeObject *type);
 PyAPI_FUNC(int) _PySandbox_CheckAllocation(void);
 PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
 PyAPI_FUNC(int) _PySandbox_CheckIteration(void);
+PyAPI_FUNC(int) _PySandbox_CheckScopeOperation(void);
 PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
 PyAPI_FUNC(int) _PySandbox_CheckFrozen(PyObject *obj);
 PyAPI_FUNC(int) _PySandbox_CheckOpcode(int opcode);
@@ -1323,6 +1529,11 @@ PyAPI_FUNC(int) PySandbox_GetFrozenMode(void);
 PyAPI_FUNC(void) PySandbox_FreezeObject(PyObject *obj);
 PyAPI_FUNC(int) PySandbox_IsObjectFrozen(PyObject *obj);
 PyAPI_FUNC(void) PySandbox_SetObjectMutable(PyObject *obj, int mutable);
+
+/* Auto-mutable mode */
+PyAPI_FUNC(void) PySandbox_SetAutoMutableMode(int mode);
+PyAPI_FUNC(int) PySandbox_GetAutoMutableMode(void);
+PyAPI_FUNC(void) _PySandbox_MaybeMarkMutable(PyObject *obj);
 ```
 
 ### Opcode Restrictions
@@ -1343,18 +1554,24 @@ PyAPI_FUNC(PyObject *) PySandbox_GetBannedOpcodes(void);
 ```
 Include/
   object.h                  # Modified: add ob_flags, Py_OBJFLAGS_* macros
+  opcode.h                  # Modified: add SANDBOX_COUNT (181)
   pyerrors.h                # Modified: declare PyExc_Sandbox* exceptions
   patchlevel.h              # Modified: version string
+  cpython/
+    compile.h               # Modified: add PyCF_SANDBOX_COUNT flag
   internal/
     pycore_sandbox.h        # Data structures, API declarations (NEW FILE)
     pycore_interp.h         # Modified: add sandbox field
     pycore_pystate.h        # Modified: tracing state
+    pycore_opcode.h         # Modified: SANDBOX_COUNT opcode metadata
 
 Python/
-  sandbox.c                 # Core implementation (NEW FILE, ~1600 lines)
-  sysmodule.c               # Modified: add sys.* functions (~600 lines added)
+  sandbox.c                 # Core implementation (NEW FILE, ~1700 lines)
+  sysmodule.c               # Modified: add sys.* functions (~700 lines added)
   pystate.c                 # Modified: initialization
-  ceval.c                   # Modified: statement tracing, opcode checking
+  ceval.c                   # Modified: statement tracing, opcode checking, SANDBOX_COUNT handler
+  compile.c                 # Modified: emit SANDBOX_COUNT at AST nodes
+  opcode_targets.h          # Modified: add SANDBOX_COUNT target
 
 Modules/
   gcmodule.c                # Modified: allocation counting
@@ -1389,9 +1606,13 @@ Lib/test/test_sandbox/     # Test package (NEW)
   test_scope.py             # Scope management and statement counting
   test_iterations.py        # Iteration counting and iterator wrapper
   test_dunder_access.py     # Dunder attribute blocking
-  test_frozen_mode.py       # Frozen mode (global and per-object)
+  test_frozen_mode.py       # Frozen mode, auto-mutable mode (global and per-object)
   test_integration.py       # Integration tests
   test_opcodes.py           # Opcode restrictions
+  test_operations.py        # Operation counting (SANDBOX_COUNT opcode)
+
+Lib/
+  opcode.py                 # Modified: add SANDBOX_COUNT opcode
 ```
 
 ---
@@ -1453,8 +1674,11 @@ Lib/test/test_sandbox/     # Test package (NEW)
 9. **Integrate allocation counting**
    - [ ] `Modules/gcmodule.c`: `_PySandbox_CheckAllocation()`
 
-10. **Integrate statement tracing and opcode checking**
-    - [ ] `Python/ceval.c`: `_PySandbox_CheckScopeStatement()`, `_PySandbox_CheckOpcode()`
+10. **Integrate statement tracing, opcode checking, and operation counting**
+    - [ ] `Python/ceval.c`: `_PySandbox_CheckScopeStatement()`, `_PySandbox_CheckOpcode()`, `SANDBOX_COUNT` handler
+    - [ ] `Python/compile.c`: Add `ADDOP_SANDBOX_COUNT(c)` macro and emit at AST nodes
+    - [ ] `Include/cpython/compile.h`: Add `PyCF_SANDBOX_COUNT` flag to `PyCF_MASK`
+    - [ ] `Include/opcode.h`, `Lib/opcode.py`: Define `SANDBOX_COUNT` opcode
 
 11. **Update build system**
     - [ ] `Makefile.pre.in`: Add `sandbox.c` to PYTHON_OBJS
@@ -1471,6 +1695,8 @@ Lib/test/test_sandbox/     # Test package (NEW)
     - [ ] Test opcode restrictions
     - [ ] Test hooks
     - [ ] Test suspend/resume
+    - [ ] Test operation counting (`SANDBOX_COUNT` opcode)
+    - [ ] Test auto-mutable mode
     - [ ] Test exception hierarchy
 
 ### Version-Specific Changes
@@ -1515,9 +1741,10 @@ Verify:
 | `test_scope.py` | Scope management, statement counting, filename tracking |
 | `test_iterations.py` | Iteration counting and iterator wrapper protection |
 | `test_dunder_access.py` | Dunder attribute blocking |
-| `test_frozen_mode.py` | Global and per-object frozen mode |
+| `test_frozen_mode.py` | Global and per-object frozen mode, auto-mutable mode |
 | `test_integration.py` | Combined functionality |
 | `test_opcodes.py` | Opcode restriction mode |
+| `test_operations.py` | Operation counting (`SANDBOX_COUNT` opcode, `PyCF_SANDBOX_COUNT`) |
 
 ### Shared Test Infrastructure
 
@@ -1563,6 +1790,7 @@ sys.setsandboxlimits(
     scope_max_statements=100_000,     # 100K statements
     scope_max_allocations=10_000,     # 10K allocations
     scope_max_iterations=1_000_000,   # 1M iterator steps
+    scope_max_operations=100_000,     # 100K AST operations (requires PyCF_SANDBOX_COUNT)
 
     # Global limits
     global_max_allocations=1_000_000, # 1M total allocations

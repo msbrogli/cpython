@@ -9,15 +9,16 @@ A practical guide for using the CPython sandbox to safely execute untrusted Pyth
 3. [Setting Resource Limits](#setting-resource-limits)
 4. [Scope Management](#scope-management)
 5. [Execution Limits](#execution-limits)
-6. [Frozen Mode](#frozen-mode)
-7. [Dunder Access Control](#dunder-access-control)
-8. [Opcode Restrictions](#opcode-restrictions)
-9. [Object Creation Hooks](#object-creation-hooks)
-10. [Suspend/Resume for Trusted Code](#suspendresume-for-trusted-code)
-11. [Exception Handling](#exception-handling)
-12. [Complete Examples](#complete-examples)
-13. [Best Practices](#best-practices)
-14. [API Quick Reference](#api-quick-reference)
+6. [Operation Counting](#operation-counting)
+7. [Frozen Mode](#frozen-mode)
+8. [Dunder Access Control](#dunder-access-control)
+9. [Opcode Restrictions](#opcode-restrictions)
+10. [Object Creation Hooks](#object-creation-hooks)
+11. [Suspend/Resume for Trusted Code](#suspendresume-for-trusted-code)
+12. [Exception Handling](#exception-handling)
+13. [Complete Examples](#complete-examples)
+14. [Best Practices](#best-practices)
+15. [API Quick Reference](#api-quick-reference)
 
 ---
 
@@ -323,6 +324,7 @@ print(f"Global allocations: {counts['global_allocation_count']}")
 print(f"Scoped allocations: {counts['scope_allocation_count']}")
 print(f"Statements executed: {counts['scope_statement_count']}")
 print(f"Iterator steps: {counts['scope_iteration_count']}")
+print(f"Operations counted: {counts['scope_operation_count']}")
 ```
 
 ### Resetting Counters
@@ -331,6 +333,107 @@ Reset all counters to 0 before each execution:
 
 ```python
 sys.resetsandboxcounters()
+```
+
+---
+
+## Operation Counting
+
+Operation counting provides an alternative to statement counting that works at the AST level. Instead of counting source lines via tracing, the compiler emits `SANDBOX_COUNT` opcodes at specific AST nodes. This has zero overhead for non-sandbox code and does not depend on the tracing mechanism.
+
+### How It Works
+
+1. **Compile with `PyCF_SANDBOX_COUNT` flag**: Code must be compiled with `flags=0x8000` to enable operation counting.
+2. **Set `scope_max_operations`**: Configure the maximum number of counted operations.
+3. **Register filenames and reset counters**: Same as with statement counting.
+
+### Basic Usage
+
+```python
+import sys
+
+PyCF_SANDBOX_COUNT = 0x8000
+
+sys.setsandboxlimits(scope_max_operations=1000)
+sys.addsandboxfilename("<sandbox>")
+sys.resetsandboxcounters()
+
+# Compile with the SANDBOX_COUNT flag
+code = compile(user_source, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
+
+try:
+    exec(code, {"__builtins__": __builtins__})
+except SandboxRuntimeError as e:
+    print(e)  # "Sandbox operation limit exceeded"
+finally:
+    sys.clearsandboxfilenames()
+```
+
+### What Gets Counted
+
+Each `SANDBOX_COUNT` opcode increments the `scope_operation_count` counter. The compiler emits one opcode per AST node for:
+
+**Counted Statements:**
+- `Assign`, `AugAssign`, `Delete`
+- `Pass`, `Break`, `Continue`, `Return`
+- `If`, `For`, `While`, `Try`
+- `Import`, `ImportFrom`
+- `Assert`
+- `FunctionDef`, `ClassDef`
+
+**Counted Expressions:**
+- `Call` (function/method calls)
+- `BinOp` (e.g., `a + b`)
+- `UnaryOp` (e.g., `-a`)
+- `Compare` (e.g., `a < b`)
+- `BoolOp` (e.g., `a and b`)
+- `Attribute` (e.g., `obj.attr`)
+- `Subscript` (e.g., `a[0]`)
+
+**Not Counted:**
+- `Expr` statement wrapper (the inner expression is counted instead)
+- `Global`, `Nonlocal` (compile-time directives)
+- Literal values, `Name` loads, `Starred`
+
+### Counting Examples
+
+```python
+# a = 1          -> Assign(1) = 1 operation
+# a = len([])    -> Assign(1) + Call(1) = 2 operations
+# a = len([]) + 1 -> Assign(1) + Call(1) + BinOp(1) = 3 operations
+# for i in range(3): a = i -> For(1) + Call(1) + Assign*3 = 5 operations
+```
+
+### Reading the Operation Counter
+
+```python
+counts = sys.getsandboxcounts()
+print(f"Operations: {counts['scope_operation_count']}")
+```
+
+### Independence from Statement Counting
+
+Operation counting (`scope_max_operations`) and statement counting (`scope_max_statements`) are independent mechanisms. You can use either or both:
+
+```python
+sys.setsandboxlimits(
+    scope_max_statements=100_000,   # Tracing-based line counting
+    scope_max_operations=50_000,    # Opcode-based AST node counting
+)
+```
+
+Code compiled **without** `PyCF_SANDBOX_COUNT` has zero operation counting overhead. Code compiled **with** the flag but without `scope_max_operations` set has minimal overhead (one pointer dereference + comparison per counted node).
+
+### No-Flag Code Is Not Counted
+
+Code compiled without `PyCF_SANDBOX_COUNT` does not contain `SANDBOX_COUNT` opcodes, so operations are never counted regardless of limits:
+
+```python
+# This code will NOT count operations (no flag)
+code = compile("a = 1\nb = 2", "<sandbox>", "exec")
+
+# This code WILL count operations (flag set)
+code = compile("a = 1\nb = 2", "<sandbox>", "exec", flags=0x8000)
 ```
 
 ---
@@ -413,6 +516,41 @@ print(output.result)  # 42
 # Remove mutable flag if needed
 sys.sandboxsetobjectmutable(output, False)
 ```
+
+### Auto-Mutable Mode
+
+When frozen mode is active, sandboxed code cannot modify any objects -- including objects it creates itself (classes, instances, functions). Auto-mutable mode solves this by automatically marking newly created objects as mutable when they are created within sandbox scope.
+
+```python
+# Enable both frozen mode and auto-mutable mode
+sys.setsandboxfrozenmode(True)
+sys.setsandboxautomutable(True)
+sys.addsandboxfilename("<sandbox>")
+
+code = compile("""
+class Foo:
+    pass
+obj = Foo()
+obj.x = 42  # Allowed - obj was created in sandbox scope and auto-marked mutable
+""", "<sandbox>", "exec")
+
+exec(code)
+
+# Check the mode
+print(sys.getsandboxautomutable())  # True
+
+# Clean up
+sys.setsandboxautomutable(False)
+sys.setsandboxfrozenmode(False)
+sys.clearsandboxfilenames()
+```
+
+Auto-mutable mode automatically applies `Py_OBJFLAGS_MUTABLE` to objects created via `type.__call__` (classes and instances) and `MAKE_FUNCTION` (function definitions) when:
+- Both `auto_mutable_mode` and `frozen_mode` are active
+- The current frame is within sandbox scope
+- The sandbox is not suspended
+
+This allows sandboxed code to define and use its own classes and functions naturally while still preventing modification of imported or pre-existing objects.
 
 ### Frozen Mode with Scope
 
@@ -694,7 +832,8 @@ Suspend bypasses **all** sandbox restrictions:
 - Allocation counting
 - Statement counting
 - Iteration counting
-- Frozen mode
+- Operation counting
+- Frozen mode (including auto-mutable marking)
 - Dunder access blocking
 - Opcode restrictions
 
@@ -711,7 +850,7 @@ Exception
  +-- SandboxError                    # Base class for all sandbox violations
       +-- SandboxOverflowError       # Size/length limit exceeded
       +-- SandboxMemoryError         # Allocation limit exceeded
-      +-- SandboxRuntimeError        # Statement/iteration limit, banned opcode
+      +-- SandboxRuntimeError        # Statement/iteration/operation limit, banned opcode
       +-- SandboxTypeError           # Forbidden type creation
       +-- SandboxAttributeError      # Frozen mode or dunder access blocked
 ```
@@ -736,7 +875,7 @@ except SandboxOverflowError:
 except SandboxMemoryError:
     print("Too many object allocations")
 except SandboxRuntimeError:
-    print("Execution limit exceeded (statements, iterations, or banned opcode)")
+    print("Execution limit exceeded (statements, iterations, operations, or banned opcode)")
 except SandboxTypeError:
     print("Forbidden type creation attempted")
 except SandboxAttributeError:
@@ -761,7 +900,7 @@ except SandboxOverflowError:
 
 ### Single-Raise Behavior
 
-Statement and iteration limits raise their exception **exactly once** on first violation. This allows `except` and `finally` blocks to execute normally:
+Statement, iteration, and operation limits raise their exception **exactly once** on first violation. This allows `except` and `finally` blocks to execute normally:
 
 ```python
 sys.setsandboxlimits(scope_max_statements=100)
@@ -820,6 +959,10 @@ def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
         # Enable frozen mode to protect shared state
         sys.setsandboxfrozenmode(True)
 
+        # Enable auto-mutable so sandboxed code can define and use its own
+        # classes, functions, and instances without manual mutable marking
+        sys.setsandboxautomutable(True)
+
         # Prepare namespace
         namespace = {"__builtins__": __builtins__}
         if allowed_globals:
@@ -838,6 +981,7 @@ def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
         return {"error": f"{type(e).__name__}: {e}"}
 
     finally:
+        sys.setsandboxautomutable(False)
         sys.setsandboxfrozenmode(False)
         sys.clearsandboxfilenames()
         sys.setsandboxlimits(**original)
@@ -1024,6 +1168,7 @@ try:
     sys.addsandboxfilename("<sandbox>")
     exec(code)
 finally:
+    sys.setsandboxautomutable(False)
     sys.setsandboxfrozenmode(False)
     sys.setsandboxopcoderestrictmode(False)
     sys.setsandboxbannedopcodes(None)
@@ -1032,14 +1177,15 @@ finally:
     sys.resetsandboxcounters()
 ```
 
-### 4. Use Both Statement and Iteration Limits
+### 4. Use Multiple Execution Limits
 
-Statement limits catch Python-level loops, but C builtins like `sum()`, `list()`, `sorted()` bypass the statement counter. Use iteration limits to catch these:
+Statement limits catch Python-level loops, but C builtins like `sum()`, `list()`, `sorted()` bypass the statement counter. Use iteration limits to catch these. Operation limits provide precise AST-level counting with zero tracing overhead:
 
 ```python
 sys.setsandboxlimits(
     scope_max_statements=100_000,   # Catches: while True: pass
     scope_max_iterations=1_000_000, # Catches: sum(range(10**9))
+    scope_max_operations=50_000,    # AST-level counting (requires PyCF_SANDBOX_COUNT)
 )
 ```
 
@@ -1056,6 +1202,7 @@ sys.setsandboxlimits(
     # Execution limits
     scope_max_statements=100_000,
     scope_max_iterations=1_000_000,
+    scope_max_operations=50_000,   # Requires PyCF_SANDBOX_COUNT at compile time
 
     # Memory limits
     scope_max_allocations=10_000,
@@ -1127,6 +1274,8 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `sys.sandboxfreezeobject(obj)` | Freeze a specific object |
 | `sys.sandboxisobjectfrozen(obj) -> bool` | Check if object is frozen |
 | `sys.sandboxsetobjectmutable(obj, bool)` | Set/clear mutable flag |
+| `sys.setsandboxautomutable(bool)` | Enable/disable auto-mutable mode |
+| `sys.getsandboxautomutable() -> bool` | Check auto-mutable mode status |
 
 ### Opcode Restrictions
 
@@ -1159,7 +1308,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `SandboxError` | Base class for all sandbox violations |
 | `SandboxOverflowError` | Size/length limit exceeded |
 | `SandboxMemoryError` | Allocation limit exceeded |
-| `SandboxRuntimeError` | Statement/iteration limit or banned opcode |
+| `SandboxRuntimeError` | Statement/iteration/operation limit or banned opcode |
 | `SandboxTypeError` | Forbidden type creation |
 | `SandboxAttributeError` | Frozen mode or dunder access blocked |
 
@@ -1178,6 +1327,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `scope_max_statements` | int | 0 | Max statements in scope |
 | `scope_max_allocations` | int | 0 | Max allocations in scope |
 | `scope_max_iterations` | int | 0 | Max iterator steps in scope |
+| `scope_max_operations` | int | 0 | Max AST operations in scope (requires `PyCF_SANDBOX_COUNT`) |
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | True | Allow `__dunder__` attributes |

@@ -7,15 +7,24 @@ import unittest
 from test.test_sandbox import _run_sandboxed_code, _get_settable_limits
 
 
+# Filename used for scoped test code (distinct from test file)
+SCOPED_FILENAME = "<test_allocations_scope>"
+
+
+def _run_scoped(code_str, extra_globals=None):
+    """Execute code within sandbox scope using a separate filename."""
+    globs = {"sys": sys}
+    if extra_globals:
+        globs.update(extra_globals)
+    code = compile(code_str, SCOPED_FILENAME, "exec")
+    exec(code, globs)
+    return globs
+
+
 class ScopedAllocationCountTests(unittest.TestCase):
     """Test scoped allocation counting."""
 
     def setUp(self):
-        # Ensure clean scope state from any previous tests
-        try:
-            sys.sandbox.exit_scope()
-        except RuntimeError:
-            pass
         # Reset all counters for clean test state
         sys.sandbox.reset_counts()
         self.original_limits = _get_settable_limits()
@@ -24,8 +33,8 @@ class ScopedAllocationCountTests(unittest.TestCase):
         while sys.sandbox.suspended:
             sys.sandbox.resume()
         try:
-            sys.sandbox.exit_scope()
-        except RuntimeError:
+            sys.sandbox.remove_filename(SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
             pass
         sys.sandbox.set_limits(**self.original_limits)
         sys.sandbox.reset_counts()
@@ -39,14 +48,16 @@ class ScopedAllocationCountTests(unittest.TestCase):
     def test_scoped_allocation_count_tracked(self):
         """Scoped allocation count should be tracked when in scope."""
         sys.sandbox.set_limits(max_allocations=10000)
-        sys.sandbox.enter_scope()
+        sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Create many objects and KEEP REFERENCES so they don't get garbage collected
         # (getsandboxcounts() itself allocates, so we need significant margin)
-        result = []
-        for _ in range(100):
-            result.append([1, 2, 3])
-            result.append({'a': 1})
+        globs = _run_scoped("""
+result = []
+for _ in range(100):
+    result.append([1, 2, 3])
+    result.append({'a': 1})
+""")
 
         count = sys.sandbox.get_counts()['allocation_count']
         # After 200 object creations (100 lists + 100 dicts), expect at least
@@ -94,12 +105,14 @@ except SandboxMemoryError:
     def test_reset_allocation_count(self):
         """resetsandboxcounters should reset scope allocation counter."""
         sys.sandbox.set_limits(max_allocations=10000)
-        sys.sandbox.enter_scope()
+        sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Create many objects and KEEP REFERENCES so they don't get garbage collected
-        result = []
-        for _ in range(100):
-            result.append([1, 2, 3])
+        globs = _run_scoped("""
+result = []
+for _ in range(100):
+    result.append([1, 2, 3])
+""")
 
         counts_before = sys.sandbox.get_counts()
         # After 100 list creations, expect at least some allocations.
@@ -108,6 +121,8 @@ except SandboxMemoryError:
         # The key behavior is that allocations ARE being counted (count > 0).
         self.assertGreater(counts_before['allocation_count'], 10)
 
+        # Remove the filename first so reset_counts() works
+        sys.sandbox.remove_filename(SCOPED_FILENAME)
         sys.sandbox.reset_counts()
         counts_after = sys.sandbox.get_counts()
         # Count should be close to 0 after reset. A few allocations may occur

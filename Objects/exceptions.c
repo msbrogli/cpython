@@ -3353,6 +3353,8 @@ SimpleExtendsException(PyExc_SandboxError, SandboxTypeError,
                        "Type forbidden in sandbox.");
 SimpleExtendsException(PyExc_SandboxError, SandboxAttributeError,
                        "Attribute access blocked in sandbox.");
+SimpleExtendsException(PyExc_SandboxError, SandboxSecurityError,
+                       "Sandbox configuration modification blocked.");
 
 
 /*
@@ -3609,6 +3611,7 @@ static struct static_exception static_exceptions[] = {
     ITEM(SandboxRuntimeError),    // base: SandboxError
     ITEM(SandboxTypeError),       // base: SandboxError
     ITEM(SandboxAttributeError),  // base: SandboxError
+    ITEM(SandboxSecurityError),   // base: SandboxError
 #undef ITEM
 };
 

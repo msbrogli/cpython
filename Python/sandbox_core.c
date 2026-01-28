@@ -220,6 +220,17 @@ _PySandbox_IsInScope(void)
 }
 
 int
+_PySandbox_CheckConfigModification(void)
+{
+    if (_PySandbox_IsInScope()) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "Cannot modify sandbox configuration from within sandbox scope");
+        return -1;
+    }
+    return 0;
+}
+
+int
 _PySandbox_AddFrameToScope(void)
 {
     PyThreadState *tstate = _PyThreadState_GET();

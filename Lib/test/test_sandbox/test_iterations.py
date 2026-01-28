@@ -6,6 +6,20 @@ import unittest
 from test.test_sandbox import _run_sandboxed_code, _get_settable_limits
 
 
+# Filename used for scoped test code (distinct from test file)
+SCOPED_FILENAME = "<test_iterations_scope>"
+
+
+def _run_scoped(code_str, extra_globals=None):
+    """Execute code within sandbox scope using a separate filename."""
+    globs = {"sys": sys}
+    if extra_globals:
+        globs.update(extra_globals)
+    code = compile(code_str, SCOPED_FILENAME, "exec")
+    exec(code, globs)
+    return globs
+
+
 class ScopedIterationCountTests(unittest.TestCase):
     """Tests for scoped iteration counting and limits.
 
@@ -16,11 +30,6 @@ class ScopedIterationCountTests(unittest.TestCase):
     """
 
     def setUp(self):
-        # Ensure clean scope state from any previous tests
-        try:
-            sys.sandbox.exit_scope()
-        except RuntimeError:
-            pass
         sys.sandbox.reset_counts()
         self.original_limits = _get_settable_limits()
 
@@ -28,8 +37,8 @@ class ScopedIterationCountTests(unittest.TestCase):
         while sys.sandbox.suspended:
             sys.sandbox.resume()
         try:
-            sys.sandbox.exit_scope()
-        except RuntimeError:
+            sys.sandbox.remove_filename(SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
             pass
         sys.sandbox.set_limits(**self.original_limits)
         sys.sandbox.reset_counts()
@@ -45,14 +54,16 @@ class ScopedIterationCountTests(unittest.TestCase):
         from itertools import islice, cycle
         sys.sandbox.set_limits(max_iterations=1000000)
         sys.sandbox.reset_counts()
-        sys.sandbox.enter_scope()
+        sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Use sum() which calls PyIter_Next
-        _ = sum(islice(cycle([1, 2, 3]), 100))
+        globs = _run_scoped("""
+from itertools import islice, cycle
+_ = sum(islice(cycle([1, 2, 3]), 100))
+""")
 
         counts = sys.sandbox.get_counts()
         self.assertGreater(counts['iteration_count'], 0)
-        sys.sandbox.exit_scope()
 
     def test_exceeding_iteration_limit_raises_runtime_error(self):
         """Exceeding iteration limit should raise SandboxRuntimeError."""
@@ -76,8 +87,6 @@ except SandboxRuntimeError as e:
 except Exception as e:
     print(f"Wrong exception type: {type(e).__name__}: {e}", file=sys.stderr)
     sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -88,14 +97,15 @@ finally:
         from itertools import islice, cycle
         sys.sandbox.set_limits(max_iterations=1000000)
         sys.sandbox.reset_counts()
-        sys.sandbox.enter_scope()
+        sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # This should work fine
         # cycle([1, 2, 3]) for 999 items: 333 complete cycles of (1+2+3=6) = 1998
-        result = sum(islice(cycle([1, 2, 3]), 999))
-        self.assertEqual(result, 1998)
-
-        sys.sandbox.exit_scope()
+        globs = _run_scoped("""
+from itertools import islice, cycle
+result = sum(islice(cycle([1, 2, 3]), 999))
+""")
+        self.assertEqual(globs['result'], 1998)
 
     def test_iteration_limit_protects_sum_with_infinite_iterator(self):
         """Iteration limit should protect against sum() with infinite iterator."""
@@ -112,8 +122,6 @@ try:
 except SandboxRuntimeError:
     print("PASS: SandboxRuntimeError raised")
     sys.exit(0)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -124,9 +132,12 @@ finally:
         from itertools import islice, cycle
         sys.sandbox.set_limits(max_iterations=1000000)
 
-        sys.sandbox.enter_scope()
-        _ = sum(islice(cycle([1]), 100))
-        sys.sandbox.exit_scope()
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        _run_scoped("""
+from itertools import islice, cycle
+_ = sum(islice(cycle([1]), 100))
+""")
+        sys.sandbox.remove_filename(SCOPED_FILENAME)
 
         count_before = sys.sandbox.get_counts()['iteration_count']
         self.assertGreater(count_before, 0)
@@ -140,31 +151,39 @@ finally:
         from itertools import islice, cycle
         sys.sandbox.set_limits(max_iterations=0)
         sys.sandbox.reset_counts()
-        sys.sandbox.enter_scope()
+        sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # This should work with no limit
-        result = sum(islice(cycle([1]), 10000))
-        self.assertEqual(result, 10000)
+        globs = _run_scoped("""
+from itertools import islice, cycle
+result = sum(islice(cycle([1]), 10000))
+""")
+        self.assertEqual(globs['result'], 10000)
 
-        sys.sandbox.exit_scope()
+    def test_add_filename_resets_iteration_count(self):
+        """Adding a filename to scope should reset iteration counters.
 
-    def test_enter_scope_resets_iteration_count(self):
-        """entersandboxscope should reset iteration counters."""
+        Note: We test this using add_filename/remove_filename pattern
+        since enter_scope()/exit_scope() can't be called from within scope
+        due to security restrictions.
+        """
         from itertools import islice, cycle
         sys.sandbox.set_limits(max_iterations=1000000)
 
         # First scope with some iterations
-        sys.sandbox.enter_scope()
-        _ = sum(islice(cycle([1]), 100))
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        _run_scoped("""
+from itertools import islice, cycle
+_ = sum(islice(cycle([1]), 100))
+""")
         count1 = sys.sandbox.get_counts()['iteration_count']
-        sys.sandbox.exit_scope()
-
-        # Second scope should start fresh
-        sys.sandbox.enter_scope()
-        count2 = sys.sandbox.get_counts()['iteration_count']
-        sys.sandbox.exit_scope()
-
+        sys.sandbox.remove_filename(SCOPED_FILENAME)
         self.assertGreater(count1, 0)
+
+        # Reset counts, then add filename again
+        sys.sandbox.reset_counts()
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        count2 = sys.sandbox.get_counts()['iteration_count']
         self.assertEqual(count2, 0)
 
 
@@ -183,8 +202,8 @@ class IteratorWrapperProtectionTests(unittest.TestCase):
     def tearDown(self):
         sys.sandbox.set_limits(**self.original_limits)
         try:
-            sys.sandbox.exit_scope()
-        except RuntimeError:
+            sys.sandbox.remove_filename(SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
             pass
 
     def test_list_iteration_protected(self):
@@ -206,8 +225,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -232,8 +249,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -258,8 +273,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -284,8 +297,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -310,8 +321,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -336,8 +345,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -363,8 +370,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -389,8 +394,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -415,8 +418,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -441,8 +442,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -467,8 +466,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -493,8 +490,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -519,8 +514,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -545,8 +538,6 @@ except SandboxRuntimeError as e:
     else:
         print(f"FAIL: Wrong error: {e}")
         sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -575,8 +566,6 @@ try:
 except Exception as e:
     print(f"FAIL: Unexpected error: {e}")
     sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,

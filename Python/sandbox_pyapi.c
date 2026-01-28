@@ -237,6 +237,7 @@ sandbox_get_##attr_name(_PySandboxObject *self, void *closure)             \
 static int                                                                 \
 sandbox_set_##attr_name(_PySandboxObject *self, PyObject *value, void *closure) \
 {                                                                          \
+    if (_PySandbox_CheckConfigModification() < 0) return -1;               \
     if (value == NULL) {                                                   \
         PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");  \
         return -1;                                                         \
@@ -269,6 +270,7 @@ sandbox_get_##attr_name(_PySandboxObject *self, void *closure)             \
 static int                                                                 \
 sandbox_set_##attr_name(_PySandboxObject *self, PyObject *value, void *closure) \
 {                                                                          \
+    if (_PySandbox_CheckConfigModification() < 0) return -1;               \
     if (value == NULL) {                                                   \
         PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");  \
         return -1;                                                         \
@@ -298,6 +300,7 @@ sandbox_get_##attr_name(_PySandboxObject *self, void *closure)             \
 static int                                                                 \
 sandbox_set_##attr_name(_PySandboxObject *self, PyObject *value, void *closure) \
 {                                                                          \
+    if (_PySandbox_CheckConfigModification() < 0) return -1;               \
     if (value == NULL) {                                                   \
         PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");  \
         return -1;                                                         \
@@ -356,6 +359,7 @@ sandbox_get_opcode_restrict_mode(_PySandboxObject *self, void *closure)
 static int
 sandbox_set_opcode_restrict_mode(_PySandboxObject *self, PyObject *value, void *closure)
 {
+    if (_PySandbox_CheckConfigModification() < 0) return -1;
     if (value == NULL) {
         PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");
         return -1;
@@ -376,6 +380,7 @@ sandbox_get_banned_opcodes(_PySandboxObject *self, void *closure)
 static int
 sandbox_set_banned_opcodes(_PySandboxObject *self, PyObject *value, void *closure)
 {
+    if (_PySandbox_CheckConfigModification() < 0) return -1;
     if (value == NULL) {
         PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");
         return -1;
@@ -400,6 +405,7 @@ sandbox_get_creation_hook(_PySandboxObject *self, void *closure)
 static int
 sandbox_set_creation_hook(_PySandboxObject *self, PyObject *value, void *closure)
 {
+    if (_PySandbox_CheckConfigModification() < 0) return -1;
     if (value == NULL) {
         PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");
         return -1;
@@ -502,6 +508,8 @@ static PyGetSetDef sandbox_getsetters[] = {
 static PyObject *
 sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
+
     static char *kwlist[] = {
         "max_int_digits", "max_str_length", "max_bytes_length",
         "max_list_size", "max_dict_size", "max_set_size", "max_tuple_size",
@@ -634,6 +642,7 @@ sandbox_get_counts(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 static PyObject *
 sandbox_reset_counts(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     _PySandbox_ResetCounters();
     Py_RETURN_NONE;
 }
@@ -641,6 +650,7 @@ sandbox_reset_counts(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 static PyObject *
 sandbox_reset(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     PyInterpreterState *interp = sandbox_get_interp();
     if (interp == NULL) return NULL;
     _PySandbox_Reset(interp);
@@ -650,6 +660,7 @@ sandbox_reset(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 static PyObject *
 sandbox_enter_scope(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     if (_PySandbox_EnterScope() < 0) {
         return NULL;
     }
@@ -659,6 +670,7 @@ sandbox_enter_scope(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 static PyObject *
 sandbox_exit_scope(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     /* Idempotent: no error if not in scope */
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp != NULL) {
@@ -676,6 +688,7 @@ sandbox_in_scope(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 static PyObject *
 sandbox_add_filename(_PySandboxObject *self, PyObject *arg)
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     if (!PyUnicode_Check(arg)) {
         PyErr_SetString(PyExc_TypeError, "filename must be a string");
         return NULL;
@@ -689,6 +702,7 @@ sandbox_add_filename(_PySandboxObject *self, PyObject *arg)
 static PyObject *
 sandbox_remove_filename(_PySandboxObject *self, PyObject *arg)
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     if (!PyUnicode_Check(arg)) {
         PyErr_SetString(PyExc_TypeError, "filename must be a string");
         return NULL;
@@ -702,6 +716,7 @@ sandbox_remove_filename(_PySandboxObject *self, PyObject *arg)
 static PyObject *
 sandbox_add_frame(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     if (_PySandbox_AddFrameToScope() < 0) {
         return NULL;
     }
@@ -711,6 +726,7 @@ sandbox_add_frame(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 static PyObject *
 sandbox_clear_filenames(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     _PySandbox_ClearFilenames();
     Py_RETURN_NONE;
 }
@@ -718,6 +734,7 @@ sandbox_clear_filenames(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 static PyObject *
 sandbox_suspend_method(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     int result = PySandbox_Suspend();
     if (result < 0) {
         return NULL;
@@ -728,6 +745,7 @@ sandbox_suspend_method(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 static PyObject *
 sandbox_resume_method(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     int result = PySandbox_Resume();
     if (result < 0) {
         return NULL;
@@ -738,6 +756,7 @@ sandbox_resume_method(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 static PyObject *
 sandbox_freeze(_PySandboxObject *self, PyObject *obj)
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     PySandbox_FreezeObject(obj);
     Py_RETURN_NONE;
 }
@@ -751,6 +770,7 @@ sandbox_is_frozen(_PySandboxObject *self, PyObject *obj)
 static PyObject *
 sandbox_set_mutable(_PySandboxObject *self, PyObject *args)
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     PyObject *obj;
     int mutable = 1;
     if (!PyArg_ParseTuple(args, "O|p:set_mutable", &obj, &mutable)) {
@@ -846,6 +866,8 @@ scope_ctx_dealloc(_PySandboxScopeContext *self)
 static PyObject *
 scope_ctx_enter(_PySandboxScopeContext *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
+
     /* Get current frame's filename before entering scope */
     _PyInterpreterFrame *frame = get_current_iframe(NULL);
     if (frame == NULL || frame->f_code == NULL) {
@@ -903,6 +925,7 @@ typedef struct {
 static PyObject *
 suspend_ctx_enter(_PySandboxSuspendContext *self, PyObject *Py_UNUSED(args))
 {
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
     int result = PySandbox_Suspend();
     if (result < 0) {
         return NULL;

@@ -12,6 +12,7 @@ This package contains tests split by feature domain:
 - test_opcodes: Opcode restrictions
 - test_operations: Opcode-based operation counting (SANDBOX_COUNT)
 - test_bytecode: Bytecode-level verification of SANDBOX_COUNT placement
+- test_security: Security tests for preventing config modification from scope
 """
 
 import os
@@ -51,6 +52,32 @@ def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
     )
 
 
+def _run_scoped_test(limit_name, limit_value, test_code, extra_setup=""):
+    """Run a sandbox limit test in a subprocess.
+
+    This is a helper for tests that need to set limits and enter scope.
+    All sandbox configuration must happen before enter_scope() due to
+    security restrictions that prevent modifying config from within scope.
+
+    Args:
+        limit_name: Name of the limit to set (e.g., 'max_int_digits')
+        limit_value: Value for the limit
+        test_code: Python code to run after entering scope
+        extra_setup: Additional setup code to run before entering scope
+
+    Returns:
+        subprocess.CompletedProcess with returncode, stdout, and stderr
+    """
+    code = f'''
+import sys
+{extra_setup}
+sys.sandbox.set_limits({limit_name}={limit_value})
+sys.sandbox.enter_scope()
+{test_code}
+'''
+    return _run_sandboxed_code(code)
+
+
 def _get_settable_limits():
     """Get current limits for restoring in tearDown."""
     return sys.sandbox.get_limits()
@@ -72,46 +99,98 @@ class SandboxTestCase(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures - save state and ensure clean scope."""
         # Exit any lingering scope from previous tests
+        # Note: SandboxSecurityError is raised if we're in scope (which prevents
+        # modifying sandbox config). This can happen if a previous test added
+        # the test file itself to scope and didn't clean up.
         try:
             sys.sandbox.exit_scope()
-        except RuntimeError:
+        except (RuntimeError, SandboxSecurityError):
             pass
-        # Save original limits for restoration
-        self.original_limits = _get_settable_limits()
-        # Reset counters for clean test state
-        sys.sandbox.reset_counts()
+        # Save original limits for restoration (may fail if in scope)
+        try:
+            self.original_limits = _get_settable_limits()
+        except SandboxSecurityError:
+            self.original_limits = None
+        # Reset counters for clean test state (may fail if in scope)
+        try:
+            sys.sandbox.reset_counts()
+        except SandboxSecurityError:
+            pass
 
     def tearDown(self):
         """Tear down test fixtures - restore original state."""
-        # Resume any suspended limits
-        while sys.sandbox.suspended:
-            sys.sandbox.resume()
+        # Resume any suspended limits (may fail if in scope)
+        try:
+            while sys.sandbox.suspended:
+                sys.sandbox.resume()
+        except SandboxSecurityError:
+            pass
         # Exit scope if entered
         try:
             sys.sandbox.exit_scope()
-        except RuntimeError:
+        except (RuntimeError, SandboxSecurityError):
             pass
-        # Restore original limits
-        sys.sandbox.set_limits(**self.original_limits)
-        # Reset counters
-        sys.sandbox.reset_counts()
+        # Restore original limits (may fail if in scope)
+        if self.original_limits is not None:
+            try:
+                sys.sandbox.set_limits(**self.original_limits)
+            except SandboxSecurityError:
+                pass
+        # Reset counters (may fail if in scope)
+        try:
+            sys.sandbox.reset_counts()
+        except SandboxSecurityError:
+            pass
 
 
 class SandboxScopedTestCase(SandboxTestCase):
     """Base class for tests that run inside sandbox scope.
 
-    This automatically enters scope in setUp and exits in tearDown.
+    NOTE: Due to security restrictions, we cannot call enter_scope() from the
+    test file itself (it would put the test file in scope and prevent cleanup).
+    Instead, this base class registers a specific filename and provides
+    run_scoped_code() to execute code in that scope.
+
+    If you need to run Python statements directly in scope (not via exec),
+    you must convert your test to use subprocess tests instead.
     """
 
+    # Filename used for scoped test code
+    SCOPED_FILENAME = "<test_scoped_code>"
+
     def setUp(self):
-        """Set up test fixtures and enter sandbox scope."""
+        """Set up test fixtures and register scoped filename."""
         super().setUp()
-        sys.sandbox.enter_scope()
+        # Add a specific filename to scope instead of the test file itself
+        # This allows cleanup to work properly
+        sys.sandbox.add_filename(self.SCOPED_FILENAME)
 
     def tearDown(self):
-        """Exit sandbox scope and restore state."""
-        # Note: super().tearDown() will handle exit_scope()
+        """Remove scoped filename and restore state."""
+        # Remove the scoped filename - this works because the test framework
+        # itself is not in scope (only code with SCOPED_FILENAME is)
+        try:
+            sys.sandbox.remove_filename(self.SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
+            pass
         super().tearDown()
+
+    def run_scoped_code(self, code_str, extra_globals=None):
+        """Execute code within sandbox scope.
+
+        Args:
+            code_str: Python code to execute
+            extra_globals: Additional globals dict to pass to exec
+
+        Returns:
+            The globals dict after execution (useful for checking results)
+        """
+        globs = {"sys": sys}
+        if extra_globals:
+            globs.update(extra_globals)
+        code = compile(code_str, self.SCOPED_FILENAME, "exec")
+        exec(code, globs)
+        return globs
 
 
 def load_tests(loader, tests, pattern):

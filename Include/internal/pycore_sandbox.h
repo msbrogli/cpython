@@ -286,6 +286,11 @@ PyAPI_FUNC(int) _PySandbox_ExitScope(void);    /* Clear entry frame and selected
 PyAPI_FUNC(int) _PySandbox_IsInScope(void);    /* Check if currently in sandbox scope */
 PyAPI_FUNC(int) _PySandbox_AddFrameToScope(void);  /* Add current frame's filename to registered set */
 
+/* Security check for configuration modification.
+ * Returns 0 if modification allowed, -1 if blocked (sets SandboxSecurityError).
+ * This prevents code running in sandbox scope from modifying sandbox config. */
+PyAPI_FUNC(int) _PySandbox_CheckConfigModification(void);
+
 /* Filename-based scope management */
 PyAPI_FUNC(int) _PySandbox_AddFilename(PyObject *filename);      /* Add a filename to the scope set */
 PyAPI_FUNC(int) _PySandbox_RemoveFilename(PyObject *filename);   /* Remove a filename from the set */

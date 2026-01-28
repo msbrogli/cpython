@@ -51,8 +51,6 @@ total = sum(result)
 except Exception as e:
     print(f"Unexpected error: {e}", file=sys.stderr)
     sys.exit(1)
-finally:
-    sys.sandbox.exit_scope()
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],

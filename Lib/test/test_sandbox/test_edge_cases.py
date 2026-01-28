@@ -6,28 +6,49 @@ import unittest
 from test.test_sandbox import SandboxTestCase, SandboxScopedTestCase, _run_sandboxed_code
 
 
+# Filename used for scoped test code (distinct from test file)
+SCOPED_FILENAME = "<test_edge_cases_scope>"
+
+
+def _run_scoped(code_str, extra_globals=None):
+    """Execute code within sandbox scope using a separate filename."""
+    globs = {"sys": sys}
+    if extra_globals:
+        globs.update(extra_globals)
+    code = compile(code_str, SCOPED_FILENAME, "exec")
+    exec(code, globs)
+    return globs
+
+
 class LimitBoundaryTests(SandboxTestCase):
     """Test boundary conditions for limit values."""
 
+    def tearDown(self):
+        try:
+            sys.sandbox.remove_filename(SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
+            pass
+        super().tearDown()
+
     def test_limit_zero_allows_unlimited(self):
         """Setting limit to 0 should disable the limit (allow unlimited)."""
-        sys.sandbox.enter_scope()
         # Zero means no limit
         sys.sandbox.set_limits(max_list_size=0)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
         # Should succeed with any size
-        lst = list(range(10000))
-        self.assertEqual(len(lst), 10000)
+        globs = _run_scoped("lst = list(range(10000))")
+        self.assertEqual(len(globs['lst']), 10000)
 
     def test_limit_small_list_size(self):
         """Setting a small list size limit should block large lists."""
-        sys.sandbox.enter_scope()
         sys.sandbox.set_limits(max_list_size=5)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
         # Creating a small list should work
-        lst = [1, 2, 3]
-        self.assertEqual(len(lst), 3)
+        globs = _run_scoped("lst = [1, 2, 3]")
+        self.assertEqual(len(globs['lst']), 3)
         # Creating a list beyond the limit should fail
         with self.assertRaises(SandboxOverflowError):
-            large_lst = list(range(100))
+            _run_scoped("large_lst = list(range(100))")
 
     def test_limit_small_statements(self):
         """Setting a small statement limit should block after threshold."""
@@ -149,26 +170,39 @@ class OverflowProtectionTests(SandboxTestCase):
 class NestedScopeTests(SandboxTestCase):
     """Test nested scope handling."""
 
-    def test_nested_enter_scope_resets_counters(self):
-        """Calling enter_scope() while in scope should reset counters."""
-        sys.sandbox.set_limits(max_statements=100000, max_allocations=100000)
-        sys.sandbox.enter_scope()
+    def tearDown(self):
+        try:
+            sys.sandbox.remove_filename(SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
+            pass
+        super().tearDown()
 
-        # Do some work to increment counters
-        result = []
-        for _ in range(50):
-            result.append([1, 2, 3])
+    def test_nested_enter_scope_blocked_from_scope(self):
+        """Calling enter_scope() while in scope should raise SandboxSecurityError.
 
-        counts_before = sys.sandbox.get_counts()
-        self.assertGreater(counts_before['allocation_count'], 0)
+        Security feature: code running in sandbox scope cannot modify sandbox
+        configuration, including calling enter_scope() again.
+        """
+        code = '''
+import sys
+sys.sandbox.set_limits(max_statements=100000, max_allocations=100000)
+sys.sandbox.enter_scope()
 
-        # Enter scope again (nested)
-        sys.sandbox.enter_scope()
-        counts_after = sys.sandbox.get_counts()
+# Do some work to increment counters
+result = []
+for _ in range(50):
+    result.append([1, 2, 3])
 
-        # Counters should be reset
-        self.assertLess(counts_after['allocation_count'],
-                       counts_before['allocation_count'])
+# Try to enter scope again - should be blocked
+try:
+    sys.sandbox.enter_scope()
+    sys.exit(2)  # Should not reach here
+except SandboxSecurityError:
+    sys.exit(0)  # Expected behavior
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Nested enter_scope should raise SandboxSecurityError: {result.stdout} {result.stderr}")
 
     def test_nested_scope_with_different_filenames(self):
         """Nested scopes with different filenames should work correctly."""
@@ -210,34 +244,47 @@ sys.exit(0 if combined_count > outer_count > 0 else 1)
                         f"Nested filenames failed: {result.stdout} {result.stderr}")
 
 
-class DeeplyNestedCodeTests(SandboxScopedTestCase):
+class DeeplyNestedCodeTests(SandboxTestCase):
     """Test deeply nested code structures."""
+
+    def tearDown(self):
+        try:
+            sys.sandbox.remove_filename(SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
+            pass
+        super().tearDown()
 
     def test_deeply_nested_functions(self):
         """Deeply nested function definitions should work correctly."""
         sys.sandbox.set_limits(max_statements=100000)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Create deeply nested functions
-        def level1():
-            def level2():
-                def level3():
-                    def level4():
-                        return 42
-                    return level4()
-                return level3()
-            return level2()
+        globs = _run_scoped("""
+def level1():
+    def level2():
+        def level3():
+            def level4():
+                return 42
+            return level4()
+        return level3()
+    return level2()
 
-        result = level1()
-        self.assertEqual(result, 42)
+result = level1()
+""")
+        self.assertEqual(globs['result'], 42)
 
     def test_deeply_nested_lambdas(self):
         """Deeply nested lambdas should work correctly."""
         sys.sandbox.set_limits(max_statements=100000)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Create deeply nested lambdas
-        f = lambda: (lambda: (lambda: (lambda: 42)())())()
-        result = f()
-        self.assertEqual(result, 42)
+        globs = _run_scoped("""
+f = lambda: (lambda: (lambda: (lambda: 42)())())()
+result = f()
+""")
+        self.assertEqual(globs['result'], 42)
 
     def test_recursive_function_with_limit(self):
         """Recursive functions should be limited by statement count."""
@@ -297,10 +344,20 @@ class ScopeContextManagerTests(SandboxTestCase):
 class SuspendedLimitsEdgeCases(SandboxTestCase):
     """Test edge cases for suspend/resume."""
 
+    def tearDown(self):
+        # Resume any suspended limits
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
+        try:
+            sys.sandbox.remove_filename(SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
+            pass
+        super().tearDown()
+
     def test_deeply_nested_suspend_resume(self):
         """Many levels of suspend/resume should work correctly."""
-        sys.sandbox.enter_scope()
         sys.sandbox.set_limits(max_list_size=5)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Suspend 10 times
         for i in range(10):
@@ -308,8 +365,8 @@ class SuspendedLimitsEdgeCases(SandboxTestCase):
             self.assertEqual(count, i + 1)
 
         # Should work while suspended
-        lst = list(range(100))
-        self.assertEqual(len(lst), 100)
+        globs = _run_scoped("lst = list(range(100))")
+        self.assertEqual(len(globs['lst']), 100)
 
         # Resume 10 times
         for i in range(10, 0, -1):
@@ -318,7 +375,7 @@ class SuspendedLimitsEdgeCases(SandboxTestCase):
 
         # Should fail now
         with self.assertRaises(SandboxOverflowError):
-            list(range(100))
+            _run_scoped("lst = list(range(100))")
 
 
 if __name__ == '__main__':

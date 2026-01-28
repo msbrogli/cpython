@@ -61,44 +61,8 @@ _PySandbox_Init(PyInterpreterState *interp)
      * state is available. The type is initialized lazily in
      * _PySandbox_WrapIterator when first needed. */
 
-    /* Initialize with defaults (no limits) */
-    interp->sandbox.limits.max_int_digits = 0;
-    interp->sandbox.limits.max_str_length = 0;
-    interp->sandbox.limits.max_bytes_length = 0;
-    interp->sandbox.limits.max_list_size = 0;
-    interp->sandbox.limits.max_dict_size = 0;
-    interp->sandbox.limits.max_set_size = 0;
-    interp->sandbox.limits.max_tuple_size = 0;
-
-    /* Scoped limits */
-    interp->sandbox.limits.max_statements = 0;
-    interp->sandbox.limits.statement_count = 0;
-    interp->sandbox.limits.max_allocations = 0;
-    interp->sandbox.limits.allocation_count = 0;
-    interp->sandbox.limits.max_iterations = 0;
-    interp->sandbox.limits.iteration_count = 0;
-    interp->sandbox.limits.max_operations = 0;
-    interp->sandbox.limits.operation_count = 0;
-
-    /* Registered filenames set (lazy-initialized as Python set) */
-    interp->sandbox.registered_filenames = NULL;
-
-    interp->sandbox.limits.allow_float = 1;
-    interp->sandbox.limits.allow_complex = 1;
-    interp->sandbox.in_check = 0;
-    interp->sandbox.suspended = 0;
-    interp->sandbox.limits.allow_dunder_access = 1;
-    interp->sandbox.limits.count_iterations_as_operations = 0;
-
-    interp->sandbox.creation_hook.hook_func = NULL;
-    interp->sandbox.creation_hook.hook_userdata = NULL;
-    interp->sandbox.creation_hook.hook_callback = NULL;
-    interp->sandbox.creation_hook.in_hook = 0;
-
-    interp->sandbox.frozen_mode = 0;
-    interp->sandbox.auto_mutable_mode = 0;
-    interp->sandbox.opcode_restrict_mode = 0;
-    _PySandbox_OpcodeSet_ZERO(&interp->sandbox.banned_opcodes);
+    /* Initialize sandbox state using the default macro */
+    interp->sandbox = (_PySandboxState)_PySandboxState_INIT;
 }
 
 void
@@ -127,7 +91,7 @@ get_sandbox_state(void)
 
 /* Forward declarations for scope-checking functions used by prologue macro */
 static int frame_in_sandbox_scope(PyObject *set, _PyInterpreterFrame *frame);
-static _PyInterpreterFrame *get_current_interpreter_frame(void);
+static _PyInterpreterFrame *get_current_iframe(PyThreadState *tstate);
 
 /* Macro to reduce boilerplate in _PySandbox_Check* functions.
  * Returns 0 (allow) early if:
@@ -137,23 +101,26 @@ static _PyInterpreterFrame *get_current_interpreter_frame(void);
  * - Sandbox is suspended
  * - No filenames registered (not in any scope)
  * - Current frame is not in sandbox scope
+ *
+ * Optimized to fetch thread state only once.
  */
 #define _PYSANDBOX_CHECK_PROLOGUE(limit_field) \
-    _PySandboxState *sandbox = get_sandbox_state(); \
-    if (sandbox == NULL) { return 0; } \
+    PyThreadState *_prologue_tstate = _PyThreadState_GET(); \
+    if (_prologue_tstate == NULL || _prologue_tstate->interp == NULL) { return 0; } \
+    _PySandboxState *sandbox = &_prologue_tstate->interp->sandbox; \
     _PySandboxLimits *limits = &sandbox->limits; \
     if (limits->limit_field == 0 || \
-        sandbox->in_check || sandbox->suspended) { \
+        sandbox->suppress_checks || sandbox->suspended) { \
         return 0; \
     } \
     if (sandbox->registered_filenames == NULL) { \
         return 0; \
     } \
     { \
-        _PyInterpreterFrame *_prologue_frame = get_current_interpreter_frame(); \
-        if (!frame_in_sandbox_scope(sandbox->registered_filenames, _prologue_frame)) { \
-            return 0; \
-        } \
+        _PyInterpreterFrame *_prologue_frame = get_current_iframe(_prologue_tstate); \
+        int _in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, _prologue_frame); \
+        if (_in_scope < 0) { return -1; } \
+        if (!_in_scope) { return 0; } \
     }
 
 int
@@ -163,11 +130,11 @@ _PySandbox_CheckIntSize(Py_ssize_t ndigits)
 
     if (ndigits > limits->max_int_digits) {
         /* Prevent recursive checks during error handling */
-        sandbox->in_check = 1;
+        sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Integer size (%zd digits) exceeds sandbox limit (%zd digits)",
                      ndigits, limits->max_int_digits);
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
     return 0;
@@ -180,11 +147,11 @@ _PySandbox_CheckStrLength(Py_ssize_t length)
 
     if (length > limits->max_str_length) {
         /* Prevent recursive checks during error handling */
-        sandbox->in_check = 1;
+        sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "String length (%zd) exceeds sandbox limit (%zd)",
                      length, limits->max_str_length);
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
     return 0;
@@ -197,11 +164,11 @@ _PySandbox_CheckBytesLength(Py_ssize_t length)
 
     if (length > limits->max_bytes_length) {
         /* Prevent recursive checks during error handling */
-        sandbox->in_check = 1;
+        sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Bytes length (%zd) exceeds sandbox limit (%zd)",
                      length, limits->max_bytes_length);
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
     return 0;
@@ -213,11 +180,11 @@ _PySandbox_CheckListSize(Py_ssize_t size)
     _PYSANDBOX_CHECK_PROLOGUE(max_list_size)
 
     if (size > limits->max_list_size) {
-        sandbox->in_check = 1;
+        sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "List size (%zd) exceeds sandbox limit (%zd)",
                      size, limits->max_list_size);
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
     return 0;
@@ -229,11 +196,11 @@ _PySandbox_CheckDictSize(Py_ssize_t size)
     _PYSANDBOX_CHECK_PROLOGUE(max_dict_size)
 
     if (size > limits->max_dict_size) {
-        sandbox->in_check = 1;
+        sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Dict size (%zd) exceeds sandbox limit (%zd)",
                      size, limits->max_dict_size);
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
     return 0;
@@ -245,11 +212,11 @@ _PySandbox_CheckSetSize(Py_ssize_t size)
     _PYSANDBOX_CHECK_PROLOGUE(max_set_size)
 
     if (size > limits->max_set_size) {
-        sandbox->in_check = 1;
+        sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Set size (%zd) exceeds sandbox limit (%zd)",
                      size, limits->max_set_size);
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
     return 0;
@@ -261,11 +228,11 @@ _PySandbox_CheckTupleSize(Py_ssize_t size)
     _PYSANDBOX_CHECK_PROLOGUE(max_tuple_size)
 
     if (size > limits->max_tuple_size) {
-        sandbox->in_check = 1;
+        sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Tuple size (%zd) exceeds sandbox limit (%zd)",
                      size, limits->max_tuple_size);
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
     return 0;
@@ -275,7 +242,7 @@ int
 _PySandbox_CheckTypeAllowed(PyTypeObject *type)
 {
     _PySandboxState *sandbox = get_sandbox_state();
-    if (sandbox == NULL || sandbox->suspended || sandbox->in_check) {
+    if (sandbox == NULL || sandbox->suspended || sandbox->suppress_checks) {
         return 0;  /* No limits active, suspended, or recursive check */
     }
     _PySandboxLimits *limits = &sandbox->limits;
@@ -289,26 +256,30 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
     if (sandbox->registered_filenames == NULL) {
         return 0;
     }
-    _PyInterpreterFrame *frame = get_current_interpreter_frame();
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;
+    }
+    if (!in_scope) {
         return 0;
     }
 
     /* Check float */
     if (!limits->allow_float && type == &PyFloat_Type) {
-        sandbox->in_check = 1;
+        sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxTypeError,
                         "float type is forbidden in sandbox");
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
 
     /* Check complex */
     if (!limits->allow_complex && type == &PyComplex_Type) {
-        sandbox->in_check = 1;
+        sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxTypeError,
                         "complex type is forbidden in sandbox");
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
 
@@ -319,26 +290,29 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
  * This allows Python to format and print MemoryError without cascading failures. */
 #define ALLOCATION_GRACE_HEADROOM 1000
 
+/* Maximum allowed value for uint64_t limits to prevent overflow when doing
+ * comparisons like `count == max + 1` or `count > max + ALLOCATION_GRACE_HEADROOM`.
+ * We use UINT64_MAX - ALLOCATION_GRACE_HEADROOM as the safe maximum. */
+#define SANDBOX_MAX_LIMIT (UINT64_MAX - ALLOCATION_GRACE_HEADROOM)
+
 /* ============ Registered Filenames Set ============ */
 
 /* Check if a filename is in the registered set.
- * Uses Python set for O(1) lookup. NULL-safe. */
+ * Uses Python set for O(1) lookup. NULL-safe.
+ * Returns: 1 if registered, 0 if not registered, -1 on error (exception set). */
 static int
 filename_is_registered(PyObject *set, PyObject *filename)
 {
     if (set == NULL || filename == NULL) {
         return 0;
     }
-    int r = PySet_Contains(set, filename);
-    if (r < 0) {
-        PyErr_Clear();
-        return 0;
-    }
-    return r;
+    /* PySet_Contains returns 1 if found, 0 if not found, -1 on error */
+    return PySet_Contains(set, filename);
 }
 
 /* Check if current frame is in sandbox scope.
- * A frame is in scope if its co_filename is in the registered set. */
+ * A frame is in scope if its co_filename is in the registered set.
+ * Returns: 1 if in scope, 0 if not in scope, -1 on error (exception set). */
 static int
 frame_in_sandbox_scope(PyObject *set, _PyInterpreterFrame *frame)
 {
@@ -403,11 +377,14 @@ free_filenames(PyObject **setp)
     Py_CLEAR(*setp);
 }
 
-/* Get the current interpreter frame */
+/* Get the current interpreter frame.
+ * If tstate is NULL, fetches it via _PyThreadState_GET(). */
 static _PyInterpreterFrame *
-get_current_interpreter_frame(void)
+get_current_iframe(PyThreadState *tstate)
 {
-    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        tstate = _PyThreadState_GET();
+    }
     if (tstate == NULL || tstate->cframe == NULL) {
         return NULL;
     }
@@ -416,6 +393,54 @@ get_current_interpreter_frame(void)
         frame = frame->previous;
     }
     return frame;
+}
+
+/* Helper for scoped counter checks. Performs all early-exit checks:
+ * - Thread/interpreter state availability
+ * - Suspended or suppress_checks flags
+ * - Whether the specific limit is set (max_limit parameter)
+ * - Registered filenames and scope check
+ *
+ * Returns:
+ *   1 = proceed with check (sandbox/limits set via out params)
+ *   0 = skip check (not in scope, suspended, no limit, etc.)
+ *  -1 = error (exception set)
+ */
+static inline int
+sandbox_scope_check_prologue(PyThreadState *tstate,
+                             uint64_t max_limit,
+                             _PySandboxState **sandbox_out,
+                             _PySandboxLimits **limits_out)
+{
+    if (tstate == NULL || tstate->interp == NULL) {
+        return 0;
+    }
+
+    _PySandboxState *sandbox = &tstate->interp->sandbox;
+    _PySandboxLimits *limits = &sandbox->limits;
+
+    if (sandbox->suppress_checks || sandbox->suspended) {
+        return 0;
+    }
+    if (max_limit == 0) {
+        return 0;
+    }
+    if (sandbox->registered_filenames == NULL) {
+        return 0;
+    }
+
+    _PyInterpreterFrame *frame = get_current_iframe(tstate);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;
+    }
+    if (!in_scope) {
+        return 0;
+    }
+
+    *sandbox_out = sandbox;
+    *limits_out = limits;
+    return 1;
 }
 
 /* _PySandbox_CheckAllocation - Check allocation against scoped limits
@@ -436,48 +461,24 @@ get_current_interpreter_frame(void)
 int
 _PySandbox_CheckAllocation(void)
 {
-    /* Get thread state first - if not available, skip check */
+    _PySandboxState *sandbox;
+    _PySandboxLimits *limits;
+
+    /* Need to get limits first to check max_allocations */
     PyThreadState *tstate = _PyThreadState_GET();
-    if (tstate == NULL) {
+    if (tstate == NULL || tstate->interp == NULL) {
         return 0;
     }
 
-    /* Get interpreter state - if not available, skip check */
-    PyInterpreterState *interp = tstate->interp;
-    if (interp == NULL) {
-        return 0;
-    }
-
-    _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
-
-    /* Skip counting during recursive checks or when suspended */
-    if (sandbox->in_check || sandbox->suspended) {
-        return 0;
-    }
-
-    /* Early exit if no scoped allocation limit is set */
-    if (limits->max_allocations == 0) {
-        return 0;
-    }
-
-    /* Check if in sandbox scope for scoped counting.
-     * Frame is in scope if its co_filename is in the registered set. */
-    if (sandbox->registered_filenames == NULL) {
-        return 0;
-    }
-
-    _PyInterpreterFrame *current = get_current_interpreter_frame();
-    if (current == NULL) {
-        return 0;
-    }
-
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, current)) {
-        return 0;
+    int result = sandbox_scope_check_prologue(
+        tstate, tstate->interp->sandbox.limits.max_allocations,
+        &sandbox, &limits);
+    if (result <= 0) {
+        return result;
     }
 
     /* Increment scoped count */
-    limits->allocation_count++;
+    sandbox->counters.allocation_count++;
 
     /* If there's already an error set, don't raise another one.
      * This prevents allocation failures during error handling. */
@@ -487,12 +488,12 @@ _PySandbox_CheckAllocation(void)
 
     /* Check scoped limit */
     /* Hard limit: grace allocations exhausted, fail unconditionally */
-    if (limits->allocation_count > limits->max_allocations + ALLOCATION_GRACE_HEADROOM) {
+    if (sandbox->counters.allocation_count > limits->max_allocations + ALLOCATION_GRACE_HEADROOM) {
         PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox scoped allocation limit exceeded");
         return -1;
     }
     /* Soft limit: raise MemoryError only on the first allocation past the limit */
-    if (limits->allocation_count == limits->max_allocations + 1) {
+    if (sandbox->counters.allocation_count == limits->max_allocations + 1) {
         PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox scoped allocation limit exceeded");
         return -1;
     }
@@ -519,47 +520,30 @@ _PySandbox_CheckAllocation(void)
 int
 _PySandbox_CheckScopeStatement(void)
 {
-    /* Get thread state first - if not available, skip check */
+    _PySandboxState *sandbox;
+    _PySandboxLimits *limits;
+
     PyThreadState *tstate = _PyThreadState_GET();
-    if (tstate == NULL) {
+    if (tstate == NULL || tstate->interp == NULL) {
         return 0;
     }
 
-    /* Get interpreter state - if not available, skip check */
-    PyInterpreterState *interp = tstate->interp;
-    if (interp == NULL) {
-        return 0;
-    }
-
-    _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
-
-    /* Skip if no statement limit set, or if suspended/in_check */
-    if (limits->max_statements == 0 ||
-        sandbox->in_check || sandbox->suspended) {
-        return 0;
-    }
-
-    /* Skip if no registered filenames */
-    if (sandbox->registered_filenames == NULL) {
-        return 0;
-    }
-
-    /* Check if current frame's filename is in the registered set */
-    _PyInterpreterFrame *current = get_current_interpreter_frame();
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, current)) {
-        return 0;
+    int result = sandbox_scope_check_prologue(
+        tstate, tstate->interp->sandbox.limits.max_statements,
+        &sandbox, &limits);
+    if (result <= 0) {
+        return result;
     }
 
     /* Increment statement count */
-    limits->statement_count++;
+    sandbox->counters.statement_count++;
 
     /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
-    if (limits->statement_count == limits->max_statements + 1) {
-        sandbox->in_check = 1;
+    if (sandbox->counters.statement_count == limits->max_statements + 1) {
+        sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox statement limit exceeded");
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
 
@@ -585,47 +569,30 @@ _PySandbox_CheckScopeStatement(void)
 int
 _PySandbox_CheckScopeOperation(void)
 {
-    /* Get thread state first - if not available, skip check */
+    _PySandboxState *sandbox;
+    _PySandboxLimits *limits;
+
     PyThreadState *tstate = _PyThreadState_GET();
-    if (tstate == NULL) {
+    if (tstate == NULL || tstate->interp == NULL) {
         return 0;
     }
 
-    /* Get interpreter state - if not available, skip check */
-    PyInterpreterState *interp = tstate->interp;
-    if (interp == NULL) {
-        return 0;
-    }
-
-    _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
-
-    /* Skip if no operation limit set, or if suspended/in_check */
-    if (limits->max_operations == 0 ||
-        sandbox->in_check || sandbox->suspended) {
-        return 0;
-    }
-
-    /* Skip if no registered filenames */
-    if (sandbox->registered_filenames == NULL) {
-        return 0;
-    }
-
-    /* Check if current frame's filename is in the registered set */
-    _PyInterpreterFrame *current = get_current_interpreter_frame();
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, current)) {
-        return 0;
+    int result = sandbox_scope_check_prologue(
+        tstate, tstate->interp->sandbox.limits.max_operations,
+        &sandbox, &limits);
+    if (result <= 0) {
+        return result;
     }
 
     /* Increment operation count */
-    limits->operation_count++;
+    sandbox->counters.operation_count++;
 
     /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
-    if (limits->operation_count == limits->max_operations + 1) {
-        sandbox->in_check = 1;
+    if (sandbox->counters.operation_count == limits->max_operations + 1) {
+        sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox operation limit exceeded");
-        sandbox->in_check = 0;
+        sandbox->suppress_checks = 0;
         return -1;
     }
 
@@ -651,25 +618,24 @@ static inline int
 sandbox_check_iteration(void)
 {
     PyThreadState *tstate = _PyThreadState_GET();
-    if (tstate == NULL) {
+    if (tstate == NULL || tstate->interp == NULL) {
         return 0;
     }
 
-    PyInterpreterState *interp = tstate->interp;
-    if (interp == NULL) {
-        return 0;
-    }
-
-    _PySandboxState *sandbox = &interp->sandbox;
+    _PySandboxState *sandbox = &tstate->interp->sandbox;
     _PySandboxLimits *limits = &sandbox->limits;
+
+    /* Fast exit: suspended or in recursive check */
+    if (sandbox->suppress_checks || sandbox->suspended) {
+        return 0;
+    }
 
     int check_iters = (limits->max_iterations > 0);
     int check_ops = (limits->count_iterations_as_operations
                      && limits->max_operations > 0);
 
     /* Fast exit: nothing to check */
-    if ((!check_iters && !check_ops)
-        || sandbox->in_check || sandbox->suspended) {
+    if (!check_iters && !check_ops) {
         return 0;
     }
 
@@ -677,31 +643,35 @@ sandbox_check_iteration(void)
     if (sandbox->registered_filenames == NULL) {
         return 0;
     }
-    _PyInterpreterFrame *current = get_current_interpreter_frame();
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, current)) {
+    _PyInterpreterFrame *frame = get_current_iframe(tstate);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;
+    }
+    if (!in_scope) {
         return 0;
     }
 
     /* Iteration counter */
     if (check_iters) {
-        limits->iteration_count++;
-        if (limits->iteration_count == limits->max_iterations + 1) {
-            sandbox->in_check = 1;
+        sandbox->counters.iteration_count++;
+        if (sandbox->counters.iteration_count == limits->max_iterations + 1) {
+            sandbox->suppress_checks = 1;
             PyErr_SetString(PyExc_SandboxRuntimeError,
                             "Sandbox iteration limit exceeded");
-            sandbox->in_check = 0;
+            sandbox->suppress_checks = 0;
             return -1;
         }
     }
 
     /* Operation counter (optional, piggybacks on same scope check) */
     if (check_ops) {
-        limits->operation_count++;
-        if (limits->operation_count == limits->max_operations + 1) {
-            sandbox->in_check = 1;
+        sandbox->counters.operation_count++;
+        if (sandbox->counters.operation_count == limits->max_operations + 1) {
+            sandbox->suppress_checks = 1;
             PyErr_SetString(PyExc_SandboxRuntimeError,
                             "Sandbox operation limit exceeded");
-            sandbox->in_check = 0;
+            sandbox->suppress_checks = 0;
             return -1;
         }
     }
@@ -711,26 +681,40 @@ sandbox_check_iteration(void)
 
 /* Exported thin wrapper for external callers (e.g. abstract.c) */
 int
-_PySandbox_CheckIterationImpl(void)
+_PySandbox_CheckIteration(void)
 {
     return sandbox_check_iteration();
 }
 
 /* ============ Dunder Access Checking ============ */
 
-/* Check if a name contains "__" (dunder pattern) */
+/* Check if a name starts or ends with "__" (dunder pattern).
+ * Uses direct character access to avoid UTF-8 conversion overhead.
+ * Returns: 1 if dunder, 0 if not dunder. */
 static int
 is_dunder_name(PyObject *name)
 {
     if (!PyUnicode_Check(name)) {
         return 0;
     }
-    const char *str = PyUnicode_AsUTF8(name);
-    if (str == NULL) {
-        PyErr_Clear();
+    Py_ssize_t len = PyUnicode_GET_LENGTH(name);
+    if (len < 2) {
         return 0;
     }
-    return strstr(str, "__") != NULL;
+    int kind = PyUnicode_KIND(name);
+    const void *data = PyUnicode_DATA(name);
+    /* Check if starts with "__" */
+    if (PyUnicode_READ(kind, data, 0) == '_' &&
+        PyUnicode_READ(kind, data, 1) == '_') {
+        return 1;
+    }
+    /* Check if ends with "__" */
+    if (len >= 4 &&
+        PyUnicode_READ(kind, data, len - 1) == '_' &&
+        PyUnicode_READ(kind, data, len - 2) == '_') {
+        return 1;
+    }
+    return 0;
 }
 
 /* _PySandbox_CheckDunderAccess - Check if dunder attribute access is blocked
@@ -747,8 +731,9 @@ is_dunder_name(PyObject *name)
 int
 _PySandbox_CheckDunderAccess(PyObject *name)
 {
+    assert(name != NULL);
     _PySandboxState *sandbox = get_sandbox_state();
-    if (sandbox == NULL || sandbox->in_check || sandbox->suspended) {
+    if (sandbox == NULL || sandbox->suppress_checks || sandbox->suspended) {
         return 0;
     }
     _PySandboxLimits *limits = &sandbox->limits;
@@ -765,16 +750,23 @@ _PySandbox_CheckDunderAccess(PyObject *name)
         return 0;
     }
 
-    _PyInterpreterFrame *frame = get_current_interpreter_frame();
-    if (frame == NULL || !frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    if (frame == NULL) {
+        return 0;
+    }
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;
+    }
+    if (!in_scope) {
         return 0;
     }
 
     /* Block dunder access */
-    sandbox->in_check = 1;
+    sandbox->suppress_checks = 1;
     PyErr_Format(PyExc_SandboxAttributeError,
                  "dunder attribute access blocked in sandbox: '%U'", name);
-    sandbox->in_check = 0;
+    sandbox->suppress_checks = 0;
     return -1;
 }
 
@@ -796,10 +788,9 @@ _PySandbox_EnterScope(void)
     }
 
     _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
 
     /* Get current frame and add its filename to registered set */
-    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    _PyInterpreterFrame *frame = get_current_iframe(tstate);
     if (frame == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No current frame");
         return -1;
@@ -811,10 +802,10 @@ _PySandbox_EnterScope(void)
     }
 
     /* Reset scope counters */
-    limits->statement_count = 0;
-    limits->allocation_count = 0;
-    limits->iteration_count = 0;
-    limits->operation_count = 0;
+    sandbox->counters.statement_count = 0;
+    sandbox->counters.allocation_count = 0;
+    sandbox->counters.iteration_count = 0;
+    sandbox->counters.operation_count = 0;
 
     return 0;
 }
@@ -851,7 +842,7 @@ _PySandbox_IsInScope(void)
         return 0;
     }
 
-    _PyInterpreterFrame *current = get_current_interpreter_frame();
+    _PyInterpreterFrame *current = get_current_iframe(NULL);
     if (current == NULL) {
         return 0;
     }
@@ -878,7 +869,7 @@ _PySandbox_AddFrameToScope(void)
     _PySandboxState *sandbox = &interp->sandbox;
 
     /* Get current frame */
-    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
     if (frame == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No current frame");
         return -1;
@@ -896,10 +887,10 @@ _PySandbox_ResetCounters(void)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp != NULL) {
-        interp->sandbox.limits.statement_count = 0;
-        interp->sandbox.limits.allocation_count = 0;
-        interp->sandbox.limits.iteration_count = 0;
-        interp->sandbox.limits.operation_count = 0;
+        interp->sandbox.counters.statement_count = 0;
+        interp->sandbox.counters.allocation_count = 0;
+        interp->sandbox.counters.iteration_count = 0;
+        interp->sandbox.counters.operation_count = 0;
     }
 }
 
@@ -908,6 +899,7 @@ _PySandbox_ResetCounters(void)
 int
 _PySandbox_AddFilename(PyObject *filename)
 {
+    assert(filename != NULL);
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
@@ -920,6 +912,7 @@ _PySandbox_AddFilename(PyObject *filename)
 int
 _PySandbox_RemoveFilename(PyObject *filename)
 {
+    assert(filename != NULL);
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
@@ -947,7 +940,7 @@ _PySandbox_ClearFilenames(void)
 
 /* Get current frame for hook */
 static PyFrameObject *
-get_current_frame(void)
+get_current_pyframe(void)
 {
     PyThreadState *tstate = _PyThreadState_GET();
     if (tstate == NULL) {
@@ -966,6 +959,10 @@ get_current_frame(void)
     return _PyFrame_GetFrameObject(frame);
 }
 
+/* Pre-allocated context strings for creation hook (lazy-initialized) */
+static PyObject *_hook_context_type_call = NULL;
+static PyObject *_hook_context_init = NULL;
+
 /* Python callback trampoline */
 static PyObject *
 creation_hook_trampoline(PyObject *obj, PyTypeObject *type,
@@ -973,17 +970,29 @@ creation_hook_trampoline(PyObject *obj, PyTypeObject *type,
 {
     PyObject *callback = (PyObject *)userdata;
 
-    /* Build context string */
-    const char *context_str = (flags & Py_OBJHOOK_TYPE_CALL) ? "type_call" : "init";
-    PyObject *context = PyUnicode_FromString(context_str);
-    if (context == NULL) {
-        return NULL;
+    /* Get pre-allocated context string (lazy init) */
+    PyObject *context;
+    if (flags & Py_OBJHOOK_TYPE_CALL) {
+        if (_hook_context_type_call == NULL) {
+            _hook_context_type_call = PyUnicode_InternFromString("type_call");
+            if (_hook_context_type_call == NULL) {
+                return NULL;
+            }
+        }
+        context = _hook_context_type_call;
+    } else {
+        if (_hook_context_init == NULL) {
+            _hook_context_init = PyUnicode_InternFromString("init");
+            if (_hook_context_init == NULL) {
+                return NULL;
+            }
+        }
+        context = _hook_context_init;
     }
 
     /* Build arguments: (obj, type, frame, context) */
     PyObject *frame_arg = frame ? (PyObject *)frame : Py_None;
     PyObject *args = Py_BuildValue("(OOOO)", obj, (PyObject *)type, frame_arg, context);
-    Py_DECREF(context);
 
     if (args == NULL) {
         return NULL;
@@ -1018,7 +1027,7 @@ _PySandbox_CallCreationHook(PyObject *obj, PyTypeObject *type, int flags)
     hook_state->in_hook = 1;
 
     PyObject *result = obj;
-    PyFrameObject *frame = get_current_frame();
+    PyFrameObject *frame = get_current_pyframe();
 
     /* Call C hook if set */
     if (hook_state->hook_func != NULL) {
@@ -1036,8 +1045,10 @@ _PySandbox_CallCreationHook(PyObject *obj, PyTypeObject *type, int flags)
         }
 
         if (hook_result != Py_None && (flags & Py_OBJHOOK_TYPE_CALL)) {
-            /* Replace object */
-            Py_DECREF(obj);
+            /* Replace object (but not if hook returned same object) */
+            if (hook_result != obj) {
+                Py_DECREF(obj);
+            }
             result = hook_result;
         } else {
             Py_DECREF(hook_result);
@@ -1060,8 +1071,10 @@ _PySandbox_CallCreationHook(PyObject *obj, PyTypeObject *type, int flags)
         }
 
         if (hook_result != Py_None && (flags & Py_OBJHOOK_TYPE_CALL)) {
-            /* Replace object */
-            Py_DECREF(result);
+            /* Replace object (but not if hook returned same object) */
+            if (hook_result != result) {
+                Py_DECREF(result);
+            }
             result = hook_result;
         } else {
             Py_DECREF(hook_result);
@@ -1086,6 +1099,32 @@ PySandbox_SetLimits(
     Py_ssize_t max_set_size,
     int allow_float)
 {
+    /* Validate parameters */
+    if (max_int_digits < 0) {
+        PyErr_SetString(PyExc_ValueError, "max_int_digits cannot be negative");
+        return -1;
+    }
+    if (max_str_length < 0) {
+        PyErr_SetString(PyExc_ValueError, "max_str_length cannot be negative");
+        return -1;
+    }
+    if (max_bytes_length < 0) {
+        PyErr_SetString(PyExc_ValueError, "max_bytes_length cannot be negative");
+        return -1;
+    }
+    if (max_list_size < 0) {
+        PyErr_SetString(PyExc_ValueError, "max_list_size cannot be negative");
+        return -1;
+    }
+    if (max_dict_size < 0) {
+        PyErr_SetString(PyExc_ValueError, "max_dict_size cannot be negative");
+        return -1;
+    }
+    if (max_set_size < 0) {
+        PyErr_SetString(PyExc_ValueError, "max_set_size cannot be negative");
+        return -1;
+    }
+
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
@@ -1169,6 +1208,10 @@ PySandbox_Suspend(void)
     }
 
     _PySandboxState *sandbox = &interp->sandbox;
+    if (sandbox->suspended == INT_MAX) {
+        PyErr_SetString(PyExc_OverflowError, "Sandbox suspend count overflow");
+        return -1;
+    }
     sandbox->suspended++;
     return sandbox->suspended;
 }
@@ -1183,9 +1226,11 @@ PySandbox_Resume(void)
     }
 
     _PySandboxState *sandbox = &interp->sandbox;
-    if (sandbox->suspended > 0) {
-        sandbox->suspended--;
+    if (sandbox->suspended == 0) {
+        PyErr_SetString(PyExc_RuntimeError, "Sandbox resume without matching suspend");
+        return -1;
     }
+    sandbox->suspended--;
     return sandbox->suspended;
 }
 
@@ -1216,6 +1261,7 @@ PySandbox_IsSuspended(void)
 int
 _PySandbox_CheckFrozen(PyObject *obj)
 {
+    assert(obj != NULL);
     /* Fast path: mutable objects are always allowed */
     if (Py_IS_MUTABLE(obj)) {
         return 0;
@@ -1234,8 +1280,12 @@ _PySandbox_CheckFrozen(PyObject *obj)
 
     /* Frozen restrictions exist — only enforce within sandbox scope */
     _PySandboxState *sandbox = &interp->sandbox;
-    _PyInterpreterFrame *frame = get_current_interpreter_frame();
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;
+    }
+    if (!in_scope) {
         return 0;  /* Not in scope — allow */
     }
 
@@ -1297,7 +1347,7 @@ PySandbox_SetObjectMutable(PyObject *obj, int mutable)
 /* ============ Auto-Mutable Mode ============ */
 
 /* _PySandbox_MaybeMarkMutable - conditionally mark a newly created object
- * as mutable (Py_OBJFLAGS_MUTABLE) when auto_mutable_mode and frozen_mode
+ * as mutable (Py_OBJFLAGS_MUTABLE) when auto_mutable and frozen_mode
  * are both active and the current frame is within sandbox scope.
  *
  * This is called from MAKE_FUNCTION (ceval.c) and type_call (typeobject.c)
@@ -1313,7 +1363,7 @@ _PySandbox_MaybeMarkMutable(PyObject *obj)
         return;
     }
     /* Fast path: both flags must be on */
-    if (!interp->sandbox.auto_mutable_mode || !interp->sandbox.frozen_mode) {
+    if (!interp->sandbox.auto_mutable || !interp->sandbox.frozen_mode) {
         return;
     }
     if (interp->sandbox.suspended) {
@@ -1322,11 +1372,16 @@ _PySandbox_MaybeMarkMutable(PyObject *obj)
     if (interp->sandbox.registered_filenames == NULL) {
         return;
     }
-    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
     if (frame == NULL) {
         return;
     }
-    if (!frame_in_sandbox_scope(interp->sandbox.registered_filenames, frame)) {
+    int in_scope = frame_in_sandbox_scope(interp->sandbox.registered_filenames, frame);
+    if (in_scope <= 0) {
+        /* Not in scope or error — just return (void function) */
+        if (in_scope < 0) {
+            PyErr_Clear();
+        }
         return;
     }
     obj->ob_flags |= Py_OBJFLAGS_MUTABLE;
@@ -1337,7 +1392,7 @@ PySandbox_SetAutoMutableMode(int mode)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp != NULL) {
-        interp->sandbox.auto_mutable_mode = mode ? 1 : 0;
+        interp->sandbox.auto_mutable = mode ? 1 : 0;
     }
 }
 
@@ -1348,7 +1403,7 @@ PySandbox_GetAutoMutableMode(void)
     if (interp == NULL) {
         return 0;
     }
-    return interp->sandbox.auto_mutable_mode;
+    return interp->sandbox.auto_mutable;
 }
 
 /* ============ Opcode Restriction ============ */
@@ -1360,7 +1415,7 @@ PySandbox_GetAutoMutableMode(void)
  *
  * Fast exits:
  * - opcode_restrict_mode == 0 (not active)
- * - suspended or in_check (recursion/error handling)
+ * - suspended or suppress_checks (recursion/error handling)
  * - opcode not in banned_opcodes bitmap
  * - current frame not in sandbox scope
  *
@@ -1387,7 +1442,7 @@ _PySandbox_CheckOpcode(int opcode)
     }
 
     /* Fast exit: suspended or in recursive check */
-    if (sandbox->suspended || sandbox->in_check) {
+    if (sandbox->suspended || sandbox->suppress_checks) {
         return 0;
     }
 
@@ -1401,20 +1456,20 @@ _PySandbox_CheckOpcode(int opcode)
         return 0;
     }
 
-    _PyInterpreterFrame *frame = tstate->cframe->current_frame;
-    /* Skip incomplete frames */
-    while (frame && _PyFrame_IsIncomplete(frame)) {
-        frame = frame->previous;
+    _PyInterpreterFrame *frame = get_current_iframe(tstate);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;
     }
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+    if (!in_scope) {
         return 0;
     }
 
     /* Banned opcode in sandbox scope — raise error */
-    sandbox->in_check = 1;
+    sandbox->suppress_checks = 1;
     PyErr_Format(PyExc_SandboxRuntimeError,
                  "Opcode %d is not allowed in sandbox scope", opcode);
-    sandbox->in_check = 0;
+    sandbox->suppress_checks = 0;
     return -1;
 }
 
@@ -1667,7 +1722,7 @@ SANDBOX_BOOL_GETSET(allow_complex, limits.allow_complex)
 SANDBOX_BOOL_GETSET(allow_dunder_access, limits.allow_dunder_access)
 SANDBOX_BOOL_GETSET(count_iterations_as_operations, limits.count_iterations_as_operations)
 SANDBOX_BOOL_GETSET(frozen_mode, frozen_mode)
-SANDBOX_BOOL_GETSET(auto_mutable, auto_mutable_mode)
+SANDBOX_BOOL_GETSET(auto_mutable, auto_mutable)
 
 /* opcode_restrict_mode needs special setter to update tracing state */
 static PyObject *
@@ -1747,10 +1802,10 @@ sandbox_set_creation_hook(_PySandboxObject *self, PyObject *value, void *closure
 }
 
 /* ---- Read-only properties (counters) ---- */
-SANDBOX_UINT64_GETTER(allocation_count, limits.allocation_count)
-SANDBOX_UINT64_GETTER(statement_count, limits.statement_count)
-SANDBOX_UINT64_GETTER(iteration_count, limits.iteration_count)
-SANDBOX_UINT64_GETTER(operation_count, limits.operation_count)
+SANDBOX_UINT64_GETTER(allocation_count, counters.allocation_count)
+SANDBOX_UINT64_GETTER(statement_count, counters.statement_count)
+SANDBOX_UINT64_GETTER(iteration_count, counters.iteration_count)
+SANDBOX_UINT64_GETTER(operation_count, counters.operation_count)
 
 /* suspended: read-only bool */
 static PyObject *
@@ -1871,6 +1926,24 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
+    /* Validate that uint64_t limits don't exceed SANDBOX_MAX_LIMIT to prevent overflow */
+    if (max_statements > SANDBOX_MAX_LIMIT) {
+        PyErr_SetString(PyExc_OverflowError, "max_statements exceeds maximum allowed value");
+        return NULL;
+    }
+    if (max_allocations > SANDBOX_MAX_LIMIT) {
+        PyErr_SetString(PyExc_OverflowError, "max_allocations exceeds maximum allowed value");
+        return NULL;
+    }
+    if (max_iterations > SANDBOX_MAX_LIMIT) {
+        PyErr_SetString(PyExc_OverflowError, "max_iterations exceeds maximum allowed value");
+        return NULL;
+    }
+    if (max_operations > SANDBOX_MAX_LIMIT) {
+        PyErr_SetString(PyExc_OverflowError, "max_operations exceeds maximum allowed value");
+        return NULL;
+    }
+
     limits->max_int_digits = max_int_digits;
     limits->max_str_length = max_str_length;
     limits->max_bytes_length = max_bytes_length;
@@ -1929,14 +2002,13 @@ sandbox_get_counts(_PySandboxObject *self, PyObject *Py_UNUSED(args))
     PyInterpreterState *interp = sandbox_get_interp();
     if (interp == NULL) return NULL;
     _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
 
     return Py_BuildValue(
         "{s:K, s:K, s:K, s:K}",
-        "allocation_count", (unsigned long long)limits->allocation_count,
-        "statement_count", (unsigned long long)limits->statement_count,
-        "iteration_count", (unsigned long long)limits->iteration_count,
-        "operation_count", (unsigned long long)limits->operation_count);
+        "allocation_count", (unsigned long long)sandbox->counters.allocation_count,
+        "statement_count", (unsigned long long)sandbox->counters.statement_count,
+        "iteration_count", (unsigned long long)sandbox->counters.iteration_count,
+        "operation_count", (unsigned long long)sandbox->counters.operation_count);
 }
 
 static PyObject *
@@ -2136,18 +2208,41 @@ sandbox_repr(_PySandboxObject *self)
 
 /* ============ Context Manager Types ============ */
 
-/* _PySandboxScopeContext: __enter__ calls EnterScope, __exit__ calls ExitScope */
+/* _PySandboxScopeContext: __enter__ calls EnterScope, __exit__ calls ExitScope.
+ * Stores the filename added on __enter__ so __exit__ only removes that one. */
 
 typedef struct {
     PyObject_HEAD
+    PyObject *filename;  /* The filename added by this context, or NULL */
 } _PySandboxScopeContext;
+
+static void
+scope_ctx_dealloc(_PySandboxScopeContext *self)
+{
+    Py_XDECREF(self->filename);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
 
 static PyObject *
 scope_ctx_enter(_PySandboxScopeContext *self, PyObject *Py_UNUSED(args))
 {
+    /* Get current frame's filename before entering scope */
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    if (frame == NULL || frame->f_code == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No current frame");
+        return NULL;
+    }
+    PyObject *filename = frame->f_code->co_filename;
+
     if (_PySandbox_EnterScope() < 0) {
         return NULL;
     }
+
+    /* Save the filename so __exit__ can remove just this one */
+    Py_INCREF(filename);
+    Py_XDECREF(self->filename);
+    self->filename = filename;
+
     Py_INCREF(self);
     return (PyObject *)self;
 }
@@ -2155,10 +2250,10 @@ scope_ctx_enter(_PySandboxScopeContext *self, PyObject *Py_UNUSED(args))
 static PyObject *
 scope_ctx_exit(_PySandboxScopeContext *self, PyObject *args)
 {
-    /* Idempotent exit */
-    PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp != NULL) {
-        clear_filenames(interp->sandbox.registered_filenames);
+    /* Only remove the filename added by this context, not all filenames */
+    if (self->filename != NULL) {
+        _PySandbox_RemoveFilename(self->filename);
+        Py_CLEAR(self->filename);
     }
     Py_RETURN_NONE;
 }
@@ -2173,6 +2268,7 @@ static PyTypeObject _PySandboxScopeContext_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "_sandbox_scope_context",
     .tp_basicsize = sizeof(_PySandboxScopeContext),
+    .tp_dealloc = (destructor)scope_ctx_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_methods = scope_ctx_methods,
     .tp_new = PyType_GenericNew,
@@ -2271,51 +2367,29 @@ _PySandbox_Reset(PyInterpreterState *interp)
     if (interp == NULL) return;
 
     _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
 
-    /* Reset all limits to 0 */
-    limits->max_int_digits = 0;
-    limits->max_str_length = 0;
-    limits->max_bytes_length = 0;
-    limits->max_list_size = 0;
-    limits->max_dict_size = 0;
-    limits->max_set_size = 0;
-    limits->max_tuple_size = 0;
-    limits->max_statements = 0;
-    limits->max_allocations = 0;
-    limits->max_iterations = 0;
-    limits->max_operations = 0;
+    /* Clear Python objects before resetting (need proper cleanup) */
+    clear_filenames(sandbox->registered_filenames);
+    Py_CLEAR(sandbox->creation_hook.hook_callback);
 
-    /* Reset all counters to 0 */
-    limits->statement_count = 0;
-    limits->allocation_count = 0;
-    limits->iteration_count = 0;
-    limits->operation_count = 0;
+    /* Reset limits and counters using default macros */
+    sandbox->limits = (_PySandboxLimits)_PySandboxLimits_INIT;
+    sandbox->counters = (_PySandboxCounters)_PySandboxCounters_INIT;
 
-    /* Reset type restrictions to defaults */
-    limits->allow_float = 1;
-    limits->allow_complex = 1;
-    limits->allow_dunder_access = 1;
-    limits->count_iterations_as_operations = 0;
+    /* Reset creation hook (callback already cleared above) */
+    sandbox->creation_hook.hook_func = NULL;
+    sandbox->creation_hook.hook_userdata = NULL;
+    sandbox->creation_hook.in_hook = 0;
 
-    /* Reset in_check and suspended */
-    sandbox->in_check = 0;
+    /* Reset state flags */
+    sandbox->suppress_checks = 0;
     sandbox->suspended = 0;
 
-    /* Clear registered filenames */
-    clear_filenames(sandbox->registered_filenames);
-
-    /* Clear creation hook */
-    Py_CLEAR(interp->sandbox.creation_hook.hook_callback);
-    interp->sandbox.creation_hook.hook_func = NULL;
-    interp->sandbox.creation_hook.hook_userdata = NULL;
-    interp->sandbox.creation_hook.in_hook = 0;
-
     /* Reset modes */
-    interp->sandbox.frozen_mode = 0;
-    interp->sandbox.auto_mutable_mode = 0;
-    interp->sandbox.opcode_restrict_mode = 0;
-    _PySandbox_OpcodeSet_ZERO(&interp->sandbox.banned_opcodes);
+    sandbox->frozen_mode = 0;
+    sandbox->auto_mutable = 0;
+    sandbox->opcode_restrict_mode = 0;
+    _PySandbox_OpcodeSet_ZERO(&sandbox->banned_opcodes);
 
     /* Update tracing state */
     PyThreadState *tstate = _PyThreadState_GET();
@@ -2449,8 +2523,15 @@ _PySandbox_WrapIterator(PyObject *iter)
         return iter;
     }
 
-    /* Check if we should wrap: sandbox scope must be active */
-    if (!_PySandbox_IsInScope()) {
+    /* Check if we should wrap: sandbox scope must be active.
+     * Inline the scope check to avoid redundant interp lookup. */
+    _PySandboxState *sandbox = &interp->sandbox;
+    if (sandbox->registered_filenames == NULL) {
+        Py_INCREF(iter);
+        return iter;  /* No filenames registered, not in scope */
+    }
+    _PyInterpreterFrame *frame = get_current_iframe(tstate);
+    if (frame == NULL || !frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
         Py_INCREF(iter);
         return iter;  /* No wrapping needed */
     }

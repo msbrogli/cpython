@@ -62,13 +62,9 @@ typedef struct {
 
     /* Scoped limits - only enforced within sandbox scope (selected frames) */
     uint64_t max_statements;      /* 0 = no limit */
-    uint64_t statement_count;     /* Line executions in scope */
     uint64_t max_allocations;     /* 0 = no limit */
-    uint64_t allocation_count;    /* Allocations in scope */
     uint64_t max_iterations;      /* 0 = no limit */
-    uint64_t iteration_count;     /* Iterator calls in scope */
     uint64_t max_operations;      /* 0 = no limit */
-    uint64_t operation_count;     /* Counted operations (SANDBOX_COUNT opcode) in scope */
 
     /* Type restrictions */
     int allow_float;         /* 0 = forbidden, 1 = allowed (default) */
@@ -81,6 +77,14 @@ typedef struct {
     int count_iterations_as_operations;  /* 0 = off (default), 1 = each yield increments operation_count */
 } _PySandboxLimits;
 
+/* Sandbox counters - separated from limits for clarity */
+typedef struct {
+    uint64_t statement_count;     /* Line executions in scope */
+    uint64_t allocation_count;    /* Allocations in scope */
+    uint64_t iteration_count;     /* Iterator calls in scope */
+    uint64_t operation_count;     /* Counted operations (SANDBOX_COUNT opcode) in scope */
+} _PySandboxCounters;
+
 /* Default values (no limits) */
 #define _PySandboxLimits_INIT { \
     .max_int_digits = 0,            \
@@ -90,18 +94,21 @@ typedef struct {
     .max_dict_size = 0,             \
     .max_set_size = 0,              \
     .max_tuple_size = 0,            \
-    .max_statements = 0,      \
-    .statement_count = 0,     \
-    .max_allocations = 0,     \
-    .allocation_count = 0,    \
-    .max_iterations = 0,      \
-    .iteration_count = 0,     \
-    .max_operations = 0,      \
-    .operation_count = 0,     \
+    .max_statements = 0,            \
+    .max_allocations = 0,           \
+    .max_iterations = 0,            \
+    .max_operations = 0,            \
     .allow_float = 1,               \
     .allow_complex = 1,             \
     .allow_dunder_access = 1,       \
     .count_iterations_as_operations = 0, \
+}
+
+#define _PySandboxCounters_INIT { \
+    .statement_count = 0,           \
+    .allocation_count = 0,          \
+    .iteration_count = 0,           \
+    .operation_count = 0,           \
 }
 
 /* Object creation hook flags */
@@ -153,9 +160,10 @@ typedef struct {
 /* Combined sandbox state */
 typedef struct {
     _PySandboxLimits limits;
+    _PySandboxCounters counters;
     _PyObjectCreationHook creation_hook;
     int frozen_mode;  /* 1 = global freeze active (block all attr mutations), 0 = normal */
-    int auto_mutable_mode;  /* 1 = auto-mark created objects as mutable within scope, 0 = off */
+    int auto_mutable;  /* 1 = auto-mark created objects as mutable within scope, 0 = off */
     int opcode_restrict_mode;            /* 1 = active, 0 = off */
     _PySandboxOpcodeSet banned_opcodes;  /* bitmap of banned opcodes */
 
@@ -168,7 +176,7 @@ typedef struct {
 
     /* Recursion prevention - nonzero during limit check (to avoid recursive
        checks when error handling creates strings/integers) */
-    int in_check;
+    int suppress_checks;
 
     /* Suspend counter - when > 0, all limits are bypassed.
        Use PySandbox_Suspend/Resume for nested suspend/resume. */
@@ -177,13 +185,14 @@ typedef struct {
 
 #define _PySandboxState_INIT {              \
     .limits = _PySandboxLimits_INIT,        \
+    .counters = _PySandboxCounters_INIT,    \
     .creation_hook = _PyObjectCreationHook_INIT, \
     .frozen_mode = 0,                       \
-    .auto_mutable_mode = 0,                 \
+    .auto_mutable = 0,                 \
     .opcode_restrict_mode = 0,              \
     .banned_opcodes = {{0}},                \
-    .registered_filenames = NULL, \
-    .in_check = 0,                          \
+    .registered_filenames = NULL,           \
+    .suppress_checks = 0,                          \
     .suspended = 0,                         \
 }
 
@@ -218,7 +227,7 @@ PyAPI_FUNC(int) _PySandbox_CheckScopeOperation(void);
 
 /* Scoped iteration checking - returns -1 and sets exception when limit exceeded.
  * This is the exported version; sandbox.c uses a static inline for internal callers. */
-PyAPI_FUNC(int) _PySandbox_CheckIterationImpl(void);
+PyAPI_FUNC(int) _PySandbox_CheckIteration(void);
 
 /* Check dunder attribute access - returns -1 and sets exception when blocked */
 PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
@@ -230,14 +239,14 @@ PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
  * Respects sandbox suspend state. */
 PyAPI_FUNC(int) _PySandbox_CheckFrozen(PyObject *obj);
 
-/* Auto-mutable: mark a newly created object as mutable if auto_mutable_mode
+/* Auto-mutable: mark a newly created object as mutable if auto_mutable
  * and frozen_mode are both active and the current frame is in sandbox scope.
  * This is a no-op when either flag is off or the frame is out of scope. */
 PyAPI_FUNC(void) _PySandbox_MaybeMarkMutable(PyObject *obj);
 
 /* Opcode restriction check - called from DO_TRACING in ceval.c.
  * Returns 0 if opcode is allowed, -1 if banned (sets SandboxRuntimeError).
- * Fast exits: mode off, suspended, in_check, not in scope, opcode not banned. */
+ * Fast exits: mode off, suspended, suppress_checks, not in scope, opcode not banned. */
 PyAPI_FUNC(int) _PySandbox_CheckOpcode(int opcode);
 
 /* Sandbox scope management */

@@ -63,6 +63,55 @@ class ObjectCreationHookTests(unittest.TestCase):
             instance = BlockedClass()
         self.assertIn("blocked by hook", str(cm.exception))
 
+    def test_hook_returning_same_object(self):
+        """Hook returning the same object should not cause use-after-free."""
+        call_count = [0]
+
+        def identity_hook(obj, type_, frame, context):
+            call_count[0] += 1
+            # Return the same object - this should NOT decref it
+            return obj
+
+        sys.sandbox.creation_hook = identity_hook
+
+        class TestClass:
+            pass
+
+        # Create multiple instances to stress test
+        instances = []
+        for i in range(10):
+            inst = TestClass()
+            instances.append(inst)
+            # Verify the object is still valid
+            self.assertIsInstance(inst, TestClass)
+
+        # All instances should still be valid
+        self.assertEqual(len(instances), 10)
+        for inst in instances:
+            self.assertIsInstance(inst, TestClass)
+
+        # Hook should have been called
+        self.assertGreater(call_count[0], 0)
+
+    def test_hook_replacing_with_different_object(self):
+        """Hook returning a different object should work correctly."""
+        class Replacement:
+            pass
+
+        def replacing_hook(obj, type_, frame, context):
+            if type_.__name__ == 'Original':
+                return Replacement()
+            return obj
+
+        sys.sandbox.creation_hook = replacing_hook
+
+        class Original:
+            pass
+
+        # Creating Original should return Replacement
+        result = Original()
+        self.assertIsInstance(result, Replacement)
+
 
 if __name__ == '__main__':
     unittest.main()

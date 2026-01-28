@@ -418,6 +418,106 @@ class SuspendResumeLimitsTests(unittest.TestCase):
         with self.assertRaises(SandboxOverflowError):
             list(range(20))
 
+    def test_unpaired_resume_raises_error(self):
+        """Resume without matching suspend should raise RuntimeError."""
+        # Ensure we're not suspended
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
+
+        # Now try to resume without suspend - should raise
+        with self.assertRaises(RuntimeError) as cm:
+            sys.sandbox.resume()
+        self.assertIn("without matching suspend", str(cm.exception))
+
+    def test_extra_resume_after_balanced_pairs_raises_error(self):
+        """Extra resume after balanced suspend/resume pairs should raise."""
+        # Do a balanced suspend/resume
+        sys.sandbox.suspend()
+        sys.sandbox.resume()
+
+        # Extra resume should fail
+        with self.assertRaises(RuntimeError) as cm:
+            sys.sandbox.resume()
+        self.assertIn("without matching suspend", str(cm.exception))
+
+    def test_suspended_limits_context_manager(self):
+        """suspended_limits() context manager should bypass limits."""
+        sys.sandbox.set_limits(max_list_size=5)
+
+        # Should fail without suspension
+        with self.assertRaises(SandboxOverflowError):
+            list(range(10))
+
+        # Should succeed inside context manager
+        with sys.sandbox.suspended_limits():
+            self.assertTrue(sys.sandbox.suspended)
+            large_list = list(range(100))
+            self.assertEqual(len(large_list), 100)
+
+        # Should fail again after context
+        self.assertFalse(sys.sandbox.suspended)
+        with self.assertRaises(SandboxOverflowError):
+            list(range(10))
+
+    def test_suspended_limits_context_manager_with_exception(self):
+        """suspended_limits() should restore state even on exception."""
+        sys.sandbox.set_limits(max_list_size=5)
+
+        try:
+            with sys.sandbox.suspended_limits():
+                self.assertTrue(sys.sandbox.suspended)
+                raise ValueError("test exception")
+        except ValueError:
+            pass
+
+        # Should be resumed after exception
+        self.assertFalse(sys.sandbox.suspended)
+
+
+class ResetLimitsTests(unittest.TestCase):
+    """Test reset() functionality."""
+
+    def setUp(self):
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        # Exit scope if entered
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+        sys.sandbox.set_limits(**self.original_limits)
+
+    def test_reset_clears_all_state(self):
+        """reset() should clear all limits, counters, and modes."""
+        # Set some limits
+        sys.sandbox.set_limits(max_list_size=100, max_statements=1000)
+        sys.sandbox.frozen_mode = True
+        sys.sandbox.auto_mutable = True
+
+        # Do some operations to increment counters
+        with sys.sandbox.scope():
+            _ = [1, 2, 3]
+
+        # Reset
+        sys.sandbox.reset()
+
+        # Verify limits cleared
+        limits = sys.sandbox.get_limits()
+        self.assertEqual(limits['max_list_size'], 0)
+        self.assertEqual(limits['max_statements'], 0)
+
+        # Verify counters cleared
+        counts = sys.sandbox.get_counts()
+        self.assertEqual(counts['allocation_count'], 0)
+        self.assertEqual(counts['statement_count'], 0)
+        self.assertEqual(counts['iteration_count'], 0)
+        self.assertEqual(counts['operation_count'], 0)
+
+        # Verify modes cleared
+        self.assertFalse(sys.sandbox.frozen_mode)
+        self.assertFalse(sys.sandbox.auto_mutable)
+
 
 class OutOfScopeLimitsTests(unittest.TestCase):
     """Test that limits do NOT apply outside sandbox scope."""

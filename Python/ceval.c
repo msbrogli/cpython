@@ -1769,12 +1769,8 @@ handle_eval_breaker:
         }
 
         TARGET(SANDBOX_COUNT) {
-            PyInterpreterState *interp = tstate->interp;
-            if (interp->sandbox.limits.max_operations > 0 &&
-                !interp->sandbox.suspended) {
-                if (_PySandbox_CheckScopeOperation() < 0) {
-                    goto error;
-                }
+            if (_PySandbox_CheckScopeOperation() < 0) {
+                goto error;
             }
             DISPATCH();
         }
@@ -2890,8 +2886,10 @@ handle_eval_breaker:
             PyObject *owner = TOP();
             PyObject *v = SECOND();
             int err;
-            if (_PySandbox_CheckDunderAccess(name) < 0) {
-                goto error;
+            if (!tstate->interp->sandbox.limits.allow_dunder_access) {
+                if (_PySandbox_CheckDunderAccess(name) < 0) {
+                    goto error;
+                }
             }
             STACK_SHRINK(2);
             err = PyObject_SetAttr(owner, name, v);
@@ -2908,9 +2906,11 @@ handle_eval_breaker:
             PyObject *name = GETITEM(names, oparg);
             PyObject *owner = POP();
             int err;
-            if (_PySandbox_CheckDunderAccess(name) < 0) {
-                Py_DECREF(owner);
-                goto error;
+            if (!tstate->interp->sandbox.limits.allow_dunder_access) {
+                if (_PySandbox_CheckDunderAccess(name) < 0) {
+                    Py_DECREF(owner);
+                    goto error;
+                }
             }
             err = PyObject_SetAttr(owner, name, (PyObject *)NULL);
             Py_DECREF(owner);
@@ -3477,8 +3477,10 @@ handle_eval_breaker:
             PREDICTED(LOAD_ATTR);
             PyObject *name = GETITEM(names, oparg);
             PyObject *owner = TOP();
-            if (_PySandbox_CheckDunderAccess(name) < 0) {
-                goto error;
+            if (!tstate->interp->sandbox.limits.allow_dunder_access) {
+                if (_PySandbox_CheckDunderAccess(name) < 0) {
+                    goto error;
+                }
             }
             PyObject *res = PyObject_GetAttr(owner, name);
             if (res == NULL) {
@@ -5712,10 +5714,12 @@ handle_eval_breaker:
             }
         }
         TRACING_NEXTOPARG();
-        /* Sandbox opcode restriction check */
-        if (_PySandbox_CheckOpcode(opcode) < 0) {
-            next_instr++;
-            goto error;
+        /* Sandbox opcode restriction check - skip if mode is off */
+        if (tstate->interp->sandbox.opcode_restrict_mode) {
+            if (_PySandbox_CheckOpcode(opcode) < 0) {
+                next_instr++;
+                goto error;
+            }
         }
         PRE_DISPATCH_GOTO();
         DISPATCH_GOTO();

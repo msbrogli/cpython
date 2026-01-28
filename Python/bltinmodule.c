@@ -1124,6 +1124,11 @@ builtin_getattr(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
 
     v = args[0];
     name = args[1];
+
+    if (_PySandbox_CheckDunderAccess(name) < 0) {
+        return NULL;
+    }
+
     if (nargs > 2) {
         if (_PyObject_LookupAttr(v, name, &result) == 0) {
             PyObject *dflt = args[2];
@@ -1183,6 +1188,10 @@ builtin_hasattr_impl(PyObject *module, PyObject *obj, PyObject *name)
 /*[clinic end generated code: output=a7aff2090a4151e5 input=0faec9787d979542]*/
 {
     PyObject *v;
+
+    if (_PySandbox_CheckDunderAccess(name) < 0) {
+        return NULL;
+    }
 
     if (_PyObject_LookupAttr(obj, name, &v) < 0) {
         return NULL;

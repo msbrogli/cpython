@@ -70,32 +70,18 @@ typedef struct {
     Py_ssize_t max_tuple_size;
 
     /* Scoped limits - only enforced within sandbox scope (selected frames) */
-    uint64_t scope_max_statements;      /* 0 = no limit */
-    uint64_t scope_statement_count;     /* Line executions in scope */
-    uint64_t scope_max_allocations;     /* 0 = no limit */
-    uint64_t scope_allocation_count;    /* Allocations in scope */
-    uint64_t scope_max_iterations;      /* 0 = no limit */
-    uint64_t scope_iteration_count;     /* Iterator calls in scope */
-    uint64_t scope_max_operations;      /* 0 = no limit */
-    uint64_t scope_operation_count;     /* Counted operations (SANDBOX_COUNT opcode) in scope */
-
-    /* Sandbox scope tracking - set of registered filenames.
-     * Code with a registered co_filename counts toward scope limits.
-     * This is simpler than frame-based tracking and works reliably
-     * across function calls within the same code context. */
-    _PySandboxFilenameSet registered_filenames;
+    uint64_t max_statements;      /* 0 = no limit */
+    uint64_t statement_count;     /* Line executions in scope */
+    uint64_t max_allocations;     /* 0 = no limit */
+    uint64_t allocation_count;    /* Allocations in scope */
+    uint64_t max_iterations;      /* 0 = no limit */
+    uint64_t iteration_count;     /* Iterator calls in scope */
+    uint64_t max_operations;      /* 0 = no limit */
+    uint64_t operation_count;     /* Counted operations (SANDBOX_COUNT opcode) in scope */
 
     /* Type restrictions */
     int allow_float;         /* 0 = forbidden, 1 = allowed (default) */
     int allow_complex;       /* 0 = forbidden, 1 = allowed (default) */
-
-    /* Recursion prevention - nonzero during limit check (to avoid recursive
-       checks when error handling creates strings/integers) */
-    int in_check;
-
-    /* Suspend counter - when > 0, all limits are bypassed.
-       Use PySandbox_Suspend/Resume for nested suspend/resume. */
-    int suspended;
 
     /* Allow access to dunder attributes (names containing __) */
     int allow_dunder_access;     /* 1 = allowed (default), 0 = block __ attributes */
@@ -110,19 +96,16 @@ typedef struct {
     .max_dict_size = 0,             \
     .max_set_size = 0,              \
     .max_tuple_size = 0,            \
-    .scope_max_statements = 0,      \
-    .scope_statement_count = 0,     \
-    .scope_max_allocations = 0,     \
-    .scope_allocation_count = 0,    \
-    .scope_max_iterations = 0,      \
-    .scope_iteration_count = 0,     \
-    .scope_max_operations = 0,      \
-    .scope_operation_count = 0,     \
-    .registered_filenames = {.filenames = NULL, .capacity = 0, .count = 0}, \
+    .max_statements = 0,      \
+    .statement_count = 0,     \
+    .max_allocations = 0,     \
+    .allocation_count = 0,    \
+    .max_iterations = 0,      \
+    .iteration_count = 0,     \
+    .max_operations = 0,      \
+    .operation_count = 0,     \
     .allow_float = 1,               \
     .allow_complex = 1,             \
-    .in_check = 0,                  \
-    .suspended = 0,                 \
     .allow_dunder_access = 1,       \
 }
 
@@ -180,6 +163,20 @@ typedef struct {
     int auto_mutable_mode;  /* 1 = auto-mark created objects as mutable within scope, 0 = off */
     int opcode_restrict_mode;            /* 1 = active, 0 = off */
     _PySandboxOpcodeSet banned_opcodes;  /* bitmap of banned opcodes */
+
+    /* Sandbox scope tracking - set of registered filenames.
+     * Code with a registered co_filename counts toward scope limits.
+     * This is simpler than frame-based tracking and works reliably
+     * across function calls within the same code context. */
+    _PySandboxFilenameSet registered_filenames;
+
+    /* Recursion prevention - nonzero during limit check (to avoid recursive
+       checks when error handling creates strings/integers) */
+    int in_check;
+
+    /* Suspend counter - when > 0, all limits are bypassed.
+       Use PySandbox_Suspend/Resume for nested suspend/resume. */
+    int suspended;
 } _PySandboxState;
 
 #define _PySandboxState_INIT {              \
@@ -189,6 +186,9 @@ typedef struct {
     .auto_mutable_mode = 0,                 \
     .opcode_restrict_mode = 0,              \
     .banned_opcodes = {{0}},                \
+    .registered_filenames = {.filenames = NULL, .capacity = 0, .count = 0}, \
+    .in_check = 0,                          \
+    .suspended = 0,                         \
 }
 
 /* ============ Internal API ============ */

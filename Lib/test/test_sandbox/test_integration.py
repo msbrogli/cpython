@@ -35,8 +35,8 @@ sys.sandbox.set_limits(
     max_int_digits=100,
     max_str_length=10000,
     max_list_size=1000,
-    max_scope_statements=10000,
-    max_scope_allocations=5000,
+    max_statements=10000,
+    max_allocations=5000,
 )
 sys.sandbox.reset_counts()
 sys.sandbox.enter_scope()

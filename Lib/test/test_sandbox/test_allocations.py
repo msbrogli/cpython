@@ -32,13 +32,13 @@ class ScopedAllocationCountTests(unittest.TestCase):
 
     def test_set_and_get_scope_max_allocations(self):
         """Setting and getting scope_max_allocations should work."""
-        sys.sandbox.set_limits(max_scope_allocations=5000)
+        sys.sandbox.set_limits(max_allocations=5000)
         limits = sys.sandbox.get_limits()
-        self.assertEqual(limits['max_scope_allocations'], 5000)
+        self.assertEqual(limits['max_allocations'], 5000)
 
     def test_scoped_allocation_count_tracked(self):
         """Scoped allocation count should be tracked when in scope."""
-        sys.sandbox.set_limits(max_scope_allocations=10000)
+        sys.sandbox.set_limits(max_allocations=10000)
         sys.sandbox.enter_scope()
 
         # Create many objects and KEEP REFERENCES so they don't get garbage collected
@@ -48,7 +48,7 @@ class ScopedAllocationCountTests(unittest.TestCase):
             result.append([1, 2, 3])
             result.append({'a': 1})
 
-        count = sys.sandbox.get_counts()['scope_allocation_count']
+        count = sys.sandbox.get_counts()['allocation_count']
         # After 200 object creations, should have significant allocations
         self.assertGreater(count, 50)
 
@@ -56,7 +56,7 @@ class ScopedAllocationCountTests(unittest.TestCase):
         """Exceeding scoped allocation limit should raise SandboxMemoryError."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_allocations=100)
+sys.sandbox.set_limits(max_allocations=100)
 sys.sandbox.enter_scope()
 a = []
 try:
@@ -80,9 +80,9 @@ except SandboxMemoryError:
         self.assertIn("SandboxMemoryError", result.stderr,
                       f"Expected SandboxMemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
 
-    def test_reset_scope_allocation_count(self):
+    def test_reset_allocation_count(self):
         """resetsandboxcounters should reset scope allocation counter."""
-        sys.sandbox.set_limits(max_scope_allocations=10000)
+        sys.sandbox.set_limits(max_allocations=10000)
         sys.sandbox.enter_scope()
 
         # Create many objects and KEEP REFERENCES so they don't get garbage collected
@@ -91,16 +91,16 @@ except SandboxMemoryError:
             result.append([1, 2, 3])
 
         counts_before = sys.sandbox.get_counts()
-        self.assertGreater(counts_before['scope_allocation_count'], 20)
+        self.assertGreater(counts_before['allocation_count'], 20)
 
         sys.sandbox.reset_counts()
         counts_after = sys.sandbox.get_counts()
         # Count may not be exactly 0 due to dict allocation in getsandboxcounts
-        self.assertLess(counts_after['scope_allocation_count'], 10)
+        self.assertLess(counts_after['allocation_count'], 10)
 
     def test_allocations_outside_scope_dont_count_scoped(self):
         """Allocations outside scope should not count toward scoped limit."""
-        sys.sandbox.set_limits(max_scope_allocations=10000)
+        sys.sandbox.set_limits(max_allocations=10000)
         sys.sandbox.reset_counts()
 
         # Not in scope - create many objects and KEEP REFERENCES
@@ -110,7 +110,7 @@ except SandboxMemoryError:
 
         counts = sys.sandbox.get_counts()
         # Scoped should not count (not in scope)
-        self.assertEqual(counts['scope_allocation_count'], 0)
+        self.assertEqual(counts['allocation_count'], 0)
 
 
 if __name__ == '__main__':

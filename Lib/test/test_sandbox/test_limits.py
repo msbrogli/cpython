@@ -37,8 +37,8 @@ class SandboxLimitsTests(unittest.TestCase):
         expected_keys = {
             'max_int_digits', 'max_str_length', 'max_bytes_length',
             'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
-            'max_scope_statements', 'max_scope_allocations',
-            'max_scope_iterations', 'max_scope_operations',
+            'max_statements', 'max_allocations',
+            'max_iterations', 'max_operations',
             'allow_float', 'allow_complex', 'allow_dunder_access'
         }
         self.assertEqual(set(limits.keys()), expected_keys)
@@ -47,7 +47,7 @@ class SandboxLimitsTests(unittest.TestCase):
         """getsandboxcounts should return a dictionary with count keys."""
         counts = sys.sandbox.get_counts()
         self.assertIsInstance(counts, dict)
-        expected_keys = {'scope_allocation_count', 'scope_statement_count', 'scope_iteration_count', 'scope_operation_count'}
+        expected_keys = {'allocation_count', 'statement_count', 'iteration_count', 'operation_count'}
         self.assertEqual(set(counts.keys()), expected_keys)
 
     def test_default_limits_are_zero(self):
@@ -60,8 +60,8 @@ class SandboxLimitsTests(unittest.TestCase):
         self.assertEqual(limits['max_dict_size'], 0)
         self.assertEqual(limits['max_set_size'], 0)
         self.assertEqual(limits['max_tuple_size'], 0)
-        self.assertEqual(limits['max_scope_statements'], 0)
-        self.assertEqual(limits['max_scope_allocations'], 0)
+        self.assertEqual(limits['max_statements'], 0)
+        self.assertEqual(limits['max_allocations'], 0)
         self.assertTrue(limits['allow_float'])
         self.assertTrue(limits['allow_complex'])
         self.assertTrue(limits['allow_dunder_access'])

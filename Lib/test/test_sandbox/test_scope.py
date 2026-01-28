@@ -40,7 +40,7 @@ class SandboxScopeTests(unittest.TestCase):
 
     def test_enter_scope_resets_counters(self):
         """entersandboxscope should reset scope counters."""
-        sys.sandbox.set_limits(max_scope_statements=100000, max_scope_allocations=100000)
+        sys.sandbox.set_limits(max_statements=100000, max_allocations=100000)
         sys.sandbox.enter_scope()
 
         # Create many objects and KEEP REFERENCES so they don't get garbage collected
@@ -51,15 +51,15 @@ class SandboxScopeTests(unittest.TestCase):
 
         counts = sys.sandbox.get_counts()
         # After 100 list creations, should have some allocations counted
-        self.assertGreater(counts['scope_allocation_count'], 10)
+        self.assertGreater(counts['allocation_count'], 10)
 
         # Enter scope again - should reset
         sys.sandbox.enter_scope()
         counts = sys.sandbox.get_counts()
         # Count may not be exactly 0 due to dict allocation and statements
         # in getsandboxcounts call (which happens while in scope)
-        self.assertLess(counts['scope_allocation_count'], 10)
-        self.assertLess(counts['scope_statement_count'], 10)
+        self.assertLess(counts['allocation_count'], 10)
+        self.assertLess(counts['statement_count'], 10)
 
 
 class ScopedStatementCountTests(unittest.TestCase):
@@ -84,22 +84,22 @@ class ScopedStatementCountTests(unittest.TestCase):
 
     def test_set_and_get_scope_max_statements(self):
         """Setting and getting scope_max_statements should work."""
-        sys.sandbox.set_limits(max_scope_statements=10000)
+        sys.sandbox.set_limits(max_statements=10000)
         limits = sys.sandbox.get_limits()
-        self.assertEqual(limits['max_scope_statements'], 10000)
+        self.assertEqual(limits['max_statements'], 10000)
 
     def test_statement_counting_in_exec(self):
         """Statements in exec() should be counted."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 sys.sandbox.enter_scope()
 # Simple loop to generate statements
 exec("x = 0\\nfor _ in range(100):\\n    x += 1")
 counts = sys.sandbox.get_counts()
 # Should have counted the statements in exec
-print(counts['scope_statement_count'])
-sys.exit(0 if counts['scope_statement_count'] > 0 else 1)
+print(counts['statement_count'])
+sys.exit(0 if counts['statement_count'] > 0 else 1)
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
@@ -111,7 +111,7 @@ sys.exit(0 if counts['scope_statement_count'] > 0 else 1)
         # the same co_filename ("<string>") as the selected frame
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=10)
+sys.sandbox.set_limits(max_statements=10)
 sys.sandbox.enter_scope()
 try:
     # exec'd code has same filename as selected frame, so it counts
@@ -129,9 +129,9 @@ except SandboxRuntimeError as e:
         self.assertEqual(result.returncode, 0,
                         f"Statement limit not enforced: stdout={result.stdout!r} stderr={result.stderr!r}")
 
-    def test_reset_scope_statement_count(self):
+    def test_reset_statement_count(self):
         """resetsandboxcounters should reset scope statement counter."""
-        sys.sandbox.set_limits(max_scope_statements=1000000)
+        sys.sandbox.set_limits(max_statements=1000000)
         sys.sandbox.enter_scope()
 
         # Do some work to generate statements
@@ -141,14 +141,14 @@ except SandboxRuntimeError as e:
         counts_before = sys.sandbox.get_counts()
         # Statement count should be > 0 if we're in scope
         # (the actual count depends on tracing implementation)
-        self.assertGreater(counts_before['scope_statement_count'], 50)
+        self.assertGreater(counts_before['statement_count'], 50)
 
         sys.sandbox.reset_counts()
         # A few more statements may execute before we exit scope, so count
         # won't be exactly 0 but should be significantly less than before
         sys.sandbox.exit_scope()
         counts_after = sys.sandbox.get_counts()
-        self.assertLess(counts_after['scope_statement_count'], 20)
+        self.assertLess(counts_after['statement_count'], 20)
 
 
 class SelectedFramesScopeTests(unittest.TestCase):
@@ -193,7 +193,7 @@ class SelectedFramesScopeTests(unittest.TestCase):
         """Code with registered filename should count toward statement limit."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 sys.sandbox.add_filename("<tracked>")
 
 # Run code with registered filename - statements should count
@@ -203,7 +203,7 @@ for _ in range(100):
     x += 1
 """, "<tracked>", "exec"))
 
-count = sys.sandbox.get_counts()['scope_statement_count']
+count = sys.sandbox.get_counts()['statement_count']
 sys.sandbox.clear_filenames()
 print(count)
 sys.exit(0 if count > 50 else 1)
@@ -222,12 +222,12 @@ sys.exit(0 if count > 50 else 1)
         code = '''
 import sys
 import os
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 
 # Register a custom filename - os module has different filename
 sys.sandbox.add_filename("<my-test>")
 
-count_before = sys.sandbox.get_counts()['scope_statement_count']
+count_before = sys.sandbox.get_counts()['statement_count']
 
 # Call an imported function - should NOT count toward statement limit
 # os.getcwd() is a C builtin, so it has no Python frame at all
@@ -235,7 +235,7 @@ _ = os.getcwd()
 _ = os.getcwd()
 _ = os.getcwd()
 
-count_after = sys.sandbox.get_counts()['scope_statement_count']
+count_after = sys.sandbox.get_counts()['statement_count']
 sys.sandbox.clear_filenames()
 
 # The count should be 0 - no code with our filename was executed
@@ -256,7 +256,7 @@ sys.exit(0 if increase == 0 else 1)
         """Callbacks from builtins should count if defined with registered filename."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 sys.sandbox.add_filename("<callback-test>")
 
 # Define and use a callback with registered filename
@@ -280,9 +280,9 @@ sys.sandbox.clear_filenames()
 
 # The callback should have been called 3 times (once per element)
 # and its statements should be counted
-print(f"Statement count: {counts['scope_statement_count']}")
+print(f"Statement count: {counts['statement_count']}")
 # Should have significant statement count from the callback loops
-sys.exit(0 if counts['scope_statement_count'] > 10 else 1)
+sys.exit(0 if counts['statement_count'] > 10 else 1)
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -297,7 +297,7 @@ sys.exit(0 if counts['scope_statement_count'] > 10 else 1)
         """Functions defined in exec'd code should count toward statement limit."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 sys.sandbox.add_filename("<exec-functions>")
 
 # Run exec with registered filename - all functions share the same co_filename
@@ -323,9 +323,9 @@ counts = sys.sandbox.get_counts()
 sys.sandbox.clear_filenames()
 
 # Both foo() and bar() should have their statements counted
-print(f"Statement count: {counts['scope_statement_count']}")
+print(f"Statement count: {counts['statement_count']}")
 # Should have counted ~100 loop iterations plus other statements
-sys.exit(0 if counts['scope_statement_count'] > 80 else 1)
+sys.exit(0 if counts['statement_count'] > 80 else 1)
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -340,7 +340,7 @@ sys.exit(0 if counts['scope_statement_count'] > 80 else 1)
         """Multiple filenames can be registered for scope tracking."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 
 # Register a custom filename
 sys.sandbox.add_filename("<module-a>")
@@ -352,7 +352,7 @@ for _ in range(50):
     x += 1
 """, "<module-a>", "exec"))
 
-count_a = sys.sandbox.get_counts()['scope_statement_count']
+count_a = sys.sandbox.get_counts()['statement_count']
 
 # Register another filename
 sys.sandbox.add_filename("<module-b>")
@@ -364,7 +364,7 @@ for _ in range(50):
     y += 1
 """, "<module-b>", "exec"))
 
-count_after_b = sys.sandbox.get_counts()['scope_statement_count']
+count_after_b = sys.sandbox.get_counts()['statement_count']
 
 # Run code with unregistered filename - should not count
 exec(compile("""
@@ -373,7 +373,7 @@ for _ in range(100):
     z += 1
 """, "<unregistered>", "exec"))
 
-count_after_unreg = sys.sandbox.get_counts()['scope_statement_count']
+count_after_unreg = sys.sandbox.get_counts()['statement_count']
 
 sys.sandbox.clear_filenames()
 
@@ -399,7 +399,7 @@ sys.exit(0 if (registered_counted and unreg_not_counted) else 1)
         """Filename-based scope should also work with allocation limits."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_allocations=100000)
+sys.sandbox.set_limits(max_allocations=100000)
 
 # Register a specific filename for tracking
 sys.sandbox.add_filename("<tracked-alloc>")
@@ -411,7 +411,7 @@ for _ in range(100):
     result.append([1, 2, 3])
 """, "<tracked-alloc>", "exec"))
 
-tracked_allocs = sys.sandbox.get_counts()['scope_allocation_count']
+tracked_allocs = sys.sandbox.get_counts()['allocation_count']
 
 # Run code with unregistered filename - allocations should NOT count
 exec(compile("""
@@ -420,7 +420,7 @@ for _ in range(100):
     result2.append([1, 2, 3])
 """, "<untracked-alloc>", "exec"))
 
-after_untracked = sys.sandbox.get_counts()['scope_allocation_count']
+after_untracked = sys.sandbox.get_counts()['allocation_count']
 
 sys.sandbox.clear_filenames()
 
@@ -458,7 +458,7 @@ sys.exit(0 if (tracked_counted and untracked_not_counted) else 1)
 
     def test_entersandboxscope_adds_current_frame(self):
         """entersandboxscope should add the current frame's filename to the set."""
-        sys.sandbox.set_limits(max_scope_statements=1000000)
+        sys.sandbox.set_limits(max_statements=1000000)
 
         sys.sandbox.enter_scope()
         self.assertTrue(sys.sandbox.in_scope())
@@ -468,7 +468,7 @@ sys.exit(0 if (tracked_counted and untracked_not_counted) else 1)
         for _ in range(100):
             x += 1
 
-        count = sys.sandbox.get_counts()['scope_statement_count']
+        count = sys.sandbox.get_counts()['statement_count']
         sys.sandbox.exit_scope()
 
         # Should have counted statements
@@ -505,14 +505,14 @@ class FilenameBasedScopeTests(unittest.TestCase):
 
     def test_addsandboxfilename_basic(self):
         """addsandboxfilename should register a filename for scope tracking."""
-        sys.sandbox.set_limits(max_scope_statements=1000000)
+        sys.sandbox.set_limits(max_statements=1000000)
         sys.sandbox.add_filename("<test>")
 
         # Compile and exec code with the registered filename
         code = compile("x = 1; y = 2; z = 3", "<test>", "exec")
         exec(code)
 
-        count = sys.sandbox.get_counts()['scope_statement_count']
+        count = sys.sandbox.get_counts()['statement_count']
         # Should have counted the statements
         self.assertGreater(count, 0)
 
@@ -546,7 +546,7 @@ class FilenameBasedScopeTests(unittest.TestCase):
         """Functions defined in exec'd code should count toward statement limit."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 sys.sandbox.add_filename("<sandbox>")
 
 # Compile code with registered filename
@@ -574,9 +574,9 @@ counts = sys.sandbox.get_counts()
 sys.sandbox.clear_filenames()
 
 # Both foo() and bar() should have their statements counted
-print(f"Statement count: {counts['scope_statement_count']}")
+print(f"Statement count: {counts['statement_count']}")
 # Should have counted ~100 loop iterations plus other statements
-sys.exit(0 if counts['scope_statement_count'] > 80 else 1)
+sys.exit(0 if counts['statement_count'] > 80 else 1)
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -591,7 +591,7 @@ sys.exit(0 if counts['scope_statement_count'] > 80 else 1)
         """Cross-function calls within same registered filename should count."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 sys.sandbox.add_filename("<sandbox>")
 
 # Define classes and functions that call each other
@@ -619,8 +619,8 @@ counts = sys.sandbox.get_counts()
 sys.sandbox.clear_filenames()
 
 # All statements should be counted since they share the same filename
-print(f"Statement count: {counts['scope_statement_count']}")
-sys.exit(0 if counts['scope_statement_count'] > 30 else 1)
+print(f"Statement count: {counts['statement_count']}")
+sys.exit(0 if counts['statement_count'] > 30 else 1)
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -636,19 +636,19 @@ sys.exit(0 if counts['scope_statement_count'] > 30 else 1)
         code = '''
 import sys
 import os
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 
 # Register a custom filename - os module has different filename
 sys.sandbox.add_filename("<my-sandbox>")
 
-count_before = sys.sandbox.get_counts()['scope_statement_count']
+count_before = sys.sandbox.get_counts()['statement_count']
 
 # Call imported functions - should NOT count (different filename)
 _ = os.getcwd()
 _ = os.getcwd()
 _ = os.getcwd()
 
-count_after = sys.sandbox.get_counts()['scope_statement_count']
+count_after = sys.sandbox.get_counts()['statement_count']
 sys.sandbox.clear_filenames()
 
 # The count should be 0 - no code with our filename was executed
@@ -669,7 +669,7 @@ sys.exit(0 if increase == 0 else 1)
         """Multiple exec() calls with same filename should share scope."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 sys.sandbox.add_filename("<shared>")
 
 # First exec
@@ -699,8 +699,8 @@ counts = sys.sandbox.get_counts()
 sys.sandbox.clear_filenames()
 
 # All three exec blocks should have contributed to the count
-print(f"Statement count: {counts['scope_statement_count']}")
-sys.exit(0 if counts['scope_statement_count'] > 30 else 1)
+print(f"Statement count: {counts['statement_count']}")
+sys.exit(0 if counts['statement_count'] > 30 else 1)
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -715,7 +715,7 @@ sys.exit(0 if counts['scope_statement_count'] > 30 else 1)
         """Statement limit should work with filename-based tracking."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=10)
+sys.sandbox.set_limits(max_statements=10)
 sys.sandbox.add_filename("<limited>")
 
 try:
@@ -742,7 +742,7 @@ except SandboxRuntimeError as e:
         """Allocation limit should work with filename-based tracking."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_allocations=100)
+sys.sandbox.set_limits(max_allocations=100)
 sys.sandbox.add_filename("<alloc-limited>")
 
 a = []
@@ -773,7 +773,7 @@ except SandboxMemoryError:
         """Different registered filenames should track independently."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_scope_statements=1000000)
+sys.sandbox.set_limits(max_statements=1000000)
 
 # Register only one filename
 sys.sandbox.add_filename("<tracked>")
@@ -785,7 +785,7 @@ for i in range(50):
     x += i
 """, "<tracked>", "exec"))
 
-count_tracked = sys.sandbox.get_counts()['scope_statement_count']
+count_tracked = sys.sandbox.get_counts()['statement_count']
 
 # This should NOT count (different filename, not registered)
 exec(compile("""
@@ -794,7 +794,7 @@ for i in range(100):
     y += i
 """, "<not-tracked>", "exec"))
 
-count_after = sys.sandbox.get_counts()['scope_statement_count']
+count_after = sys.sandbox.get_counts()['statement_count']
 sys.sandbox.clear_filenames()
 
 # Count should not have increased (second exec has different filename)

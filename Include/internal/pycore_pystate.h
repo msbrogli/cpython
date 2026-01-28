@@ -144,9 +144,9 @@ _PyThreadState_UpdateTracingState(PyThreadState *tstate)
      * 4. Sandbox opcode restriction mode is active (not suspended) */
     PyInterpreterState *interp = tstate->interp;
     int sandbox_needs_tracing = (interp != NULL &&
-                                  (interp->sandbox.limits.scope_max_statements > 0 ||
+                                  (interp->sandbox.limits.max_statements > 0 ||
                                    interp->sandbox.opcode_restrict_mode) &&
-                                  !interp->sandbox.limits.suspended);
+                                  !interp->sandbox.suspended);
     bool use_tracing =
         (tstate->tracing == 0) &&
         (tstate->c_tracefunc != NULL ||

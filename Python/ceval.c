@@ -1770,8 +1770,8 @@ handle_eval_breaker:
 
         TARGET(SANDBOX_COUNT) {
             PyInterpreterState *interp = tstate->interp;
-            if (interp->sandbox.limits.scope_max_operations > 0 &&
-                !interp->sandbox.limits.suspended) {
+            if (interp->sandbox.limits.max_operations > 0 &&
+                !interp->sandbox.suspended) {
                 if (_PySandbox_CheckScopeOperation() < 0) {
                     goto error;
                 }

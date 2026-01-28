@@ -139,9 +139,11 @@ except SandboxRuntimeError as e:
             x = 1
 
         counts_before = sys.sandbox.get_counts()
-        # Statement count should be > 0 if we're in scope
-        # (the actual count depends on tracing implementation)
-        self.assertGreater(counts_before['statement_count'], 50)
+        # Statement count should be > 0 if we're in scope.
+        # After 100 loop iterations, expect at least ~100 statements
+        # (loop body + iteration overhead). Using threshold of 80 to
+        # account for implementation variations in statement counting.
+        self.assertGreater(counts_before['statement_count'], 80)
 
         sys.sandbox.reset_counts()
         # A few more statements may execute before we exit scope, so count

@@ -4,10 +4,29 @@
  * -------------------
  * Sandbox limits and counters are per-interpreter state. In CPython 3.11,
  * the GIL (Global Interpreter Lock) protects all access to interpreter state,
- * so the non-atomic counter increments (allocation_count, etc.) are
- * safe. If CPython moves to per-interpreter GILs or free-threading, these
- * counters would need atomic operations or other synchronization.
+ * so the non-atomic counter increments (allocation_count, etc.) are safe.
  *
+ * For Free-Threading (PEP 703) Compatibility:
+ * If CPython moves to per-interpreter GILs or free-threading (no-GIL mode),
+ * the following operations would need atomic updates:
+ *
+ *   Counters (in sandbox_limits.c, pycore_sandbox_impl.h):
+ *   - sandbox->counters.allocation_count++
+ *   - sandbox->counters.statement_count++
+ *   - sandbox->counters.iteration_count++
+ *   - sandbox->counters.operation_count++
+ *
+ *   Flags (various files):
+ *   - sandbox->suppress_checks reads/writes
+ *   - sandbox->suspended reads/writes
+ *   - sandbox->creation_hook.in_hook reads/writes
+ *
+ *   Recommendations for free-threading:
+ *   - Use _Py_atomic_int for suppress_checks, suspended, in_hook
+ *   - Use _Py_atomic_uint64 for counters
+ *   - Add memory barriers for limit comparisons
+ *
+ * Design Philosophy:
  * The sandbox is designed for single-threaded sandboxed execution where
  * untrusted code runs in isolation. Multi-threaded sandboxed execution
  * within the same interpreter is not a supported use case.

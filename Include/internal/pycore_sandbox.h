@@ -25,6 +25,33 @@ struct _frame;
  * 1. Resource limits (integer size, string length, container size)
  * 2. Object creation hooks (intercept and optionally replace objects)
  * 3. Type restrictions (e.g., forbid float creation)
+ *
+ * == Important Implementation Details ==
+ *
+ * Grace Headroom (Allocation Limits):
+ *   When max_allocations is exceeded, the sandbox allows an additional
+ *   ALLOCATION_GRACE_HEADROOM (1000) allocations before hard-failing.
+ *   This "grace period" allows Python to allocate memory for error
+ *   handling (e.g., creating the MemoryError exception and traceback)
+ *   without cascading failures. The soft error is raised at count == max+1,
+ *   and the hard error at count > max+ALLOCATION_GRACE_HEADROOM.
+ *
+ * Single-Raise Behavior (Statement/Iteration/Operation Limits):
+ *   These limits only raise an error ONCE, at count == max+1.
+ *   Subsequent operations beyond the limit do NOT raise additional errors.
+ *   This prevents cascading failures during error handling when Python
+ *   needs to execute statements to format and display the exception.
+ *
+ * Overflow Protection:
+ *   All uint64_t limits (max_statements, max_allocations, max_iterations,
+ *   max_operations) are capped at SANDBOX_MAX_LIMIT = UINT64_MAX - 1000.
+ *   This ensures that comparisons like `count == max + 1` or
+ *   `count > max + ALLOCATION_GRACE_HEADROOM` cannot overflow.
+ *
+ * Thread Safety:
+ *   The sandbox relies on the GIL for thread safety. Non-atomic counter
+ *   increments and flag manipulations are safe under the current GIL model.
+ *   For free-threading (no-GIL) builds, atomic operations would be needed.
  */
 
 /* Forward declaration for interpreter frame */
@@ -46,8 +73,12 @@ typedef struct {
 
 /* Sandbox limits structure - stored in PyInterpreterState */
 typedef struct {
-    /* Integer limits: max number of internal digits (each ~30 bits) */
-    /* Set to 0 to disable limit */
+    /* Integer limits: max number of internal digits.
+     * Each internal digit stores ~30 bits (PyLong_SHIFT), which is
+     * approximately 9 decimal digits. For example:
+     *   - max_int_digits=5 allows integers up to ~10^45
+     *   - max_int_digits=100 allows integers up to ~10^900
+     * Set to 0 to disable limit. */
     Py_ssize_t max_int_digits;
 
     /* String/bytes limits: max length in characters/bytes */

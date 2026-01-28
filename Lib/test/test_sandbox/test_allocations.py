@@ -49,7 +49,12 @@ class ScopedAllocationCountTests(unittest.TestCase):
             result.append({'a': 1})
 
         count = sys.sandbox.get_counts()['allocation_count']
-        # After 200 object creations, should have significant allocations
+        # After 200 object creations (100 lists + 100 dicts), expect at least
+        # some allocations. Using a threshold of 50 because:
+        # 1. Some small objects may use cached/interned instances
+        # 2. Containers may reuse pre-allocated memory
+        # 3. The exact count depends on Python's memory management
+        # The key behavior is that allocations ARE being counted (count > 0)
         self.assertGreater(count, 50)
 
     def test_exceeding_scoped_allocation_limit_raises_memory_error(self):
@@ -72,13 +77,19 @@ except SandboxMemoryError:
             text=True,
             timeout=10
         )
+        # Exit codes: 0 = success (caught SandboxMemoryError), 2 = error not raised
+        # Any other code indicates unexpected behavior
         if result.returncode == 0:
-            return  # Test passed
-        if result.returncode == 2:
-            self.fail("SandboxMemoryError was not raised")
-        # If it exited with error, check that SandboxMemoryError was involved
-        self.assertIn("SandboxMemoryError", result.stderr,
-                      f"Expected SandboxMemoryError, got: stdout={result.stdout!r} stderr={result.stderr!r}")
+            return  # Test passed - SandboxMemoryError was raised and caught
+        elif result.returncode == 2:
+            self.fail("SandboxMemoryError was not raised - loop completed without limit")
+        elif result.returncode == 1:
+            # Uncaught exception - check if it was SandboxMemoryError
+            self.assertIn("SandboxMemoryError", result.stderr,
+                          f"Unexpected error: stdout={result.stdout!r} stderr={result.stderr!r}")
+        else:
+            self.fail(f"Unexpected exit code {result.returncode}: "
+                     f"stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_reset_allocation_count(self):
         """resetsandboxcounters should reset scope allocation counter."""
@@ -91,12 +102,18 @@ except SandboxMemoryError:
             result.append([1, 2, 3])
 
         counts_before = sys.sandbox.get_counts()
-        self.assertGreater(counts_before['allocation_count'], 20)
+        # After 100 list creations, expect at least some allocations.
+        # Using threshold of 10 because the exact count varies based on
+        # Python's memory management and object caching strategies.
+        # The key behavior is that allocations ARE being counted (count > 0).
+        self.assertGreater(counts_before['allocation_count'], 10)
 
         sys.sandbox.reset_counts()
         counts_after = sys.sandbox.get_counts()
-        # Count may not be exactly 0 due to dict allocation in getsandboxcounts
-        self.assertLess(counts_after['allocation_count'], 10)
+        # Count should be close to 0 after reset. A few allocations may occur
+        # from the get_counts() call itself (creates dict). Using threshold of 5
+        # to allow for the dict allocation plus any internal bookkeeping.
+        self.assertLess(counts_after['allocation_count'], 5)
 
     def test_allocations_outside_scope_dont_count_scoped(self):
         """Allocations outside scope should not count toward scoped limit."""

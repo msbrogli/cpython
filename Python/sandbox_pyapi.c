@@ -253,7 +253,10 @@ sandbox_set_##attr_name(_PySandboxObject *self, PyObject *value, void *closure) 
     return 0;                                                              \
 }
 
-/* uint64_t property getter/setter helpers */
+/* uint64_t property getter/setter helpers
+ * Note: Validates that values don't exceed SANDBOX_MAX_LIMIT to prevent
+ * integer overflow when doing comparisons like `count == max + 1` or
+ * `count > max + ALLOCATION_GRACE_HEADROOM`. */
 #define SANDBOX_UINT64_GETSET(attr_name, field_path)                       \
 static PyObject *                                                          \
 sandbox_get_##attr_name(_PySandboxObject *self, void *closure)             \
@@ -272,6 +275,11 @@ sandbox_set_##attr_name(_PySandboxObject *self, PyObject *value, void *closure) 
     }                                                                      \
     unsigned long long v = PyLong_AsUnsignedLongLong(value);               \
     if (v == (unsigned long long)-1 && PyErr_Occurred()) return -1;        \
+    if (v > SANDBOX_MAX_LIMIT) {                                           \
+        PyErr_SetString(PyExc_OverflowError,                               \
+                        #attr_name " exceeds maximum allowed value");      \
+        return -1;                                                         \
+    }                                                                      \
     PyInterpreterState *interp = sandbox_get_interp();                     \
     if (interp == NULL) return -1;                                         \
     interp->sandbox.field_path = (uint64_t)v;                              \

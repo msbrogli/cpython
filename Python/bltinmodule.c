@@ -10,6 +10,7 @@
 #include "pycore_pystate.h"       // _PyThreadState_GET()
 #include "pycore_tuple.h"         // _PyTuple_FromArray()
 #include "pycore_ceval.h"         // _PyEval_Vector()
+#include "pycore_sandbox.h"       // _PySandbox_CheckDunderAccess()
 
 #include "clinic/bltinmodule.c.h"
 

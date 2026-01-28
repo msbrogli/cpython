@@ -153,8 +153,8 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
         return 0;
     }
 
-    /* Check float */
-    if (!limits->allow_float && type == &PyFloat_Type) {
+    /* Check float - use PyType_IsSubtype to catch subclasses (V-003 fix) */
+    if (!limits->allow_float && PyType_IsSubtype(type, &PyFloat_Type)) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxTypeError,
                         "float type is forbidden in sandbox");
@@ -162,8 +162,8 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
         return -1;
     }
 
-    /* Check complex */
-    if (!limits->allow_complex && type == &PyComplex_Type) {
+    /* Check complex - use PyType_IsSubtype to catch subclasses (V-003 fix) */
+    if (!limits->allow_complex && PyType_IsSubtype(type, &PyComplex_Type)) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxTypeError,
                         "complex type is forbidden in sandbox");

@@ -39,7 +39,8 @@ class SandboxLimitsTests(unittest.TestCase):
             'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
             'max_statements', 'max_allocations',
             'max_iterations', 'max_operations',
-            'allow_float', 'allow_complex', 'allow_dunder_access'
+            'allow_float', 'allow_complex', 'allow_dunder_access',
+            'count_iterations_as_operations',
         }
         self.assertEqual(set(limits.keys()), expected_keys)
 

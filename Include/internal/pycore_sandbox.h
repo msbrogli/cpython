@@ -76,6 +76,9 @@ typedef struct {
 
     /* Allow access to dunder attributes (names containing __) */
     int allow_dunder_access;     /* 1 = allowed (default), 0 = block __ attributes */
+
+    /* Count iterator yields as operations towards max_operations */
+    int count_iterations_as_operations;  /* 0 = off (default), 1 = each yield increments operation_count */
 } _PySandboxLimits;
 
 /* Default values (no limits) */
@@ -98,6 +101,7 @@ typedef struct {
     .allow_float = 1,               \
     .allow_complex = 1,             \
     .allow_dunder_access = 1,       \
+    .count_iterations_as_operations = 0, \
 }
 
 /* Object creation hook flags */
@@ -212,8 +216,9 @@ PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
 /* Scoped operation checking (SANDBOX_COUNT opcode) - returns -1 and sets exception when limit exceeded */
 PyAPI_FUNC(int) _PySandbox_CheckScopeOperation(void);
 
-/* Scoped iteration checking - returns -1 and sets exception when limit exceeded */
-PyAPI_FUNC(int) _PySandbox_CheckIteration(void);
+/* Scoped iteration checking - returns -1 and sets exception when limit exceeded.
+ * This is the exported version; sandbox.c uses a static inline for internal callers. */
+PyAPI_FUNC(int) _PySandbox_CheckIterationImpl(void);
 
 /* Check dunder attribute access - returns -1 and sets exception when blocked */
 PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);

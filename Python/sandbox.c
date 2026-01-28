@@ -88,6 +88,7 @@ _PySandbox_Init(PyInterpreterState *interp)
     interp->sandbox.in_check = 0;
     interp->sandbox.suspended = 0;
     interp->sandbox.limits.allow_dunder_access = 1;
+    interp->sandbox.limits.count_iterations_as_operations = 0;
 
     interp->sandbox.creation_hook.hook_func = NULL;
     interp->sandbox.creation_hook.hook_userdata = NULL;
@@ -633,30 +634,27 @@ _PySandbox_CheckScopeOperation(void)
 
 /* ============ Scoped Iteration Checking ============ */
 
-/* _PySandbox_CheckIteration - Check iteration against limit
+/* sandbox_check_iteration - Combined iteration + optional operation check
  *
- * This function is called from PyIter_Next() for each iterator step.
- * It only counts iterations when:
- * - An iteration limit is configured (max_iterations > 0)
- * - Sandbox is not suspended and not in recursive check
- * - At least one filename is registered for scope tracking
- * - Current frame's co_filename matches a registered filename
+ * This static inline merges the iteration-limit check and the optional
+ * count_iterations_as_operations flag into a single pass so that state
+ * loading and scope checking happen only once.  It is inlined into
+ * sandbox_iter_wrapper_iternext (the hot path) to eliminate function-call
+ * overhead.
  *
- * The error is raised exactly once (at count == max+1) to allow error
- * handling code to execute without triggering additional errors.
+ * Called from PyIter_Next() (via the exported wrapper) and from
+ * sandbox_iter_wrapper_iternext (inlined).
  *
- * Returns: 0 if OK, -1 if limit exceeded (RuntimeError set)
+ * Returns: 0 if OK, -1 if limit exceeded (SandboxRuntimeError set)
  */
-int
-_PySandbox_CheckIteration(void)
+static inline int
+sandbox_check_iteration(void)
 {
-    /* Get thread state first - if not available, skip check */
     PyThreadState *tstate = _PyThreadState_GET();
     if (tstate == NULL) {
         return 0;
     }
 
-    /* Get interpreter state - if not available, skip check */
     PyInterpreterState *interp = tstate->interp;
     if (interp == NULL) {
         return 0;
@@ -665,36 +663,57 @@ _PySandbox_CheckIteration(void)
     _PySandboxState *sandbox = &interp->sandbox;
     _PySandboxLimits *limits = &sandbox->limits;
 
-    /* Skip if no iteration limit set, or if suspended/in_check */
-    if (limits->max_iterations == 0 ||
-        sandbox->in_check || sandbox->suspended) {
+    int check_iters = (limits->max_iterations > 0);
+    int check_ops = (limits->count_iterations_as_operations
+                     && limits->max_operations > 0);
+
+    /* Fast exit: nothing to check */
+    if ((!check_iters && !check_ops)
+        || sandbox->in_check || sandbox->suspended) {
         return 0;
     }
 
-    /* Skip if no registered filenames */
+    /* Scope check (shared — done once for both counters) */
     if (sandbox->registered_filenames == NULL) {
         return 0;
     }
-
-    /* Check if current frame's filename is in the registered set */
     _PyInterpreterFrame *current = get_current_interpreter_frame();
     if (!frame_in_sandbox_scope(sandbox->registered_filenames, current)) {
         return 0;
     }
 
-    /* Increment iteration count */
-    limits->iteration_count++;
+    /* Iteration counter */
+    if (check_iters) {
+        limits->iteration_count++;
+        if (limits->iteration_count == limits->max_iterations + 1) {
+            sandbox->in_check = 1;
+            PyErr_SetString(PyExc_SandboxRuntimeError,
+                            "Sandbox iteration limit exceeded");
+            sandbox->in_check = 0;
+            return -1;
+        }
+    }
 
-    /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
-    if (limits->iteration_count == limits->max_iterations + 1) {
-        sandbox->in_check = 1;
-        PyErr_SetString(PyExc_SandboxRuntimeError,
-                        "Sandbox iteration limit exceeded");
-        sandbox->in_check = 0;
-        return -1;
+    /* Operation counter (optional, piggybacks on same scope check) */
+    if (check_ops) {
+        limits->operation_count++;
+        if (limits->operation_count == limits->max_operations + 1) {
+            sandbox->in_check = 1;
+            PyErr_SetString(PyExc_SandboxRuntimeError,
+                            "Sandbox operation limit exceeded");
+            sandbox->in_check = 0;
+            return -1;
+        }
     }
 
     return 0;
+}
+
+/* Exported thin wrapper for external callers (e.g. abstract.c) */
+int
+_PySandbox_CheckIterationImpl(void)
+{
+    return sandbox_check_iteration();
 }
 
 /* ============ Dunder Access Checking ============ */
@@ -1646,6 +1665,7 @@ SANDBOX_UINT64_GETSET(max_operations, limits.max_operations)
 SANDBOX_BOOL_GETSET(allow_float, limits.allow_float)
 SANDBOX_BOOL_GETSET(allow_complex, limits.allow_complex)
 SANDBOX_BOOL_GETSET(allow_dunder_access, limits.allow_dunder_access)
+SANDBOX_BOOL_GETSET(count_iterations_as_operations, limits.count_iterations_as_operations)
 SANDBOX_BOOL_GETSET(frozen_mode, frozen_mode)
 SANDBOX_BOOL_GETSET(auto_mutable, auto_mutable_mode)
 
@@ -1775,6 +1795,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_allow_complex, "Allow complex creation", NULL},
     {"allow_dunder_access", (getter)sandbox_get_allow_dunder_access,
      (setter)sandbox_set_allow_dunder_access, "Allow dunder attribute access", NULL},
+    {"count_iterations_as_operations", (getter)sandbox_get_count_iterations_as_operations,
+     (setter)sandbox_set_count_iterations_as_operations, "Count iterator yields as operations", NULL},
     {"frozen_mode", (getter)sandbox_get_frozen_mode,
      (setter)sandbox_set_frozen_mode, "Global frozen mode", NULL},
     {"auto_mutable", (getter)sandbox_get_auto_mutable,
@@ -1810,7 +1832,8 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
         "max_list_size", "max_dict_size", "max_set_size", "max_tuple_size",
         "max_statements", "max_allocations",
         "max_iterations", "max_operations",
-        "allow_float", "allow_complex", "allow_dunder_access", NULL
+        "allow_float", "allow_complex", "allow_dunder_access",
+        "count_iterations_as_operations", NULL
     };
 
     PyInterpreterState *interp = sandbox_get_interp();
@@ -1833,8 +1856,9 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     int allow_float = limits->allow_float;
     int allow_complex = limits->allow_complex;
     int allow_dunder_access = limits->allow_dunder_access;
+    int count_iterations_as_operations = limits->count_iterations_as_operations;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKKppp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKKpppp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
@@ -1842,7 +1866,8 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
                                      &max_statements, &max_allocations,
                                      &max_iterations, &max_operations,
                                      &allow_float, &allow_complex,
-                                     &allow_dunder_access)) {
+                                     &allow_dunder_access,
+                                     &count_iterations_as_operations)) {
         return NULL;
     }
 
@@ -1860,6 +1885,7 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     limits->allow_float = allow_float;
     limits->allow_complex = allow_complex;
     limits->allow_dunder_access = allow_dunder_access;
+    limits->count_iterations_as_operations = count_iterations_as_operations;
 
     /* Update tracing state */
     PyThreadState *tstate = _PyThreadState_GET();
@@ -1879,7 +1905,7 @@ sandbox_get_limits(_PySandboxObject *self, PyObject *Py_UNUSED(args))
     _PySandboxLimits *limits = &sandbox->limits;
 
     return Py_BuildValue(
-        "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:K, s:O, s:O, s:O}",
+        "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:K, s:O, s:O, s:O, s:O}",
         "max_int_digits", limits->max_int_digits,
         "max_str_length", limits->max_str_length,
         "max_bytes_length", limits->max_bytes_length,
@@ -1893,7 +1919,8 @@ sandbox_get_limits(_PySandboxObject *self, PyObject *Py_UNUSED(args))
         "max_operations", (unsigned long long)limits->max_operations,
         "allow_float", limits->allow_float ? Py_True : Py_False,
         "allow_complex", limits->allow_complex ? Py_True : Py_False,
-        "allow_dunder_access", limits->allow_dunder_access ? Py_True : Py_False);
+        "allow_dunder_access", limits->allow_dunder_access ? Py_True : Py_False,
+        "count_iterations_as_operations", limits->count_iterations_as_operations ? Py_True : Py_False);
 }
 
 static PyObject *
@@ -2269,6 +2296,7 @@ _PySandbox_Reset(PyInterpreterState *interp)
     limits->allow_float = 1;
     limits->allow_complex = 1;
     limits->allow_dunder_access = 1;
+    limits->count_iterations_as_operations = 0;
 
     /* Reset in_check and suspended */
     sandbox->in_check = 0;
@@ -2348,8 +2376,8 @@ sandbox_iter_wrapper_iter(PyObject *self)
 static PyObject *
 sandbox_iter_wrapper_iternext(_PySandboxIteratorWrapper *self)
 {
-    /* Check iteration limits BEFORE delegating */
-    if (_PySandbox_CheckIteration() < 0) {
+    /* Check iteration limits BEFORE delegating (inlined for zero overhead) */
+    if (sandbox_check_iteration() < 0) {
         return NULL;  /* Exception already set */
     }
 

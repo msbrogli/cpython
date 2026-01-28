@@ -2876,7 +2876,7 @@ PyObject *
 PyIter_Next(PyObject *iter)
 {
     /* Check iteration limits */
-    if (_PySandbox_CheckIteration() < 0) {
+    if (_PySandbox_CheckIterationImpl() < 0) {
         return NULL;
     }
 

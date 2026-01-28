@@ -413,5 +413,94 @@ class OperationLimitTests(unittest.TestCase):
         self.assertEqual(sys.sandbox.get_counts()["operation_count"], 1)
 
 
+class CountIterationsAsOperationsTests(unittest.TestCase):
+    """Test the count_iterations_as_operations flag."""
+
+    ITER_FILENAME = "<sandbox-iter-ops-test>"
+
+    def setUp(self):
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.clear_filenames()
+
+    def test_count_iterations_as_operations_default_off(self):
+        """Flag defaults to 0; iterations don't increment operation_count."""
+        limits = sys.sandbox.get_limits()
+        self.assertIn("count_iterations_as_operations", limits)
+        self.assertFalse(limits["count_iterations_as_operations"])
+
+        # With flag off, iterating should not bump operation_count
+        sys.sandbox.set_limits(max_iterations=1000, max_operations=1000)
+        sys.sandbox.add_filename(self.ITER_FILENAME)
+        sys.sandbox.reset_counts()
+
+        code = compile("for _ in range(5): pass", self.ITER_FILENAME, "exec")
+        exec(code, {"__builtins__": __builtins__})
+
+        counts = sys.sandbox.get_counts()
+        # Iterations happened but operation_count should be 0
+        # (no SANDBOX_COUNT opcodes in the code)
+        self.assertGreater(counts["iteration_count"], 0)
+        self.assertEqual(counts["operation_count"], 0)
+
+    def test_count_iterations_as_operations_enabled(self):
+        """With flag on, each iteration yield also increments operation_count."""
+        sys.sandbox.set_limits(
+            max_iterations=1000,
+            max_operations=1000,
+            count_iterations_as_operations=True,
+        )
+        sys.sandbox.add_filename(self.ITER_FILENAME)
+        sys.sandbox.reset_counts()
+
+        code = compile("for _ in range(5): pass", self.ITER_FILENAME, "exec")
+        exec(code, {"__builtins__": __builtins__})
+
+        counts = sys.sandbox.get_counts()
+        iter_count = counts["iteration_count"]
+        op_count = counts["operation_count"]
+        # Both should reflect the iteration yields
+        self.assertGreater(iter_count, 0)
+        self.assertEqual(op_count, iter_count)
+
+    def test_count_iterations_as_operations_exceeds_limit(self):
+        """Low max_operations + flag on -> SandboxRuntimeError from iterations."""
+        sys.sandbox.set_limits(
+            max_iterations=1000,
+            max_operations=3,
+            count_iterations_as_operations=True,
+        )
+        sys.sandbox.add_filename(self.ITER_FILENAME)
+        sys.sandbox.reset_counts()
+
+        # range(10) yields 10 items, should exceed max_operations=3
+        code = compile("for _ in range(10): pass", self.ITER_FILENAME, "exec")
+        with self.assertRaises(Exception) as ctx:
+            exec(code, {"__builtins__": __builtins__})
+        self.assertIn("operation limit", str(ctx.exception).lower())
+
+    def test_count_iterations_as_operations_in_limits(self):
+        """Flag appears in get_limits() dict."""
+        sys.sandbox.set_limits(count_iterations_as_operations=True)
+        limits = sys.sandbox.get_limits()
+        self.assertTrue(limits["count_iterations_as_operations"])
+
+        sys.sandbox.set_limits(count_iterations_as_operations=False)
+        limits = sys.sandbox.get_limits()
+        self.assertFalse(limits["count_iterations_as_operations"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -183,8 +183,8 @@ class StatementOperationCountTests(unittest.TestCase):
 
     def test_expr_statement_not_counted(self):
         """Expr statement wrapper is NOT counted (ops inside are)."""
-        # 'len([])' is an Expr wrapping a Call — only the Call counts
-        self.assertEqual(_run_and_count("len([])"), 1)
+        # 'len([])' is an Expr wrapping a Call + List — only Call + List count
+        self.assertEqual(_run_and_count("len([])"), 2)
 
     def test_global_nonlocal_not_counted(self):
         """Global/Nonlocal are compile-time directives, not counted."""
@@ -211,8 +211,8 @@ class ExpressionOperationCountTests(unittest.TestCase):
         sys.sandbox.reset()
 
     def test_call_single(self):
-        """Single Call counts 1."""
-        self.assertEqual(_run_and_count("len([])"), 1)
+        """Single Call counts 1 + List(1) = 2."""
+        self.assertEqual(_run_and_count("len([])"), 2)
 
     def test_call_nested(self):
         """Nested calls count independently."""
@@ -257,11 +257,11 @@ class ExpressionOperationCountTests(unittest.TestCase):
 
     def test_attribute_load(self):
         """Attribute access (load) counts 1."""
-        self.assertEqual(_run_and_count("a = []\na.append"), 2)  # Assign + Attr
+        self.assertEqual(_run_and_count("a = []\na.append"), 3)  # Assign + List + Attr
 
     def test_subscript_load(self):
         """Subscript access (load) counts 1."""
-        self.assertEqual(_run_and_count("a = [1]\nb = a[0]"), 3)  # Assign + Assign + Subscript
+        self.assertEqual(_run_and_count("a = [1]\nb = a[0]"), 4)  # Assign + List + Assign + Subscript
 
 
 class CombinedCountTests(unittest.TestCase):
@@ -283,25 +283,25 @@ class CombinedCountTests(unittest.TestCase):
         sys.sandbox.reset()
 
     def test_assign_with_call(self):
-        """a = f(x) -> Assign(1) + Call(1) = 2."""
-        self.assertEqual(_run_and_count("a = len([])"), 2)
+        """a = f(x) -> Assign(1) + Call(1) + List(1) = 3."""
+        self.assertEqual(_run_and_count("a = len([])"), 3)
 
     def test_assign_with_call_and_binop(self):
-        """a = f(x) + 1 -> Assign(1) + Call(1) + BinOp(1) = 3."""
-        self.assertEqual(_run_and_count("a = len([]) + 1"), 3)
+        """a = f(x) + 1 -> Assign(1) + Call(1) + BinOp(1) + List(1) = 4."""
+        self.assertEqual(_run_and_count("a = len([]) + 1"), 4)
 
     def test_return_with_call_and_binop(self):
-        """return f(x) + 1 -> FunctionDef(1) + Call(outer)(1) + Return(1) + Call(len)(1) + BinOp(1) = 5."""
+        """return f(x) + 1 -> FunctionDef(1) + Call(outer)(1) + Return(1) + Call(len)(1) + BinOp(1) + List(1) = 6."""
         count = _run_and_count("def f():\n    return len([]) + 1\nf()")
-        self.assertEqual(count, 5)
+        self.assertEqual(count, 6)
 
     def test_assert_with_compare(self):
         """assert a < b -> Assert(1) + Compare(1) = 2."""
         self.assertEqual(_run_and_count("a = 1\nassert a < 2"), 3)  # Assign + Assert + Compare
 
     def test_attribute_call(self):
-        """obj.method() -> Attr(1) + Call(1) = 2."""
-        self.assertEqual(_run_and_count("a = []\na.append(1)"), 3)  # Assign + Attr + Call
+        """obj.method() -> Assign(1) + List(1) + Attr(1) + Call(1) = 4."""
+        self.assertEqual(_run_and_count("a = []\na.append(1)"), 4)  # Assign + List + Attr + Call
 
     def test_for_loop_body_per_iteration(self):
         """Loop body counted per iteration."""

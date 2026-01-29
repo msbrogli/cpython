@@ -3355,6 +3355,8 @@ SimpleExtendsException(PyExc_SandboxError, SandboxAttributeError,
                        "Attribute access blocked in sandbox.");
 SimpleExtendsException(PyExc_SandboxError, SandboxSecurityError,
                        "Sandbox configuration modification blocked.");
+SimpleExtendsException(PyExc_SandboxError, SandboxImportError,
+                       "Import blocked in sandbox.");
 
 
 /*
@@ -3612,6 +3614,7 @@ static struct static_exception static_exceptions[] = {
     ITEM(SandboxTypeError),       // base: SandboxError
     ITEM(SandboxAttributeError),  // base: SandboxError
     ITEM(SandboxSecurityError),   // base: SandboxError
+    ITEM(SandboxImportError),     // base: SandboxError
 #undef ITEM
 };
 

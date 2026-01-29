@@ -417,6 +417,7 @@ PYTHON_OBJS=	\
 		Python/pystate.o \
 		Python/sandbox_core.o \
 		Python/sandbox_frozen.o \
+		Python/sandbox_imports.o \
 		Python/sandbox_iter.o \
 		Python/sandbox_limits.o \
 		Python/sandbox_opcodes.o \

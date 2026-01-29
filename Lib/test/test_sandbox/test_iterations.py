@@ -3,7 +3,7 @@
 import sys
 import unittest
 
-from test.test_sandbox import _run_sandboxed_code, _get_settable_limits
+from test.test_sandbox import _run_sandboxed_code
 
 
 # Filename used for scoped test code (distinct from test file)
@@ -31,7 +31,8 @@ class ScopedIterationCountTests(unittest.TestCase):
 
     def setUp(self):
         sys.sandbox.reset_counts()
-        self.original_limits = _get_settable_limits()
+        # Disable import restrictions for legacy tests
+        sys.sandbox.import_restrict_mode = False
 
     def tearDown(self):
         while sys.sandbox.suspended:
@@ -40,8 +41,7 @@ class ScopedIterationCountTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
-        sys.sandbox.reset_counts()
+        sys.sandbox.reset()
 
     def test_set_and_get_scope_max_iterations(self):
         """Setting and getting scope_max_iterations should work."""
@@ -197,14 +197,14 @@ class IteratorWrapperProtectionTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.original_limits = _get_settable_limits()
+        pass
 
     def tearDown(self):
-        sys.sandbox.set_limits(**self.original_limits)
         try:
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
+        sys.sandbox.reset()
 
     def test_list_iteration_protected(self):
         """list() of infinite iterator is now protected."""

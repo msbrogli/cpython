@@ -37,17 +37,17 @@ class SandboxLimitsTests(unittest.TestCase):
     """Test sandbox limits functionality."""
 
     def setUp(self):
-        # Save original limits (excluding read-only fields)
-        self.original_limits = _get_settable_limits()
+        # Disable import restrictions for legacy tests
+        sys.sandbox.import_restrict_mode = False
 
     def tearDown(self):
-        # Restore original limits
-        sys.sandbox.set_limits(**self.original_limits)
         # Exit scope if entered
         try:
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
+        # Reset all sandbox state to defaults
+        sys.sandbox.reset()
 
     def test_getsandboxlimits_returns_dict(self):
         """getsandboxlimits should return a dictionary with all limit keys."""
@@ -350,14 +350,15 @@ class MinimalSafeLimitsTests(unittest.TestCase):
     }
 
     def setUp(self):
-        self.original_limits = _get_settable_limits()
+        # Disable import restrictions for legacy tests
+        sys.sandbox.import_restrict_mode = False
 
     def tearDown(self):
         try:
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.reset()
 
     def test_minimal_limits_allow_imports(self):
         """Minimal limits should allow standard library imports."""

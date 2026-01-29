@@ -86,6 +86,9 @@ _PySandbox_Fini(PyInterpreterState *interp)
     /* Free registered filenames set */
     free_filenames(&interp->sandbox.registered_filenames);
 
+    /* Free allowed imports set */
+    Py_CLEAR(interp->sandbox.allowed_imports);
+
     Py_CLEAR(interp->sandbox.creation_hook.hook_callback);
     interp->sandbox.creation_hook.hook_func = NULL;
     interp->sandbox.creation_hook.hook_userdata = NULL;
@@ -390,6 +393,7 @@ _PySandbox_Reset(PyInterpreterState *interp)
     /* Clear Python objects before resetting (need proper cleanup) */
     clear_filenames(sandbox->registered_filenames);
     Py_CLEAR(sandbox->creation_hook.hook_callback);
+    Py_CLEAR(sandbox->allowed_imports);
 
     /* Reset limits and counters using default macros */
     sandbox->limits = (_PySandboxLimits)_PySandboxLimits_INIT;

@@ -123,6 +123,7 @@ PyAPI_DATA(PyObject *) PyExc_SandboxRuntimeError;
 PyAPI_DATA(PyObject *) PyExc_SandboxTypeError;
 PyAPI_DATA(PyObject *) PyExc_SandboxAttributeError;
 PyAPI_DATA(PyObject *) PyExc_SandboxSecurityError;
+PyAPI_DATA(PyObject *) PyExc_SandboxImportError;
 
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03030000
 PyAPI_DATA(PyObject *) PyExc_BlockingIOError;

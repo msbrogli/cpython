@@ -8,7 +8,6 @@ statement counting (max_statements / statement_count).
 import sys
 import unittest
 
-from test.test_sandbox import _get_settable_limits
 
 # PyCF_SANDBOX_COUNT flag value
 PyCF_SANDBOX_COUNT = 0x8000
@@ -22,6 +21,8 @@ def _compile_sandboxed(source, filename=SANDBOX_FILENAME):
 
 def _run_and_count(source, max_ops=100000):
     """Compile with sandbox flag, execute, and return operation count."""
+    # Disable import restrictions for legacy tests
+    sys.sandbox.import_restrict_mode = False
     sys.sandbox.set_limits(max_operations=max_ops)
     sys.sandbox.add_filename(SANDBOX_FILENAME)
     sys.sandbox.reset_counts()
@@ -40,7 +41,6 @@ class OperationCountingAPITests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         while sys.sandbox.suspended:
@@ -49,8 +49,7 @@ class OperationCountingAPITests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
-        sys.sandbox.clear_filenames()
+        sys.sandbox.reset()
 
     def test_scope_max_operations_in_limits(self):
         """scope_max_operations should appear in getsandboxlimits."""
@@ -98,7 +97,6 @@ class StatementOperationCountTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         while sys.sandbox.suspended:
@@ -107,8 +105,7 @@ class StatementOperationCountTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
-        sys.sandbox.clear_filenames()
+        sys.sandbox.reset()
 
     def test_assign(self):
         """Assign statement counts 1."""
@@ -203,7 +200,6 @@ class ExpressionOperationCountTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         while sys.sandbox.suspended:
@@ -212,8 +208,7 @@ class ExpressionOperationCountTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
-        sys.sandbox.clear_filenames()
+        sys.sandbox.reset()
 
     def test_call_single(self):
         """Single Call counts 1."""
@@ -277,7 +272,6 @@ class CombinedCountTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         while sys.sandbox.suspended:
@@ -286,8 +280,7 @@ class CombinedCountTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
-        sys.sandbox.clear_filenames()
+        sys.sandbox.reset()
 
     def test_assign_with_call(self):
         """a = f(x) -> Assign(1) + Call(1) = 2."""
@@ -339,7 +332,6 @@ class OperationLimitTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         while sys.sandbox.suspended:
@@ -348,8 +340,7 @@ class OperationLimitTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
-        sys.sandbox.clear_filenames()
+        sys.sandbox.reset()
 
     def test_operation_limit_exceeded(self):
         """Exceeding scope_max_operations should raise SandboxRuntimeError."""
@@ -423,7 +414,6 @@ class CountIterationsAsOperationsTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         while sys.sandbox.suspended:
@@ -432,8 +422,7 @@ class CountIterationsAsOperationsTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
-        sys.sandbox.clear_filenames()
+        sys.sandbox.reset()
 
     def test_count_iterations_as_operations_default_off(self):
         """Flag defaults to 0; iterations don't increment operation_count."""

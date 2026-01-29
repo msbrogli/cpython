@@ -44,8 +44,10 @@ def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
     Returns:
         subprocess.CompletedProcess with returncode, stdout, and stderr
     """
+    # Prepend import restriction disabling for legacy tests
+    preamble = "import sys; sys.sandbox.import_restrict_mode = False\n"
     return subprocess.run(
-        [sys.executable, '-c', code],
+        [sys.executable, '-c', preamble + code],
         capture_output=True,
         text=True,
         timeout=timeout
@@ -70,6 +72,8 @@ def _run_scoped_test(limit_name, limit_value, test_code, extra_setup=""):
     """
     code = f'''
 import sys
+# Disable import restrictions for legacy tests
+sys.sandbox.import_restrict_mode = False
 {extra_setup}
 sys.sandbox.set_limits({limit_name}={limit_value})
 sys.sandbox.enter_scope()
@@ -106,11 +110,12 @@ class SandboxTestCase(unittest.TestCase):
             sys.sandbox.exit_scope()
         except (RuntimeError, SandboxSecurityError):
             pass
-        # Save original limits for restoration (may fail if in scope)
+        # Disable import restrictions for existing tests
+        # (tests weren't designed with import restrictions in mind)
         try:
-            self.original_limits = _get_settable_limits()
+            sys.sandbox.import_restrict_mode = False
         except SandboxSecurityError:
-            self.original_limits = None
+            pass
         # Reset counters for clean test state (may fail if in scope)
         try:
             sys.sandbox.reset_counts()
@@ -130,15 +135,9 @@ class SandboxTestCase(unittest.TestCase):
             sys.sandbox.exit_scope()
         except (RuntimeError, SandboxSecurityError):
             pass
-        # Restore original limits (may fail if in scope)
-        if self.original_limits is not None:
-            try:
-                sys.sandbox.set_limits(**self.original_limits)
-            except SandboxSecurityError:
-                pass
-        # Reset counters (may fail if in scope)
+        # Reset all sandbox state to defaults
         try:
-            sys.sandbox.reset_counts()
+            sys.sandbox.reset()
         except SandboxSecurityError:
             pass
 

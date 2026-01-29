@@ -111,6 +111,10 @@ typedef struct {
      * When allow_unsafe=0 (default), these are blocked in sandbox scope.
      * Set allow_unsafe=1 to allow them (less secure). */
     int allow_unsafe;
+
+    /* Import restrictions */
+    int import_restrict_mode;     /* 0 = off, 1 = enforce allowed_imports (default) */
+    int import_allow_submodules;  /* 1 = allow submodules, 0 = deny (default) */
 } _PySandboxLimits;
 
 /* Sandbox counters - separated from limits for clarity */
@@ -139,6 +143,8 @@ typedef struct {
     .allow_dunder_access = 1,       \
     .count_iterations_as_operations = 0, \
     .allow_unsafe = 0,              \
+    .import_restrict_mode = 1,      \
+    .import_allow_submodules = 0,   \
 }
 
 #define _PySandboxCounters_INIT { \
@@ -211,6 +217,11 @@ typedef struct {
      * NULL when no filenames are registered (lazy-initialized). */
     PyObject *registered_filenames;
 
+    /* Import allowlist - Python set of tuples (module_name, import_name).
+     * Only checked when import_restrict_mode=1 and in sandbox scope.
+     * NULL or empty set means no imports allowed when mode is active. */
+    PyObject *allowed_imports;
+
     /* Recursion prevention - nonzero during limit check (to avoid recursive
        checks when error handling creates strings/integers) */
     int suppress_checks;
@@ -229,6 +240,7 @@ typedef struct {
     .opcode_restrict_mode = 0,              \
     .banned_opcodes = {{0}},                \
     .registered_filenames = NULL,           \
+    .allowed_imports = NULL,                \
     .suppress_checks = 0,                          \
     .suspended = 0,                         \
 }
@@ -290,6 +302,19 @@ PyAPI_FUNC(void) _PySandbox_MaybeMarkMutable(PyObject *obj);
  * Returns 0 if opcode is allowed, -1 if banned (sets SandboxRuntimeError).
  * Fast exits: mode off, suspended, suppress_checks, not in scope, opcode not banned. */
 PyAPI_FUNC(int) _PySandbox_CheckOpcode(int opcode);
+
+/* Check if import is allowed. Returns 0 if allowed, -1 if blocked.
+ * abs_name: fully resolved module name
+ * fromlist: tuple of names being imported, or NULL for bare import */
+PyAPI_FUNC(int) _PySandbox_CheckImport(PyObject *abs_name, PyObject *fromlist);
+
+/* Set the import allowlist. Accepts iterable of (module, name) tuples.
+ * Returns 0 on success, -1 on error. */
+PyAPI_FUNC(int) PySandbox_SetAllowedImports(PyObject *modules);
+
+/* Get the import allowlist. Returns a new reference to a frozenset,
+ * or NULL on error. */
+PyAPI_FUNC(PyObject *) PySandbox_GetAllowedImports(void);
 
 /* Sandbox scope management */
 PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */

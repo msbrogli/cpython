@@ -357,6 +357,8 @@ SANDBOX_BOOL_GETSET(count_iterations_as_operations, limits.count_iterations_as_o
 SANDBOX_BOOL_GETSET(allow_unsafe, limits.allow_unsafe)
 SANDBOX_BOOL_GETSET(frozen_mode, frozen_mode)
 SANDBOX_BOOL_GETSET(auto_mutable, auto_mutable)
+SANDBOX_BOOL_GETSET(import_restrict_mode, limits.import_restrict_mode)
+SANDBOX_BOOL_GETSET(import_allow_submodules, limits.import_allow_submodules)
 
 /* opcode_restrict_mode needs special setter to update tracing state */
 static PyObject *
@@ -438,6 +440,24 @@ sandbox_set_creation_hook(_PySandboxObject *self, PyObject *value, void *closure
     return 0;
 }
 
+/* allowed_imports: frozenset getter / set|frozenset|iterable setter */
+static PyObject *
+sandbox_get_allowed_imports(_PySandboxObject *self, void *closure)
+{
+    return PySandbox_GetAllowedImports();
+}
+
+static int
+sandbox_set_allowed_imports(_PySandboxObject *self, PyObject *value, void *closure)
+{
+    if (_PySandbox_CheckConfigModification() < 0) return -1;
+    if (value == NULL) {
+        PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");
+        return -1;
+    }
+    return PySandbox_SetAllowedImports(value);
+}
+
 /* ---- Read-only properties (counters) ---- */
 SANDBOX_UINT64_GETTER(allocation_count, counters.allocation_count)
 SANDBOX_UINT64_GETTER(statement_count, counters.statement_count)
@@ -497,11 +517,17 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_auto_mutable, "Auto-mutable mode for new objects in scope", NULL},
     {"opcode_restrict_mode", (getter)sandbox_get_opcode_restrict_mode,
      (setter)sandbox_set_opcode_restrict_mode, "Opcode restriction mode", NULL},
+    {"import_restrict_mode", (getter)sandbox_get_import_restrict_mode,
+     (setter)sandbox_set_import_restrict_mode, "Import restriction mode (True by default)", NULL},
+    {"import_allow_submodules", (getter)sandbox_get_import_allow_submodules,
+     (setter)sandbox_set_import_allow_submodules, "Allow submodules of allowed modules", NULL},
     /* R/W special */
     {"banned_opcodes", (getter)sandbox_get_banned_opcodes,
      (setter)sandbox_set_banned_opcodes, "Banned opcodes (frozenset of ints)", NULL},
     {"creation_hook", (getter)sandbox_get_creation_hook,
      (setter)sandbox_set_creation_hook, "Object creation hook (callable or None)", NULL},
+    {"allowed_imports", (getter)sandbox_get_allowed_imports,
+     (setter)sandbox_set_allowed_imports, "Allowed imports (set of (module, name) tuples)", NULL},
     /* R/O counters */
     {"allocation_count", (getter)sandbox_get_allocation_count,
      NULL, "Current scoped allocation count", NULL},

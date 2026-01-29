@@ -26,7 +26,10 @@
 int
 _PySandbox_CheckFrozen(PyObject *obj)
 {
-    assert(obj != NULL);
+    /* NULL objects cannot be frozen - allow mutation */
+    if (obj == NULL) {
+        return 0;
+    }
     /* Fast path: mutable objects are always allowed */
     if (Py_IS_MUTABLE(obj)) {
         return 0;

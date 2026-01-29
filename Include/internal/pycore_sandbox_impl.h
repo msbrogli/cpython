@@ -263,7 +263,7 @@ sandbox_check_iteration(void)
     /* Iteration counter */
     if (check_iters) {
         _PySandbox_CounterIncrement(sandbox->counters.iteration_count);
-        if (_PySandbox_CounterLoad(sandbox->counters.iteration_count) == limits->max_iterations + 1) {
+        if (_PySandbox_CounterLoad(sandbox->counters.iteration_count) >= limits->max_iterations + 1) {
             sandbox->suppress_checks = 1;
             PyErr_SetString(PyExc_SandboxRuntimeError,
                             "Sandbox iteration limit exceeded");
@@ -275,7 +275,7 @@ sandbox_check_iteration(void)
     /* Operation counter (optional, piggybacks on same scope check) */
     if (check_ops) {
         _PySandbox_CounterIncrement(sandbox->counters.operation_count);
-        if (_PySandbox_CounterLoad(sandbox->counters.operation_count) == limits->max_operations + 1) {
+        if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= limits->max_operations + 1) {
             sandbox->suppress_checks = 1;
             PyErr_SetString(PyExc_SandboxRuntimeError,
                             "Sandbox operation limit exceeded");

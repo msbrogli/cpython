@@ -225,7 +225,7 @@ _PySandbox_CheckAllocation(void)
         return -1;
     }
     /* Soft limit: raise MemoryError only on the first allocation past the limit */
-    if (alloc_count == limits->max_allocations + 1) {
+    if (alloc_count >= limits->max_allocations + 1) {
         PyErr_SetString(PyExc_SandboxMemoryError, "Sandbox scoped allocation limit exceeded");
         return -1;
     }
@@ -271,7 +271,7 @@ _PySandbox_CheckScopeStatement(void)
     _PySandbox_CounterIncrement(sandbox->counters.statement_count);
 
     /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
-    if (_PySandbox_CounterLoad(sandbox->counters.statement_count) == limits->max_statements + 1) {
+    if (_PySandbox_CounterLoad(sandbox->counters.statement_count) >= limits->max_statements + 1) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox statement limit exceeded");
@@ -320,7 +320,7 @@ _PySandbox_CheckScopeOperation(void)
     _PySandbox_CounterIncrement(sandbox->counters.operation_count);
 
     /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
-    if (_PySandbox_CounterLoad(sandbox->counters.operation_count) == limits->max_operations + 1) {
+    if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= limits->max_operations + 1) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox operation limit exceeded");

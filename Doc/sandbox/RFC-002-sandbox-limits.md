@@ -141,6 +141,28 @@ except SandboxSecurityError as e:
     print(e)  # "compile() is not allowed in sandbox"
 ```
 
+## I/O Operation Blocking
+
+Block all I/O operations (file, socket, raw fd) to prevent data exfiltration:
+
+```python
+sys.sandbox.allow_io = False  # This is the default
+
+try:
+    open("/tmp/test.txt", "w")  # Raises SandboxSecurityError
+except SandboxSecurityError as e:
+    print(e)  # "open() is not allowed in sandbox scope (I/O blocked)"
+```
+
+When `allow_io=False` (default), the following operations are blocked in sandbox scope:
+- `open()`, `FileIO()`
+- `socket()` (low-level `_socket.socket`)
+- `os.open()`, `os.close()`, `os.closerange()`
+- `os.read()`, `os.write()`
+- `os.dup()`, `os.dup2()`, `os.pipe()`
+
+In-memory I/O (`StringIO`, `BytesIO`) remains allowed as it doesn't access external resources.
+
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
@@ -170,6 +192,7 @@ typedef struct {
     int allow_complex;              /* 1 = allowed, 0 = forbidden */
     int allow_dunder_access;        /* 1 = allowed, 0 = blocked */
     int allow_unsafe;               /* 1 = allowed, 0 = blocked */
+    int allow_io;                   /* 1 = allowed, 0 = blocked (default) */
     int count_iterations_as_operations;  /* 1 = count iterations as ops */
 } _PySandboxLimits;
 ```
@@ -433,6 +456,34 @@ _PySandbox_CheckUnsafeBlocked(const char *operation)
 }
 ```
 
+## I/O Operation Check
+
+```c
+int
+_PySandbox_CheckIOAllowed(const char *operation)
+{
+    /* ... get sandbox state ... */
+    if (sandbox->limits.allow_io ||
+        sandbox->suppress_checks || sandbox->suspended) {
+        return 0;
+    }
+
+    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+        return 0;
+    }
+
+    PyErr_Format(PyExc_SandboxSecurityError,
+                 "%s is not allowed in sandbox scope (I/O blocked)", operation);
+    return -1;
+}
+```
+
+Called from:
+- `Modules/_io/_iomodule.c` - `_io_open_impl()` (high-level `open()`)
+- `Modules/_io/fileio.c` - `_io_FileIO___init___impl()` (FileIO)
+- `Modules/socketmodule.c` - `sock_initobj_impl()` (socket creation)
+- `Modules/posixmodule.c` - `os_open_impl()`, `os_close_impl()`, `os_read_impl()`, `os_write_impl()`, `os_dup_impl()`, `os_dup2_impl()`, `os_pipe_impl()`, `os_closerange_impl()`
+
 ## Python API
 
 ### Properties
@@ -453,7 +504,8 @@ _PySandbox_CheckUnsafeBlocked(const char *operation)
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | True | Allow `__dunder__` access |
-| `allow_unsafe` | bool | True | Allow unsafe operations |
+| `allow_unsafe` | bool | False | Allow unsafe operations |
+| `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterations as operations |
 
 ### Read-Only Counter Properties
@@ -491,6 +543,10 @@ _PySandbox_CheckUnsafeBlocked(const char *operation)
 | `Python/ceval.c` | line tracing | `_PySandbox_CheckScopeStatement()` |
 | `Python/ceval.c` | `SANDBOX_COUNT` | `_PySandbox_CheckScopeOperation()` |
 | `Python/ceval.c` | `LOAD_ATTR`, etc. | `_PySandbox_CheckDunderAccess()` |
+| `Modules/_io/_iomodule.c` | `_io_open_impl()` | `_PySandbox_CheckIOAllowed()` |
+| `Modules/_io/fileio.c` | `_io_FileIO___init___impl()` | `_PySandbox_CheckIOAllowed()` |
+| `Modules/socketmodule.c` | `sock_initobj_impl()` | `_PySandbox_CheckIOAllowed()` |
+| `Modules/posixmodule.c` | `os_open_impl()`, etc. | `_PySandbox_CheckIOAllowed()` |
 
 ## Exception Types
 

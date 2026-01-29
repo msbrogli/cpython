@@ -493,6 +493,47 @@ _PySandbox_CheckUnsafeBlocked(const char *operation)
     return -1;
 }
 
+/* ============ I/O Operation Checking ============ */
+
+/* _PySandbox_CheckIOAllowed - Check if I/O operations are blocked
+ *
+ * This function blocks I/O operations (file open, socket, raw fd)
+ * in sandbox scope unless allow_io=1. It is used to prevent data exfiltration.
+ *
+ * Returns: 0 if allowed, -1 if blocked (SandboxSecurityError set)
+ */
+int
+_PySandbox_CheckIOAllowed(const char *operation)
+{
+    _PySandboxState *sandbox = get_sandbox_state();
+    if (sandbox == NULL || sandbox->suspended || sandbox->suppress_checks) {
+        return 0;
+    }
+    if (sandbox->limits.allow_io) {
+        return 0;  /* I/O operations allowed */
+    }
+    if (sandbox->registered_filenames == NULL) {
+        return 0;  /* No scope registered */
+    }
+
+    /* Check if currently in sandbox scope */
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;  /* Error during scope check */
+    }
+    if (!in_scope) {
+        return 0;  /* Not in scope */
+    }
+
+    /* Block the I/O operation */
+    sandbox->suppress_checks = 1;
+    PyErr_Format(PyExc_SandboxSecurityError,
+                 "%s is not allowed in sandbox scope (I/O blocked)", operation);
+    sandbox->suppress_checks = 0;
+    return -1;
+}
+
 /* ============ Public C API ============ */
 
 int

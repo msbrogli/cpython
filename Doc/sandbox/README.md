@@ -22,7 +22,7 @@ This directory contains RFC-style documentation for each module of the CPython s
 ```python
 import sys
 
-# Configure limits
+# Configure limits (allow_io=False and allow_unsafe=False are defaults)
 sys.sandbox.set_limits(
     max_int_digits=100,
     max_str_length=100_000,
@@ -30,6 +30,8 @@ sys.sandbox.set_limits(
     max_statements=100_000,
     max_iterations=1_000_000,
     allow_dunder_access=False,
+    # allow_io=False,     # Default: blocks file/socket/fd operations
+    # allow_unsafe=False, # Default: blocks compile(), gc introspection
 )
 
 # Register sandbox scope
@@ -86,6 +88,10 @@ except SandboxError as e:
 | `Python/ceval.c` | Statement/operation counting, opcode check |
 | `Python/compile.c` | SANDBOX_COUNT emission |
 | `Modules/gcmodule.c` | Allocation counting |
+| `Modules/_io/_iomodule.c` | I/O check (open) |
+| `Modules/_io/fileio.c` | I/O check (FileIO) |
+| `Modules/socketmodule.c` | I/O check (socket) |
+| `Modules/posixmodule.c` | I/O check (os.open, os.read, etc.) |
 
 ## Exception Hierarchy
 
@@ -116,6 +122,7 @@ Exception
 | Complex restriction | 002 | `allow_complex` |
 | Dunder blocking | 002 | `allow_dunder_access` |
 | Unsafe blocking | 002 | `allow_unsafe` |
+| I/O blocking | 002 | `allow_io` |
 | Statement limit | 002 | `max_statements` |
 | Allocation limit | 002 | `max_allocations` |
 | Iteration limit | 004 | `max_iterations` |

@@ -12,13 +12,14 @@ A practical guide for using the CPython sandbox to safely execute untrusted Pyth
 6. [Operation Counting](#operation-counting)
 7. [Frozen Mode](#frozen-mode)
 8. [Dunder Access Control](#dunder-access-control)
-9. [Opcode Restrictions](#opcode-restrictions)
-10. [Object Creation Hooks](#object-creation-hooks)
-11. [Suspend/Resume for Trusted Code](#suspendresume-for-trusted-code)
-12. [Exception Handling](#exception-handling)
-13. [Complete Examples](#complete-examples)
-14. [Best Practices](#best-practices)
-15. [API Quick Reference](#api-quick-reference)
+9. [I/O Restrictions](#io-restrictions)
+10. [Opcode Restrictions](#opcode-restrictions)
+11. [Object Creation Hooks](#object-creation-hooks)
+12. [Suspend/Resume for Trusted Code](#suspendresume-for-trusted-code)
+13. [Exception Handling](#exception-handling)
+14. [Complete Examples](#complete-examples)
+15. [Best Practices](#best-practices)
+16. [API Quick Reference](#api-quick-reference)
 
 ---
 
@@ -643,6 +644,89 @@ try:
     exec(code)
 except SandboxAttributeError:
     print("Blocked dunder access in sandbox")
+```
+
+---
+
+## I/O Restrictions
+
+Block all I/O operations (file, socket, raw fd) in sandbox scope to prevent data exfiltration and unauthorized system access.
+
+### Default Behavior
+
+By default, `allow_io` is `False`, meaning all I/O operations are blocked in sandbox scope:
+
+```python
+import sys
+
+sys.sandbox.add_filename("<sandbox>")
+
+# In sandbox scope - I/O is blocked by default
+code = compile('open("/tmp/test.txt", "w")', "<sandbox>", "exec")
+try:
+    exec(code)
+except SandboxSecurityError as e:
+    print(e)  # "open() is not allowed in sandbox scope (I/O blocked)"
+```
+
+### Blocked Operations
+
+When `allow_io=False` (default), the following operations are blocked in sandbox scope:
+
+| Operation | Description |
+|-----------|-------------|
+| `open()` | High-level file open |
+| `FileIO()` | Low-level file I/O |
+| `socket()` | Socket creation |
+| `os.open()` | Raw file descriptor open |
+| `os.read()` | Raw fd read |
+| `os.write()` | Raw fd write |
+| `os.close()` | Raw fd close |
+| `os.closerange()` | Batch fd close |
+| `os.dup()` | fd duplication |
+| `os.dup2()` | fd duplication to specific fd |
+| `os.pipe()` | Pipe creation |
+
+### Allowed Operations
+
+In-memory I/O remains allowed even with `allow_io=False`:
+
+```python
+from io import StringIO, BytesIO
+
+# These work even with allow_io=False
+s = StringIO()
+s.write("hello")
+
+b = BytesIO()
+b.write(b"world")
+```
+
+### Enabling I/O
+
+If your sandbox needs I/O access (less secure), enable it explicitly:
+
+```python
+sys.sandbox.allow_io = True
+sys.sandbox.add_filename("<sandbox>")
+
+# Now I/O operations are allowed
+code = compile('open("/tmp/test.txt", "w").close()', "<sandbox>", "exec")
+exec(code)  # Works
+```
+
+### Scope Behavior
+
+The I/O check uses the sandbox's scope mechanism. Operations called from code whose `co_filename` is registered in the sandbox are blocked. Operations called from unregistered code (stdlib, your harness) are allowed.
+
+```python
+# If socket.py is NOT registered, high-level socket.socket() may not be blocked
+# because the actual C init is called from socket.py, not <sandbox>
+
+# For complete I/O blocking, register wrapper modules too:
+import socket
+sys.sandbox.add_filename(socket.__file__)
+sys.sandbox.add_filename("<sandbox>")
 ```
 
 ---
@@ -1339,4 +1423,6 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | True | Allow `__dunder__` attributes |
+| `allow_unsafe` | bool | False | Allow unsafe operations (compile, gc introspection) |
+| `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterator yields toward `operation_count` |

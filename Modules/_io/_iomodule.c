@@ -11,6 +11,7 @@
 #include "Python.h"
 #include "_iomodule.h"
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckIOAllowed()
 
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
@@ -198,6 +199,11 @@ _io_open_impl(PyObject *module, PyObject *file, const char *mode,
               const char *newline, int closefd, PyObject *opener)
 /*[clinic end generated code: output=aefafc4ce2b46dc0 input=5bb37f174cb2fb11]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("open()") < 0) {
+        return NULL;
+    }
+
     unsigned i;
 
     int creating = 0, reading = 0, writing = 0, appending = 0, updating = 0;

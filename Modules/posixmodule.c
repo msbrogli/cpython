@@ -32,6 +32,7 @@
 #include "pycore_moduleobject.h"  // _PyModule_GetState()
 #include "pycore_object.h"        // _PyObject_LookupSpecial()
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckIOAllowed()
 #include "pycore_signal.h"        // Py_NSIG
 
 #ifdef MS_WINDOWS
@@ -9337,6 +9338,11 @@ static int
 os_open_impl(PyObject *module, path_t *path, int flags, int mode, int dir_fd)
 /*[clinic end generated code: output=abc7227888c8bc73 input=ad8623b29acd2934]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("os.open()") < 0) {
+        return -1;
+    }
+
     int fd;
     int async_err = 0;
 #ifdef HAVE_OPENAT
@@ -9418,6 +9424,11 @@ static PyObject *
 os_close_impl(PyObject *module, int fd)
 /*[clinic end generated code: output=2fe4e93602822c14 input=2bc42451ca5c3223]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("os.close()") < 0) {
+        return NULL;
+    }
+
     int res;
     /* We do not want to retry upon EINTR: see http://lwn.net/Articles/576478/
      * and http://linux.derkeiler.com/Mailing-Lists/Kernel/2005-09/3000.html
@@ -9447,6 +9458,11 @@ static PyObject *
 os_closerange_impl(PyObject *module, int fd_low, int fd_high)
 /*[clinic end generated code: output=0ce5c20fcda681c2 input=5855a3d053ebd4ec]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("os.closerange()") < 0) {
+        return NULL;
+    }
+
     Py_BEGIN_ALLOW_THREADS
     _Py_closerange(fd_low, fd_high - 1);
     Py_END_ALLOW_THREADS
@@ -9467,6 +9483,11 @@ static int
 os_dup_impl(PyObject *module, int fd)
 /*[clinic end generated code: output=486f4860636b2a9f input=6f10f7ea97f7852a]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("os.dup()") < 0) {
+        return -1;
+    }
+
     return _Py_dup(fd);
 }
 
@@ -9486,6 +9507,11 @@ static int
 os_dup2_impl(PyObject *module, int fd, int fd2, int inheritable)
 /*[clinic end generated code: output=bc059d34a73404d1 input=c3cddda8922b038d]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("os.dup2()") < 0) {
+        return -1;
+    }
+
     int res = 0;
 #if defined(HAVE_DUP3) && \
     !(defined(HAVE_FCNTL_H) && defined(F_DUP2FD_CLOEXEC))
@@ -9671,6 +9697,11 @@ static PyObject *
 os_read_impl(PyObject *module, int fd, Py_ssize_t length)
 /*[clinic end generated code: output=dafbe9a5cddb987b input=1df2eaa27c0bf1d3]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("os.read()") < 0) {
+        return NULL;
+    }
+
     Py_ssize_t n;
     PyObject *buffer;
 
@@ -9987,6 +10018,11 @@ static Py_ssize_t
 os_write_impl(PyObject *module, int fd, Py_buffer *data)
 /*[clinic end generated code: output=e4ef5bc904b58ef9 input=3207e28963234f3c]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("os.write()") < 0) {
+        return -1;
+    }
+
     return _Py_write(fd, data->buf, data->len);
 }
 
@@ -10327,6 +10363,11 @@ static PyObject *
 os_pipe_impl(PyObject *module)
 /*[clinic end generated code: output=ff9b76255793b440 input=02535e8c8fa6c4d4]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("os.pipe()") < 0) {
+        return NULL;
+    }
+
     int fds[2];
 #ifdef MS_WINDOWS
     HANDLE read, write;

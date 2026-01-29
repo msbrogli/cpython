@@ -355,6 +355,7 @@ SANDBOX_BOOL_GETSET(allow_complex, limits.allow_complex)
 SANDBOX_BOOL_GETSET(allow_dunder_access, limits.allow_dunder_access)
 SANDBOX_BOOL_GETSET(count_iterations_as_operations, limits.count_iterations_as_operations)
 SANDBOX_BOOL_GETSET(allow_unsafe, limits.allow_unsafe)
+SANDBOX_BOOL_GETSET(allow_io, limits.allow_io)
 SANDBOX_BOOL_GETSET(frozen_mode, frozen_mode)
 SANDBOX_BOOL_GETSET(auto_mutable, auto_mutable)
 SANDBOX_BOOL_GETSET(import_restrict_mode, limits.import_restrict_mode)
@@ -511,6 +512,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_count_iterations_as_operations, "Count iterator yields as operations", NULL},
     {"allow_unsafe", (getter)sandbox_get_allow_unsafe,
      (setter)sandbox_set_allow_unsafe, "Allow unsafe operations (compile, gc introspection, __iter__)", NULL},
+    {"allow_io", (getter)sandbox_get_allow_io,
+     (setter)sandbox_set_allow_io, "Allow I/O operations (file, socket, raw fd)", NULL},
     {"frozen_mode", (getter)sandbox_get_frozen_mode,
      (setter)sandbox_set_frozen_mode, "Global frozen mode", NULL},
     {"auto_mutable", (getter)sandbox_get_auto_mutable,
@@ -555,7 +558,7 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
         "max_statements", "max_allocations",
         "max_iterations", "max_operations",
         "allow_float", "allow_complex", "allow_dunder_access",
-        "count_iterations_as_operations", NULL
+        "count_iterations_as_operations", "allow_io", NULL
     };
 
     PyInterpreterState *interp = sandbox_get_interp();
@@ -579,8 +582,9 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     int allow_complex = limits->allow_complex;
     int allow_dunder_access = limits->allow_dunder_access;
     int count_iterations_as_operations = limits->count_iterations_as_operations;
+    int allow_io = limits->allow_io;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKKpppp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKKppppp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
@@ -589,7 +593,8 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
                                      &max_iterations, &max_operations,
                                      &allow_float, &allow_complex,
                                      &allow_dunder_access,
-                                     &count_iterations_as_operations)) {
+                                     &count_iterations_as_operations,
+                                     &allow_io)) {
         return NULL;
     }
 
@@ -626,6 +631,7 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     limits->allow_complex = allow_complex;
     limits->allow_dunder_access = allow_dunder_access;
     limits->count_iterations_as_operations = count_iterations_as_operations;
+    limits->allow_io = allow_io;
 
     /* Update tracing state */
     PyThreadState *tstate = _PyThreadState_GET();
@@ -645,7 +651,7 @@ sandbox_get_limits(_PySandboxObject *self, PyObject *Py_UNUSED(args))
     _PySandboxLimits *limits = &sandbox->limits;
 
     return Py_BuildValue(
-        "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:K, s:O, s:O, s:O, s:O}",
+        "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:K, s:O, s:O, s:O, s:O, s:O}",
         "max_int_digits", limits->max_int_digits,
         "max_str_length", limits->max_str_length,
         "max_bytes_length", limits->max_bytes_length,
@@ -660,7 +666,8 @@ sandbox_get_limits(_PySandboxObject *self, PyObject *Py_UNUSED(args))
         "allow_float", limits->allow_float ? Py_True : Py_False,
         "allow_complex", limits->allow_complex ? Py_True : Py_False,
         "allow_dunder_access", limits->allow_dunder_access ? Py_True : Py_False,
-        "count_iterations_as_operations", limits->count_iterations_as_operations ? Py_True : Py_False);
+        "count_iterations_as_operations", limits->count_iterations_as_operations ? Py_True : Py_False,
+        "allow_io", limits->allow_io ? Py_True : Py_False);
 }
 
 static PyObject *

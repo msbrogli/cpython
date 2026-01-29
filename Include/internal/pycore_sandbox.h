@@ -112,6 +112,11 @@ typedef struct {
      * Set allow_unsafe=1 to allow them (less secure). */
     int allow_unsafe;
 
+    /* Allow I/O operations (file, socket, raw fd).
+     * When allow_io=0 (default), I/O is blocked in sandbox scope.
+     * Set allow_io=1 to allow I/O (less secure). */
+    int allow_io;
+
     /* Import restrictions */
     int import_restrict_mode;     /* 0 = off, 1 = enforce allowed_imports (default) */
     int import_allow_submodules;  /* 1 = allow submodules, 0 = deny (default) */
@@ -143,6 +148,7 @@ typedef struct {
     .allow_dunder_access = 1,       \
     .count_iterations_as_operations = 0, \
     .allow_unsafe = 0,              \
+    .allow_io = 0,                  \
     .import_restrict_mode = 1,      \
     .import_allow_submodules = 0,   \
 }
@@ -285,6 +291,11 @@ PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
  * Returns 0 if allowed, -1 if blocked (sets SandboxSecurityError).
  * Unsafe operations include: compile(), __iter__() access, gc introspection. */
 PyAPI_FUNC(int) _PySandbox_CheckUnsafeBlocked(const char *operation);
+
+/* Check if I/O operations are blocked in sandbox scope.
+ * Returns 0 if allowed, -1 if blocked (sets SandboxSecurityError).
+ * I/O operations include: file open, socket, raw fd operations. */
+PyAPI_FUNC(int) _PySandbox_CheckIOAllowed(const char *operation);
 
 /* Check if attribute mutation is blocked on an object.
  * Returns 0 if mutation is allowed, -1 if blocked (sets SandboxAttributeError).

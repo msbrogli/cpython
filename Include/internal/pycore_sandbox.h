@@ -280,6 +280,9 @@ PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
 /* Scoped operation checking (SANDBOX_COUNT opcode) - returns -1 and sets exception when limit exceeded */
 PyAPI_FUNC(int) _PySandbox_CheckScopeOperation(void);
 
+/* Scoped operation checking with count parameter (for folded operations) */
+PyAPI_FUNC(int) _PySandbox_CheckScopeOperationN(int count);
+
 /* Scoped iteration checking - returns -1 and sets exception when limit exceeded.
  * This is the exported version; sandbox.c uses a static inline for internal callers. */
 PyAPI_FUNC(int) _PySandbox_CheckIteration(void);

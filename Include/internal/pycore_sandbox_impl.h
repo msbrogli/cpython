@@ -39,24 +39,31 @@ extern "C" {
 #  ifdef HAVE_BUILTIN_ATOMIC
 #    define _PySandbox_CounterIncrement(counter) \
          __atomic_add_fetch(&(counter), 1, __ATOMIC_RELAXED)
+#    define _PySandbox_CounterAdd(counter, n) \
+         __atomic_add_fetch(&(counter), (n), __ATOMIC_RELAXED)
 #    define _PySandbox_CounterLoad(counter) \
          __atomic_load_n(&(counter), __ATOMIC_RELAXED)
 #  elif defined(_MSC_VER)
 #    include <intrin.h>
 #    define _PySandbox_CounterIncrement(counter) \
          _InterlockedIncrement64((__int64*)&(counter))
+#    define _PySandbox_CounterAdd(counter, n) \
+         _InterlockedExchangeAdd64((__int64*)&(counter), (n))
 #    define _PySandbox_CounterLoad(counter) \
          _InterlockedCompareExchange64((__int64*)&(counter), 0, 0)
 #  else
 /* Fallback: volatile operations (not truly atomic but better than nothing) */
 #    define _PySandbox_CounterIncrement(counter) \
          (++*((volatile uint64_t*)&(counter)))
+#    define _PySandbox_CounterAdd(counter, n) \
+         (*((volatile uint64_t*)&(counter)) += (n))
 #    define _PySandbox_CounterLoad(counter) \
          (*((volatile uint64_t*)&(counter)))
 #  endif
 #else
 /* GIL-enabled build: GIL provides synchronization, use plain operations */
 #define _PySandbox_CounterIncrement(counter) (++(counter))
+#define _PySandbox_CounterAdd(counter, n) ((counter) += (n))
 #define _PySandbox_CounterLoad(counter) (counter)
 #endif
 

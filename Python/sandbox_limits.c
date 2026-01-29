@@ -331,6 +331,53 @@ _PySandbox_CheckScopeOperation(void)
     return 0;
 }
 
+/* _PySandbox_CheckScopeOperationN - Check N operations against limit
+ *
+ * Like _PySandbox_CheckScopeOperation, but increments counter by N instead of 1.
+ * Used by SANDBOX_COUNT opcode when operations were folded during AST optimization.
+ *
+ * Parameters:
+ *   count: Number of operations to count (must be >= 1)
+ *
+ * Returns: 0 if OK, -1 if limit exceeded (RuntimeError set)
+ */
+int
+_PySandbox_CheckScopeOperationN(int count)
+{
+    _PySandboxState *sandbox;
+    _PySandboxLimits *limits;
+
+    if (count <= 0) {
+        return 0;  /* No-op for count <= 0 */
+    }
+
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL || tstate->interp == NULL) {
+        return 0;
+    }
+
+    int result = sandbox_scope_check_prologue(
+        tstate, tstate->interp->sandbox.limits.max_operations,
+        &sandbox, &limits);
+    if (result <= 0) {
+        return result;
+    }
+
+    /* Increment operation count by N */
+    _PySandbox_CounterAdd(sandbox->counters.operation_count, count);
+
+    /* Check limit - only raise error ONCE when crossing max to allow error handling */
+    if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= limits->max_operations + 1) {
+        sandbox->suppress_checks = 1;
+        PyErr_SetString(PyExc_SandboxRuntimeError,
+                        "Sandbox operation limit exceeded");
+        sandbox->suppress_checks = 0;
+        return -1;
+    }
+
+    return 0;
+}
+
 /* ============ Scoped Iteration Checking ============ */
 
 /* Exported thin wrapper for external callers (e.g. abstract.c) */

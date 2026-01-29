@@ -1582,11 +1582,17 @@ compiler_addop_j_noline(struct compiler *c, int opcode, basicblock *b)
         return 0; \
 }
 
-#define ADDOP_SANDBOX_COUNT(C) { \
-    if ((C)->c_flags->cf_flags & PyCF_SANDBOX_COUNT) { \
-        ADDOP((C), SANDBOX_COUNT); \
+/* ADDOP_SANDBOX_COUNT_N emits SANDBOX_COUNT with oparg N (operation count).
+ * N is typically 1 for single operations, or the accumulated operations_count
+ * from AST nodes that were folded during optimization. */
+#define ADDOP_SANDBOX_COUNT_N(C, N) { \
+    if ((C)->c_flags->cf_flags & PyCF_SANDBOX_COUNT && (N) > 0) { \
+        ADDOP_I((C), SANDBOX_COUNT, (N)); \
     } \
 }
+
+/* Legacy macro for backwards compatibility - emits count=1 */
+#define ADDOP_SANDBOX_COUNT(C) ADDOP_SANDBOX_COUNT_N((C), 1)
 
 #define ADDOP_NOLINE(C, OP) { \
     if (!compiler_addop_noline((C), (OP))) \
@@ -2804,7 +2810,10 @@ compiler_class(struct compiler *c, stmt_ty s)
     /* 4. load class name */
     ADDOP_LOAD_CONST(c, s->v.ClassDef.name);
 
-    /* 5. generate the rest of the code for the call */
+    /* 5. generate the rest of the code for the call.
+     * This is an implicit __build_class__ call - count it separately from the
+     * ClassDef's operations_count which was already emitted in compiler_visit_stmt. */
+    ADDOP_SANDBOX_COUNT(c);
     if (!compiler_call_helper(c, 2, s->v.ClassDef.bases, s->v.ClassDef.keywords))
         return 0;
     /* 6. apply decorators */
@@ -4094,22 +4103,22 @@ compiler_visit_stmt(struct compiler *c, stmt_ty s)
     /* Always assign a lineno to the next instruction for a stmt. */
     SET_LOC(c, s);
 
+    /* Unified operation counting - emit if this node should count.
+     * The operations_count is set during parsing (1 for counting nodes,
+     * 0 for non-counting nodes like Global, Nonlocal, Expr). */
+    ADDOP_SANDBOX_COUNT_N(c, s->operations_count);
+
     switch (s->kind) {
     case FunctionDef_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_function(c, s, 0);
     case ClassDef_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_class(c, s);
     case Return_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_return(c, s);
     case Delete_kind:
-        ADDOP_SANDBOX_COUNT(c);
         VISIT_SEQ(c, expr, s->v.Delete.targets)
         break;
     case Assign_kind:
-        ADDOP_SANDBOX_COUNT(c);
         n = asdl_seq_LEN(s->v.Assign.targets);
         VISIT(c, expr, s->v.Assign.value);
         for (i = 0; i < n; i++) {
@@ -4121,25 +4130,18 @@ compiler_visit_stmt(struct compiler *c, stmt_ty s)
         }
         break;
     case AugAssign_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_augassign(c, s);
     case AnnAssign_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_annassign(c, s);
     case For_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_for(c, s);
     case While_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_while(c, s);
     case If_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_if(c, s);
     case Match_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_match(c, s);
     case Raise_kind:
-        ADDOP_SANDBOX_COUNT(c);
         n = 0;
         if (s->v.Raise.exc) {
             VISIT(c, expr, s->v.Raise.exc);
@@ -4152,19 +4154,14 @@ compiler_visit_stmt(struct compiler *c, stmt_ty s)
         ADDOP_I(c, RAISE_VARARGS, (int)n);
         break;
     case Try_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_try(c, s);
     case TryStar_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_try_star(c, s);
     case Assert_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_assert(c, s);
     case Import_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_import(c, s);
     case ImportFrom_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_from_import(c, s);
     case Global_kind:
     case Nonlocal_kind:
@@ -4172,26 +4169,19 @@ compiler_visit_stmt(struct compiler *c, stmt_ty s)
     case Expr_kind:
         return compiler_visit_stmt_expr(c, s->v.Expr.value);
     case Pass_kind:
-        ADDOP_SANDBOX_COUNT(c);
         ADDOP(c, NOP);
         break;
     case Break_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_break(c);
     case Continue_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_continue(c);
     case With_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_with(c, s, 0);
     case AsyncFunctionDef_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_function(c, s, 1);
     case AsyncWith_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_async_with(c, s, 0);
     case AsyncFor_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_async_for(c, s);
     }
 
@@ -4923,7 +4913,9 @@ maybe_optimize_method_call(struct compiler *c, expr_ty e)
         }
     }
     /* Alright, we can optimize the code. */
-    ADDOP_SANDBOX_COUNT(c);  /* Count the Attribute access (method lookup) */
+    /* Count the Attribute access (method lookup). The Call's operations_count
+     * was already emitted in compiler_visit_expr1 before entering here. */
+    ADDOP_SANDBOX_COUNT_N(c, meth->operations_count);
     VISIT(c, expr, meth->v.Attribute.value);
     SET_LOC(c, meth);
     update_start_location_to_match_attr(c, meth);
@@ -4938,7 +4930,6 @@ maybe_optimize_method_call(struct compiler *c, expr_ty e)
     }
     SET_LOC(c, e);
     update_start_location_to_match_attr(c, meth);
-    ADDOP_SANDBOX_COUNT(c);
     ADDOP_I(c, PRECALL, argsl + kwdsl);
     ADDOP_I(c, CALL, argsl + kwdsl);
     return 1;
@@ -5178,7 +5169,9 @@ compiler_call_helper(struct compiler *c,
             return 0;
         };
     }
-    ADDOP_SANDBOX_COUNT(c);
+    /* Note: SANDBOX_COUNT for Call is handled by the unified check in
+     * compiler_visit_expr1, not here. For implicit calls like __build_class__,
+     * the caller (e.g., compiler_class) emits the count separately. */
     ADDOP_I(c, PRECALL, n + nelts + nkwelts);
     ADDOP_I(c, CALL, n + nelts + nkwelts);
     return 1;
@@ -5236,7 +5229,8 @@ ex_call:
         }
         assert(have_dict);
     }
-    ADDOP_SANDBOX_COUNT(c);
+    /* Note: SANDBOX_COUNT for Call is handled by the unified check in
+     * compiler_visit_expr1, not here. */
     ADDOP_I(c, CALL_FUNCTION_EX, nkwelts > 0);
     return 1;
 }
@@ -5863,6 +5857,13 @@ compiler_with(struct compiler *c, stmt_ty s, int pos)
 static int
 compiler_visit_expr1(struct compiler *c, expr_ty e)
 {
+    /* Unified operation counting - emit if this node should count.
+     * The operations_count is set during parsing (1 for counting nodes like
+     * BinOp, BoolOp, Compare, Call, etc., 0 for non-counting nodes like
+     * Name, Constant, Lambda). For folded constants, operations_count
+     * accumulates the count from the folded operations. */
+    ADDOP_SANDBOX_COUNT_N(c, e->operations_count);
+
     switch (e->kind) {
     case NamedExpr_kind:
         VISIT(c, expr, e->v.NamedExpr.value);
@@ -5870,16 +5871,13 @@ compiler_visit_expr1(struct compiler *c, expr_ty e)
         VISIT(c, expr, e->v.NamedExpr.target);
         break;
     case BoolOp_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_boolop(c, e);
     case BinOp_kind:
-        ADDOP_SANDBOX_COUNT(c);
         VISIT(c, expr, e->v.BinOp.left);
         VISIT(c, expr, e->v.BinOp.right);
         ADDOP_BINARY(c, e->v.BinOp.op);
         break;
     case UnaryOp_kind:
-        ADDOP_SANDBOX_COUNT(c);
         VISIT(c, expr, e->v.UnaryOp.operand);
         ADDOP(c, unaryop(e->v.UnaryOp.op));
         break;
@@ -5940,7 +5938,6 @@ compiler_visit_expr1(struct compiler *c, expr_ty e)
         ADD_YIELD_FROM(c, 1);
         break;
     case Compare_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_compare(c, e);
     case Call_kind:
         return compiler_call(c, e);
@@ -5953,7 +5950,6 @@ compiler_visit_expr1(struct compiler *c, expr_ty e)
         return compiler_formatted_value(c, e);
     /* The following exprs can be assignment targets. */
     case Attribute_kind:
-        ADDOP_SANDBOX_COUNT(c);
         VISIT(c, expr, e->v.Attribute.value);
         update_start_location_to_match_attr(c, e);
         switch (e->v.Attribute.ctx) {
@@ -5974,7 +5970,6 @@ compiler_visit_expr1(struct compiler *c, expr_ty e)
         }
         break;
     case Subscript_kind:
-        ADDOP_SANDBOX_COUNT(c);
         return compiler_subscript(c, e);
     case Starred_kind:
         switch (e->v.Starred.ctx) {

@@ -241,8 +241,12 @@ void * _PyPegen_seq_last_item(asdl_seq *seq);
 void * _PyPegen_seq_first_item(asdl_seq *seq);
 #define PyPegen_first_item(seq, type) ((type)_PyPegen_seq_first_item((asdl_seq*)seq))
 #define UNUSED(expr) do { (void)(expr); } while (0)
-#define EXTRA_EXPR(head, tail) head->lineno, (head)->col_offset, (tail)->end_lineno, (tail)->end_col_offset, p->arena
-#define EXTRA _start_lineno, _start_col_offset, _end_lineno, _end_col_offset, p->arena
+/* EXTRA macros pass operations_count=0 by default. The operations_count
+ * will be accumulated during AST optimization when folding occurs. */
+#define EXTRA_EXPR(head, tail) head->lineno, (head)->col_offset, (tail)->end_lineno, (tail)->end_col_offset, 0, p->arena
+#define EXTRA _start_lineno, _start_col_offset, _end_lineno, _end_col_offset, 0, p->arena
+/* EXTRA_OP1 passes operations_count=1 for nodes that should count as operations */
+#define EXTRA_OP1 _start_lineno, _start_col_offset, _end_lineno, _end_col_offset, 1, p->arena
 PyObject *_PyPegen_new_type_comment(Parser *, const char *);
 
 Py_LOCAL_INLINE(PyObject *)
@@ -290,7 +294,7 @@ asdl_seq *_PyPegen_seq_append_to_end(Parser *, asdl_seq *, void *);
 asdl_seq *_PyPegen_seq_flatten(Parser *, asdl_seq *);
 expr_ty _PyPegen_join_names_with_dot(Parser *, expr_ty, expr_ty);
 int _PyPegen_seq_count_dots(asdl_seq *);
-alias_ty _PyPegen_alias_for_star(Parser *, int, int, int, int, PyArena *);
+alias_ty _PyPegen_alias_for_star(Parser *, int, int, int, int, int, PyArena *);
 asdl_identifier_seq *_PyPegen_map_names_to_ids(Parser *, asdl_expr_seq *);
 CmpopExprPair *_PyPegen_cmpop_expr_pair(Parser *, cmpop_ty, expr_ty);
 asdl_int_seq *_PyPegen_get_cmpops(Parser *p, asdl_seq *);
@@ -316,7 +320,7 @@ asdl_expr_seq *_PyPegen_seq_extract_starred_exprs(Parser *, asdl_seq *);
 asdl_keyword_seq *_PyPegen_seq_delete_starred_exprs(Parser *, asdl_seq *);
 expr_ty _PyPegen_collect_call_seqs(Parser *, asdl_expr_seq *, asdl_seq *,
                      int lineno, int col_offset, int end_lineno,
-                     int end_col_offset, PyArena *arena);
+                     int end_col_offset, int operations_count, PyArena *arena);
 expr_ty _PyPegen_concatenate_strings(Parser *p, asdl_seq *);
 expr_ty _PyPegen_ensure_imaginary(Parser *p, expr_ty);
 expr_ty _PyPegen_ensure_real(Parser *p, expr_ty);

@@ -22,7 +22,7 @@ _PyPegen_dummy_name(Parser *p, ...)
     if (!id) {
         return NULL;
     }
-    cache = _PyAST_Name(id, Load, 1, 0, 1, 0, p->arena);
+    cache = _PyAST_Name(id, Load, 1, 0, 1, 0, 0, p->arena);
     return cache;
 }
 
@@ -209,7 +209,8 @@ _PyPegen_seq_count_dots(asdl_seq *seq)
 /* Creates an alias with '*' as the identifier name */
 alias_ty
 _PyPegen_alias_for_star(Parser *p, int lineno, int col_offset, int end_lineno,
-                        int end_col_offset, PyArena *arena) {
+                        int end_col_offset, int operations_count, PyArena *arena) {
+    (void)operations_count; // Currently unused; reserved for future use
     PyObject *str = PyUnicode_InternFromString("*");
     if (!str) {
         return NULL;
@@ -218,7 +219,7 @@ _PyPegen_alias_for_star(Parser *p, int lineno, int col_offset, int end_lineno,
         Py_DECREF(str);
         return NULL;
     }
-    return _PyAST_alias(str, NULL, lineno, col_offset, end_lineno, end_col_offset, arena);
+    return _PyAST_alias(str, NULL, lineno, col_offset, end_lineno, end_col_offset, 0, arena);
 }
 
 /* Creates a new asdl_seq* with the identifiers of all the names in seq */
@@ -771,7 +772,7 @@ _PyPegen_function_def_decorators(Parser *p, asdl_expr_seq *decorators, stmt_ty f
             function_def->v.FunctionDef.body, decorators, function_def->v.FunctionDef.returns,
             function_def->v.FunctionDef.type_comment, function_def->lineno,
             function_def->col_offset, function_def->end_lineno, function_def->end_col_offset,
-            p->arena);
+            function_def->operations_count, p->arena);
     }
 
     return _PyAST_FunctionDef(
@@ -780,7 +781,7 @@ _PyPegen_function_def_decorators(Parser *p, asdl_expr_seq *decorators, stmt_ty f
         function_def->v.FunctionDef.returns,
         function_def->v.FunctionDef.type_comment, function_def->lineno,
         function_def->col_offset, function_def->end_lineno,
-        function_def->end_col_offset, p->arena);
+        function_def->end_col_offset, function_def->operations_count, p->arena);
 }
 
 /* Construct a ClassDef equivalent to class_def, but with decorators */
@@ -792,7 +793,7 @@ _PyPegen_class_def_decorators(Parser *p, asdl_expr_seq *decorators, stmt_ty clas
         class_def->v.ClassDef.name, class_def->v.ClassDef.bases,
         class_def->v.ClassDef.keywords, class_def->v.ClassDef.body, decorators,
         class_def->lineno, class_def->col_offset, class_def->end_lineno,
-        class_def->end_col_offset, p->arena);
+        class_def->end_col_offset, class_def->operations_count, p->arena);
 }
 
 /* Construct a KeywordOrStarred */
@@ -945,7 +946,7 @@ _PyPegen_concatenate_strings(Parser *p, asdl_seq *strings)
         }
         return _PyAST_Constant(bytes_str, NULL, first->lineno,
                                first->col_offset, last->end_lineno,
-                               last->end_col_offset, p->arena);
+                               last->end_col_offset, 0, p->arena);
     }
 
     return _PyPegen_FstringParser_Finish(p, &state, first, last);
@@ -1035,7 +1036,7 @@ _PyPegen_add_type_comment_to_arg(Parser *p, arg_ty a, Token *tc)
     }
     return _PyAST_arg(a->arg, a->annotation, tco,
                       a->lineno, a->col_offset, a->end_lineno, a->end_col_offset,
-                      p->arena);
+                      0, p->arena);
 }
 
 /* Checks if the NOTEQUAL token is valid given the current parser flags
@@ -1155,13 +1156,14 @@ _PyPegen_get_last_comprehension_item(comprehension_ty comprehension) {
 
 expr_ty _PyPegen_collect_call_seqs(Parser *p, asdl_expr_seq *a, asdl_seq *b,
                      int lineno, int col_offset, int end_lineno,
-                     int end_col_offset, PyArena *arena) {
+                     int end_col_offset, int operations_count, PyArena *arena) {
+    (void)operations_count; // Currently unused; reserved for future use
     Py_ssize_t args_len = asdl_seq_LEN(a);
     Py_ssize_t total_len = args_len;
 
     if (b == NULL) {
         return _PyAST_Call(_PyPegen_dummy_name(p), a, NULL, lineno, col_offset,
-                        end_lineno, end_col_offset, arena);
+                        end_lineno, end_col_offset, 0, arena);
 
     }
 
@@ -1183,7 +1185,7 @@ expr_ty _PyPegen_collect_call_seqs(Parser *p, asdl_expr_seq *a, asdl_seq *b,
     }
 
     return _PyAST_Call(_PyPegen_dummy_name(p), args, keywords, lineno,
-                       col_offset, end_lineno, end_col_offset, arena);
+                       col_offset, end_lineno, end_col_offset, 0, arena);
 }
 
 // AST Error reporting helpers

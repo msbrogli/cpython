@@ -334,6 +334,7 @@ struct _stmt {
     int col_offset;
     int end_lineno;
     int end_col_offset;
+    int operations_count;
 };
 
 enum _expr_kind {BoolOp_kind=1, NamedExpr_kind=2, BinOp_kind=3, UnaryOp_kind=4,
@@ -491,6 +492,7 @@ struct _expr {
     int col_offset;
     int end_lineno;
     int end_col_offset;
+    int operations_count;
 };
 
 struct _comprehension {
@@ -515,6 +517,7 @@ struct _excepthandler {
     int col_offset;
     int end_lineno;
     int end_col_offset;
+    int operations_count;
 };
 
 struct _arguments {
@@ -535,6 +538,7 @@ struct _arg {
     int col_offset;
     int end_lineno;
     int end_col_offset;
+    int operations_count;
 };
 
 struct _keyword {
@@ -544,6 +548,7 @@ struct _keyword {
     int col_offset;
     int end_lineno;
     int end_col_offset;
+    int operations_count;
 };
 
 struct _alias {
@@ -553,6 +558,7 @@ struct _alias {
     int col_offset;
     int end_lineno;
     int end_col_offset;
+    int operations_count;
 };
 
 struct _withitem {
@@ -616,6 +622,7 @@ struct _pattern {
     int col_offset;
     int end_lineno;
     int end_col_offset;
+    int operations_count;
 };
 
 enum _type_ignore_kind {TypeIgnore_kind=1};
@@ -641,208 +648,228 @@ mod_ty _PyAST_FunctionType(asdl_expr_seq * argtypes, expr_ty returns, PyArena
 stmt_ty _PyAST_FunctionDef(identifier name, arguments_ty args, asdl_stmt_seq *
                            body, asdl_expr_seq * decorator_list, expr_ty
                            returns, string type_comment, int lineno, int
-                           col_offset, int end_lineno, int end_col_offset,
-                           PyArena *arena);
+                           col_offset, int end_lineno, int end_col_offset, int
+                           operations_count, PyArena *arena);
 stmt_ty _PyAST_AsyncFunctionDef(identifier name, arguments_ty args,
                                 asdl_stmt_seq * body, asdl_expr_seq *
                                 decorator_list, expr_ty returns, string
                                 type_comment, int lineno, int col_offset, int
-                                end_lineno, int end_col_offset, PyArena *arena);
+                                end_lineno, int end_col_offset, int
+                                operations_count, PyArena *arena);
 stmt_ty _PyAST_ClassDef(identifier name, asdl_expr_seq * bases,
                         asdl_keyword_seq * keywords, asdl_stmt_seq * body,
                         asdl_expr_seq * decorator_list, int lineno, int
-                        col_offset, int end_lineno, int end_col_offset, PyArena
-                        *arena);
+                        col_offset, int end_lineno, int end_col_offset, int
+                        operations_count, PyArena *arena);
 stmt_ty _PyAST_Return(expr_ty value, int lineno, int col_offset, int
-                      end_lineno, int end_col_offset, PyArena *arena);
+                      end_lineno, int end_col_offset, int operations_count,
+                      PyArena *arena);
 stmt_ty _PyAST_Delete(asdl_expr_seq * targets, int lineno, int col_offset, int
-                      end_lineno, int end_col_offset, PyArena *arena);
+                      end_lineno, int end_col_offset, int operations_count,
+                      PyArena *arena);
 stmt_ty _PyAST_Assign(asdl_expr_seq * targets, expr_ty value, string
                       type_comment, int lineno, int col_offset, int end_lineno,
-                      int end_col_offset, PyArena *arena);
+                      int end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_AugAssign(expr_ty target, operator_ty op, expr_ty value, int
                          lineno, int col_offset, int end_lineno, int
-                         end_col_offset, PyArena *arena);
+                         end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_AnnAssign(expr_ty target, expr_ty annotation, expr_ty value, int
                          simple, int lineno, int col_offset, int end_lineno,
-                         int end_col_offset, PyArena *arena);
+                         int end_col_offset, int operations_count, PyArena
+                         *arena);
 stmt_ty _PyAST_For(expr_ty target, expr_ty iter, asdl_stmt_seq * body,
                    asdl_stmt_seq * orelse, string type_comment, int lineno, int
-                   col_offset, int end_lineno, int end_col_offset, PyArena
-                   *arena);
+                   col_offset, int end_lineno, int end_col_offset, int
+                   operations_count, PyArena *arena);
 stmt_ty _PyAST_AsyncFor(expr_ty target, expr_ty iter, asdl_stmt_seq * body,
                         asdl_stmt_seq * orelse, string type_comment, int
                         lineno, int col_offset, int end_lineno, int
-                        end_col_offset, PyArena *arena);
+                        end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_While(expr_ty test, asdl_stmt_seq * body, asdl_stmt_seq *
                      orelse, int lineno, int col_offset, int end_lineno, int
-                     end_col_offset, PyArena *arena);
+                     end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_If(expr_ty test, asdl_stmt_seq * body, asdl_stmt_seq * orelse,
                   int lineno, int col_offset, int end_lineno, int
-                  end_col_offset, PyArena *arena);
+                  end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_With(asdl_withitem_seq * items, asdl_stmt_seq * body, string
                     type_comment, int lineno, int col_offset, int end_lineno,
-                    int end_col_offset, PyArena *arena);
+                    int end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_AsyncWith(asdl_withitem_seq * items, asdl_stmt_seq * body,
                          string type_comment, int lineno, int col_offset, int
-                         end_lineno, int end_col_offset, PyArena *arena);
+                         end_lineno, int end_col_offset, int operations_count,
+                         PyArena *arena);
 stmt_ty _PyAST_Match(expr_ty subject, asdl_match_case_seq * cases, int lineno,
-                     int col_offset, int end_lineno, int end_col_offset,
-                     PyArena *arena);
+                     int col_offset, int end_lineno, int end_col_offset, int
+                     operations_count, PyArena *arena);
 stmt_ty _PyAST_Raise(expr_ty exc, expr_ty cause, int lineno, int col_offset,
-                     int end_lineno, int end_col_offset, PyArena *arena);
+                     int end_lineno, int end_col_offset, int operations_count,
+                     PyArena *arena);
 stmt_ty _PyAST_Try(asdl_stmt_seq * body, asdl_excepthandler_seq * handlers,
                    asdl_stmt_seq * orelse, asdl_stmt_seq * finalbody, int
                    lineno, int col_offset, int end_lineno, int end_col_offset,
-                   PyArena *arena);
+                   int operations_count, PyArena *arena);
 stmt_ty _PyAST_TryStar(asdl_stmt_seq * body, asdl_excepthandler_seq * handlers,
                        asdl_stmt_seq * orelse, asdl_stmt_seq * finalbody, int
                        lineno, int col_offset, int end_lineno, int
-                       end_col_offset, PyArena *arena);
+                       end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_Assert(expr_ty test, expr_ty msg, int lineno, int col_offset,
-                      int end_lineno, int end_col_offset, PyArena *arena);
+                      int end_lineno, int end_col_offset, int operations_count,
+                      PyArena *arena);
 stmt_ty _PyAST_Import(asdl_alias_seq * names, int lineno, int col_offset, int
-                      end_lineno, int end_col_offset, PyArena *arena);
+                      end_lineno, int end_col_offset, int operations_count,
+                      PyArena *arena);
 stmt_ty _PyAST_ImportFrom(identifier module, asdl_alias_seq * names, int level,
                           int lineno, int col_offset, int end_lineno, int
-                          end_col_offset, PyArena *arena);
+                          end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_Global(asdl_identifier_seq * names, int lineno, int col_offset,
-                      int end_lineno, int end_col_offset, PyArena *arena);
+                      int end_lineno, int end_col_offset, int operations_count,
+                      PyArena *arena);
 stmt_ty _PyAST_Nonlocal(asdl_identifier_seq * names, int lineno, int
-                        col_offset, int end_lineno, int end_col_offset, PyArena
-                        *arena);
+                        col_offset, int end_lineno, int end_col_offset, int
+                        operations_count, PyArena *arena);
 stmt_ty _PyAST_Expr(expr_ty value, int lineno, int col_offset, int end_lineno,
-                    int end_col_offset, PyArena *arena);
+                    int end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_Pass(int lineno, int col_offset, int end_lineno, int
-                    end_col_offset, PyArena *arena);
+                    end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_Break(int lineno, int col_offset, int end_lineno, int
-                     end_col_offset, PyArena *arena);
+                     end_col_offset, int operations_count, PyArena *arena);
 stmt_ty _PyAST_Continue(int lineno, int col_offset, int end_lineno, int
-                        end_col_offset, PyArena *arena);
+                        end_col_offset, int operations_count, PyArena *arena);
 expr_ty _PyAST_BoolOp(boolop_ty op, asdl_expr_seq * values, int lineno, int
-                      col_offset, int end_lineno, int end_col_offset, PyArena
-                      *arena);
+                      col_offset, int end_lineno, int end_col_offset, int
+                      operations_count, PyArena *arena);
 expr_ty _PyAST_NamedExpr(expr_ty target, expr_ty value, int lineno, int
-                         col_offset, int end_lineno, int end_col_offset,
-                         PyArena *arena);
+                         col_offset, int end_lineno, int end_col_offset, int
+                         operations_count, PyArena *arena);
 expr_ty _PyAST_BinOp(expr_ty left, operator_ty op, expr_ty right, int lineno,
-                     int col_offset, int end_lineno, int end_col_offset,
-                     PyArena *arena);
+                     int col_offset, int end_lineno, int end_col_offset, int
+                     operations_count, PyArena *arena);
 expr_ty _PyAST_UnaryOp(unaryop_ty op, expr_ty operand, int lineno, int
-                       col_offset, int end_lineno, int end_col_offset, PyArena
-                       *arena);
+                       col_offset, int end_lineno, int end_col_offset, int
+                       operations_count, PyArena *arena);
 expr_ty _PyAST_Lambda(arguments_ty args, expr_ty body, int lineno, int
-                      col_offset, int end_lineno, int end_col_offset, PyArena
-                      *arena);
+                      col_offset, int end_lineno, int end_col_offset, int
+                      operations_count, PyArena *arena);
 expr_ty _PyAST_IfExp(expr_ty test, expr_ty body, expr_ty orelse, int lineno,
-                     int col_offset, int end_lineno, int end_col_offset,
-                     PyArena *arena);
+                     int col_offset, int end_lineno, int end_col_offset, int
+                     operations_count, PyArena *arena);
 expr_ty _PyAST_Dict(asdl_expr_seq * keys, asdl_expr_seq * values, int lineno,
-                    int col_offset, int end_lineno, int end_col_offset, PyArena
-                    *arena);
+                    int col_offset, int end_lineno, int end_col_offset, int
+                    operations_count, PyArena *arena);
 expr_ty _PyAST_Set(asdl_expr_seq * elts, int lineno, int col_offset, int
-                   end_lineno, int end_col_offset, PyArena *arena);
+                   end_lineno, int end_col_offset, int operations_count,
+                   PyArena *arena);
 expr_ty _PyAST_ListComp(expr_ty elt, asdl_comprehension_seq * generators, int
                         lineno, int col_offset, int end_lineno, int
-                        end_col_offset, PyArena *arena);
+                        end_col_offset, int operations_count, PyArena *arena);
 expr_ty _PyAST_SetComp(expr_ty elt, asdl_comprehension_seq * generators, int
                        lineno, int col_offset, int end_lineno, int
-                       end_col_offset, PyArena *arena);
+                       end_col_offset, int operations_count, PyArena *arena);
 expr_ty _PyAST_DictComp(expr_ty key, expr_ty value, asdl_comprehension_seq *
                         generators, int lineno, int col_offset, int end_lineno,
-                        int end_col_offset, PyArena *arena);
+                        int end_col_offset, int operations_count, PyArena
+                        *arena);
 expr_ty _PyAST_GeneratorExp(expr_ty elt, asdl_comprehension_seq * generators,
                             int lineno, int col_offset, int end_lineno, int
-                            end_col_offset, PyArena *arena);
+                            end_col_offset, int operations_count, PyArena
+                            *arena);
 expr_ty _PyAST_Await(expr_ty value, int lineno, int col_offset, int end_lineno,
-                     int end_col_offset, PyArena *arena);
+                     int end_col_offset, int operations_count, PyArena *arena);
 expr_ty _PyAST_Yield(expr_ty value, int lineno, int col_offset, int end_lineno,
-                     int end_col_offset, PyArena *arena);
+                     int end_col_offset, int operations_count, PyArena *arena);
 expr_ty _PyAST_YieldFrom(expr_ty value, int lineno, int col_offset, int
-                         end_lineno, int end_col_offset, PyArena *arena);
+                         end_lineno, int end_col_offset, int operations_count,
+                         PyArena *arena);
 expr_ty _PyAST_Compare(expr_ty left, asdl_int_seq * ops, asdl_expr_seq *
                        comparators, int lineno, int col_offset, int end_lineno,
-                       int end_col_offset, PyArena *arena);
+                       int end_col_offset, int operations_count, PyArena
+                       *arena);
 expr_ty _PyAST_Call(expr_ty func, asdl_expr_seq * args, asdl_keyword_seq *
                     keywords, int lineno, int col_offset, int end_lineno, int
-                    end_col_offset, PyArena *arena);
+                    end_col_offset, int operations_count, PyArena *arena);
 expr_ty _PyAST_FormattedValue(expr_ty value, int conversion, expr_ty
                               format_spec, int lineno, int col_offset, int
-                              end_lineno, int end_col_offset, PyArena *arena);
+                              end_lineno, int end_col_offset, int
+                              operations_count, PyArena *arena);
 expr_ty _PyAST_JoinedStr(asdl_expr_seq * values, int lineno, int col_offset,
-                         int end_lineno, int end_col_offset, PyArena *arena);
+                         int end_lineno, int end_col_offset, int
+                         operations_count, PyArena *arena);
 expr_ty _PyAST_Constant(constant value, string kind, int lineno, int
-                        col_offset, int end_lineno, int end_col_offset, PyArena
-                        *arena);
+                        col_offset, int end_lineno, int end_col_offset, int
+                        operations_count, PyArena *arena);
 expr_ty _PyAST_Attribute(expr_ty value, identifier attr, expr_context_ty ctx,
                          int lineno, int col_offset, int end_lineno, int
-                         end_col_offset, PyArena *arena);
+                         end_col_offset, int operations_count, PyArena *arena);
 expr_ty _PyAST_Subscript(expr_ty value, expr_ty slice, expr_context_ty ctx, int
                          lineno, int col_offset, int end_lineno, int
-                         end_col_offset, PyArena *arena);
+                         end_col_offset, int operations_count, PyArena *arena);
 expr_ty _PyAST_Starred(expr_ty value, expr_context_ty ctx, int lineno, int
-                       col_offset, int end_lineno, int end_col_offset, PyArena
-                       *arena);
+                       col_offset, int end_lineno, int end_col_offset, int
+                       operations_count, PyArena *arena);
 expr_ty _PyAST_Name(identifier id, expr_context_ty ctx, int lineno, int
-                    col_offset, int end_lineno, int end_col_offset, PyArena
-                    *arena);
+                    col_offset, int end_lineno, int end_col_offset, int
+                    operations_count, PyArena *arena);
 expr_ty _PyAST_List(asdl_expr_seq * elts, expr_context_ty ctx, int lineno, int
-                    col_offset, int end_lineno, int end_col_offset, PyArena
-                    *arena);
+                    col_offset, int end_lineno, int end_col_offset, int
+                    operations_count, PyArena *arena);
 expr_ty _PyAST_Tuple(asdl_expr_seq * elts, expr_context_ty ctx, int lineno, int
-                     col_offset, int end_lineno, int end_col_offset, PyArena
-                     *arena);
+                     col_offset, int end_lineno, int end_col_offset, int
+                     operations_count, PyArena *arena);
 expr_ty _PyAST_Slice(expr_ty lower, expr_ty upper, expr_ty step, int lineno,
-                     int col_offset, int end_lineno, int end_col_offset,
-                     PyArena *arena);
+                     int col_offset, int end_lineno, int end_col_offset, int
+                     operations_count, PyArena *arena);
 comprehension_ty _PyAST_comprehension(expr_ty target, expr_ty iter,
                                       asdl_expr_seq * ifs, int is_async,
                                       PyArena *arena);
 excepthandler_ty _PyAST_ExceptHandler(expr_ty type, identifier name,
                                       asdl_stmt_seq * body, int lineno, int
                                       col_offset, int end_lineno, int
-                                      end_col_offset, PyArena *arena);
+                                      end_col_offset, int operations_count,
+                                      PyArena *arena);
 arguments_ty _PyAST_arguments(asdl_arg_seq * posonlyargs, asdl_arg_seq * args,
                               arg_ty vararg, asdl_arg_seq * kwonlyargs,
                               asdl_expr_seq * kw_defaults, arg_ty kwarg,
                               asdl_expr_seq * defaults, PyArena *arena);
 arg_ty _PyAST_arg(identifier arg, expr_ty annotation, string type_comment, int
                   lineno, int col_offset, int end_lineno, int end_col_offset,
-                  PyArena *arena);
+                  int operations_count, PyArena *arena);
 keyword_ty _PyAST_keyword(identifier arg, expr_ty value, int lineno, int
-                          col_offset, int end_lineno, int end_col_offset,
-                          PyArena *arena);
+                          col_offset, int end_lineno, int end_col_offset, int
+                          operations_count, PyArena *arena);
 alias_ty _PyAST_alias(identifier name, identifier asname, int lineno, int
-                      col_offset, int end_lineno, int end_col_offset, PyArena
-                      *arena);
+                      col_offset, int end_lineno, int end_col_offset, int
+                      operations_count, PyArena *arena);
 withitem_ty _PyAST_withitem(expr_ty context_expr, expr_ty optional_vars,
                             PyArena *arena);
 match_case_ty _PyAST_match_case(pattern_ty pattern, expr_ty guard,
                                 asdl_stmt_seq * body, PyArena *arena);
 pattern_ty _PyAST_MatchValue(expr_ty value, int lineno, int col_offset, int
-                             end_lineno, int end_col_offset, PyArena *arena);
+                             end_lineno, int end_col_offset, int
+                             operations_count, PyArena *arena);
 pattern_ty _PyAST_MatchSingleton(constant value, int lineno, int col_offset,
-                                 int end_lineno, int end_col_offset, PyArena
-                                 *arena);
+                                 int end_lineno, int end_col_offset, int
+                                 operations_count, PyArena *arena);
 pattern_ty _PyAST_MatchSequence(asdl_pattern_seq * patterns, int lineno, int
                                 col_offset, int end_lineno, int end_col_offset,
-                                PyArena *arena);
+                                int operations_count, PyArena *arena);
 pattern_ty _PyAST_MatchMapping(asdl_expr_seq * keys, asdl_pattern_seq *
                                patterns, identifier rest, int lineno, int
                                col_offset, int end_lineno, int end_col_offset,
-                               PyArena *arena);
+                               int operations_count, PyArena *arena);
 pattern_ty _PyAST_MatchClass(expr_ty cls, asdl_pattern_seq * patterns,
                              asdl_identifier_seq * kwd_attrs, asdl_pattern_seq
                              * kwd_patterns, int lineno, int col_offset, int
-                             end_lineno, int end_col_offset, PyArena *arena);
+                             end_lineno, int end_col_offset, int
+                             operations_count, PyArena *arena);
 pattern_ty _PyAST_MatchStar(identifier name, int lineno, int col_offset, int
-                            end_lineno, int end_col_offset, PyArena *arena);
+                            end_lineno, int end_col_offset, int
+                            operations_count, PyArena *arena);
 pattern_ty _PyAST_MatchAs(pattern_ty pattern, identifier name, int lineno, int
-                          col_offset, int end_lineno, int end_col_offset,
-                          PyArena *arena);
+                          col_offset, int end_lineno, int end_col_offset, int
+                          operations_count, PyArena *arena);
 pattern_ty _PyAST_MatchOr(asdl_pattern_seq * patterns, int lineno, int
-                          col_offset, int end_lineno, int end_col_offset,
-                          PyArena *arena);
+                          col_offset, int end_lineno, int end_col_offset, int
+                          operations_count, PyArena *arena);
 type_ignore_ty _PyAST_TypeIgnore(int lineno, string tag, PyArena *arena);
 
 

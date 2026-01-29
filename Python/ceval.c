@@ -1798,7 +1798,11 @@ handle_eval_breaker:
         }
 
         TARGET(SANDBOX_COUNT) {
-            if (_PySandbox_CheckScopeOperation() < 0) {
+            /* oparg contains the operation count (from AST folding).
+             * If oparg is 0 (legacy), treat as count=1 for backwards compatibility.
+             * Otherwise, use oparg as the count of folded operations. */
+            int count = oparg ? oparg : 1;
+            if (_PySandbox_CheckScopeOperationN(count) < 0) {
                 goto error;
             }
             DISPATCH();

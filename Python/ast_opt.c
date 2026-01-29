@@ -110,6 +110,8 @@ fold_unaryop(expr_ty node, PyArena *arena, _PyASTOptimizeState *state)
         [USub] = PyNumber_Negative,
     };
     PyObject *newval = ops[node->v.UnaryOp.op](arg->v.Constant.value);
+    /* Accumulate operations_count: 1 for this UnaryOp + any operations folded into operand */
+    node->operations_count = 1 + arg->operations_count;
     return make_const(node, newval, arena);
 }
 
@@ -281,7 +283,7 @@ parse_literal(PyObject *fmt, Py_ssize_t *ppos, PyArena *arena)
         Py_DECREF(str);
         return NULL;
     }
-    return _PyAST_Constant(str, NULL, -1, -1, -1, -1, arena);
+    return _PyAST_Constant(str, NULL, -1, -1, -1, -1, 0, arena);
 }
 
 #define MAXDIGITS 3
@@ -375,7 +377,7 @@ parse_format(PyObject *fmt, Py_ssize_t *ppos, expr_ty arg, PyArena *arena)
                 Py_DECREF(str);
                 return NULL;
             }
-            format_spec = _PyAST_Constant(str, NULL, -1, -1, -1, -1, arena);
+            format_spec = _PyAST_Constant(str, NULL, -1, -1, -1, -1, 0, arena);
             if (format_spec == NULL) {
                 return NULL;
             }
@@ -383,7 +385,7 @@ parse_format(PyObject *fmt, Py_ssize_t *ppos, expr_ty arg, PyArena *arena)
         return _PyAST_FormattedValue(arg, spec, format_spec,
                                      arg->lineno, arg->col_offset,
                                      arg->end_lineno, arg->end_col_offset,
-                                     arena);
+                                     0, arena);
     }
     // Unsupported format.
     return NULL;
@@ -432,7 +434,7 @@ optimize_format(expr_ty node, PyObject *fmt, asdl_expr_seq *elts, PyArena *arena
     expr_ty res = _PyAST_JoinedStr(seq,
                                    node->lineno, node->col_offset,
                                    node->end_lineno, node->end_col_offset,
-                                   arena);
+                                   0, arena);
     if (!res) {
         return 0;
     }
@@ -511,6 +513,8 @@ fold_binop(expr_ty node, PyArena *arena, _PyASTOptimizeState *state)
     // operators are added without being handled here
     }
 
+    /* Accumulate operations_count: 1 for this BinOp + any operations folded into operands */
+    node->operations_count = 1 + lhs->operations_count + rhs->operations_count;
     return make_const(node, newval, arena);
 }
 
@@ -547,6 +551,16 @@ fold_tuple(expr_ty node, PyArena *arena, _PyASTOptimizeState *state)
         return 1;
 
     newval = make_const_tuple(node->v.Tuple.elts);
+    if (newval != NULL) {
+        /* Accumulate operations_count from all elements */
+        asdl_expr_seq *elts = node->v.Tuple.elts;
+        int accumulated = 0;
+        for (int i = 0; i < asdl_seq_LEN(elts); i++) {
+            expr_ty e = (expr_ty)asdl_seq_GET(elts, i);
+            accumulated += e->operations_count;
+        }
+        node->operations_count = accumulated;
+    }
     return make_const(node, newval, arena);
 }
 
@@ -566,6 +580,8 @@ fold_subscr(expr_ty node, PyArena *arena, _PyASTOptimizeState *state)
     }
 
     newval = PyObject_GetItem(arg->v.Constant.value, idx->v.Constant.value);
+    /* Accumulate operations_count: 1 for this Subscript + any operations folded into value/slice */
+    node->operations_count = 1 + arg->operations_count + idx->operations_count;
     return make_const(node, newval, arena);
 }
 
@@ -579,9 +595,10 @@ static int
 fold_iter(expr_ty arg, PyArena *arena, _PyASTOptimizeState *state)
 {
     PyObject *newval;
+    asdl_expr_seq *elts = NULL;
     if (arg->kind == List_kind) {
         /* First change a list into tuple. */
-        asdl_expr_seq *elts = arg->v.List.elts;
+        elts = arg->v.List.elts;
         if (has_starred(elts)) {
             return 1;
         }
@@ -593,13 +610,23 @@ fold_iter(expr_ty arg, PyArena *arena, _PyASTOptimizeState *state)
         newval = make_const_tuple(elts);
     }
     else if (arg->kind == Set_kind) {
-        newval = make_const_tuple(arg->v.Set.elts);
+        elts = arg->v.Set.elts;
+        newval = make_const_tuple(elts);
         if (newval) {
             Py_SETREF(newval, PyFrozenSet_New(newval));
         }
     }
     else {
         return 1;
+    }
+    if (newval != NULL && elts != NULL) {
+        /* Accumulate operations_count from all elements */
+        int accumulated = 0;
+        for (int i = 0; i < asdl_seq_LEN(elts); i++) {
+            expr_ty e = (expr_ty)asdl_seq_GET(elts, i);
+            accumulated += e->operations_count;
+        }
+        arg->operations_count = accumulated;
     }
     return make_const(arg, newval, arena);
 }
@@ -670,7 +697,7 @@ astfold_body(asdl_stmt_seq *stmts, PyArena *ctx_, _PyASTOptimizeState *state)
         asdl_seq_SET(values, 0, st->v.Expr.value);
         expr_ty expr = _PyAST_JoinedStr(values, st->lineno, st->col_offset,
                                         st->end_lineno, st->end_col_offset,
-                                        ctx_);
+                                        0, ctx_);
         if (!expr) {
             return 0;
         }

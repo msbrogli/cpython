@@ -38,6 +38,7 @@ sys.sandbox.set_limits(
     max_statements=10000,
     max_allocations=5000,
 )
+sys.sandbox.allow_unsafe = 1  # Allow exec with string in scope
 sys.sandbox.reset_counts()
 sys.sandbox.enter_scope()
 try:

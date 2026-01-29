@@ -482,6 +482,7 @@ box.value = 10
 # Set mutable and frozen_mode BEFORE entering scope
 sys.sandbox.set_mutable(box)
 sys.sandbox.frozen_mode = True
+sys.sandbox.allow_unsafe = 1  # Allow exec with string in scope
 sys.sandbox.enter_scope()
 
 # exec'd code should also be affected by frozen mode

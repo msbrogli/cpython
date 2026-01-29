@@ -913,6 +913,14 @@ builtin_eval_impl(PyObject *module, PyObject *source, PyObject *globals,
     PyObject *result, *source_copy;
     const char *str;
 
+    /* Block eval() with string arguments in sandbox scope when allow_unsafe=0.
+     * Code objects are allowed since they were already compiled outside scope. */
+    if (!PyCode_Check(source)) {
+        if (_PySandbox_CheckUnsafeBlocked("eval") < 0) {
+            return NULL;
+        }
+    }
+
     if (locals != Py_None && !PyMapping_Check(locals)) {
         PyErr_SetString(PyExc_TypeError, "locals must be a mapping");
         return NULL;
@@ -1004,6 +1012,14 @@ builtin_exec_impl(PyObject *module, PyObject *source, PyObject *globals,
 /*[clinic end generated code: output=7579eb4e7646743d input=f13a7e2b503d1d9a]*/
 {
     PyObject *v;
+
+    /* Block exec() with string arguments in sandbox scope when allow_unsafe=0.
+     * Code objects are allowed since they were already compiled outside scope. */
+    if (!PyCode_Check(source)) {
+        if (_PySandbox_CheckUnsafeBlocked("exec") < 0) {
+            return NULL;
+        }
+    }
 
     if (globals == Py_None) {
         globals = PyEval_GetGlobals();

@@ -135,6 +135,7 @@ print("PASS")
         code = '''
 import sys
 sys.sandbox.set_limits(max_statements=1000000)
+sys.sandbox.allow_unsafe = 1  # Allow exec with string in scope
 sys.sandbox.enter_scope()
 # Simple loop to generate statements
 exec("x = 0\\nfor _ in range(100):\\n    x += 1")
@@ -154,6 +155,7 @@ sys.exit(0 if counts['statement_count'] > 0 else 1)
         code = '''
 import sys
 sys.sandbox.set_limits(max_statements=10)
+sys.sandbox.allow_unsafe = 1  # Allow exec with string in scope
 sys.sandbox.enter_scope()
 try:
     # exec'd code has same filename as selected frame, so it counts

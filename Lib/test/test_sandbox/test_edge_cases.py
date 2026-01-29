@@ -74,27 +74,24 @@ except SandboxRuntimeError as e:
 
     def test_limit_one_allocation(self):
         """Setting max_allocations to 1 should allow very few allocations."""
+        # Note: We don't use try/except because exception handling requires
+        # allocations, which causes cascading failures with very low limits.
         code = '''
 import sys
 sys.sandbox.set_limits(max_allocations=1)
 sys.sandbox.enter_scope()
-# First allocation might succeed, subsequent should fail
 a = []
-try:
-    for i in range(100):
-        a.append([i])  # Each append creates a new list
-    sys.exit(2)  # Should not reach here
-except SandboxMemoryError:
-    sys.exit(0)
+for i in range(100):
+    a.append([i])  # Each append creates a new list
+sys.exit(2)  # Should not reach here
 '''
         result = _run_sandboxed_code(code)
-        # With >= checks, cascading errors may occur during exception handling.
-        # Accept either: exit 0 (caught cleanly) or exit 1 with correct error in stderr.
-        if result.returncode == 0:
-            return  # Test passed - exception caught cleanly
+        # Exit code 1 with SandboxMemoryError in stderr means limit was enforced
         if result.returncode == 1 and "SandboxMemoryError" in result.stderr:
-            return  # Test passed - limit enforced, cascading error during handling
-        self.fail(f"Allocation limit=1 not enforced: {result.stderr}")
+            return  # Test passed - limit enforced
+        if result.returncode == 2:
+            self.fail("Allocation limit=1 not enforced - loop completed")
+        self.fail(f"Unexpected result: returncode={result.returncode} stderr={result.stderr!r}")
 
     def test_limit_one_iteration(self):
         """Setting max_iterations to 1 should allow exactly one iteration."""

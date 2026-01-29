@@ -175,6 +175,9 @@ _PySandbox_EnterScope(void)
     sandbox->counters.iteration_count = 0;
     sandbox->counters.operation_count = 0;
 
+    /* Update tracing state - statement counting requires tracing enabled */
+    _PyThreadState_UpdateTracingState(tstate);
+
     return 0;
 }
 
@@ -255,8 +258,13 @@ _PySandbox_AddFrameToScope(void)
     }
 
     /* Add current frame's filename to the registered set */
-    return add_filename_to_set(&sandbox->registered_filenames,
-                              frame->f_code->co_filename);
+    int result = add_filename_to_set(&sandbox->registered_filenames,
+                                     frame->f_code->co_filename);
+    if (result == 0) {
+        /* Update tracing state - statement counting requires tracing enabled */
+        _PyThreadState_UpdateTracingState(tstate);
+    }
+    return result;
 }
 
 /* ============ Filename-Based Scope Management ============ */
@@ -265,13 +273,19 @@ int
 _PySandbox_AddFilename(PyObject *filename)
 {
     assert(filename != NULL);
-    PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp == NULL) {
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL || tstate->interp == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
         return -1;
     }
+    PyInterpreterState *interp = tstate->interp;
 
-    return add_filename_to_set(&interp->sandbox.registered_filenames, filename);
+    int result = add_filename_to_set(&interp->sandbox.registered_filenames, filename);
+    if (result == 0) {
+        /* Update tracing state - statement counting requires tracing enabled */
+        _PyThreadState_UpdateTracingState(tstate);
+    }
+    return result;
 }
 
 int

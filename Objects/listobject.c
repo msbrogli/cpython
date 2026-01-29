@@ -217,6 +217,12 @@ static PyObject *
 list_new_prealloc(Py_ssize_t size)
 {
     assert(size > 0);
+
+    /* Check sandbox limits before allocating */
+    if (_PySandbox_CheckListSize(size) < 0) {
+        return NULL;
+    }
+
     PyListObject *op = (PyListObject *) PyList_New(0);
     if (op == NULL) {
         return NULL;

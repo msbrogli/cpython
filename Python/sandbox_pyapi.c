@@ -258,7 +258,7 @@ sandbox_set_##attr_name(_PySandboxObject *self, PyObject *value, void *closure) 
  * Note: Validates that values don't exceed SANDBOX_MAX_LIMIT to prevent
  * integer overflow when doing comparisons like `count == max + 1` or
  * `count > max + ALLOCATION_GRACE_HEADROOM`. */
-#define SANDBOX_UINT64_GETSET(attr_name, field_path)                       \
+#define SANDBOX_UINT64_GETSET_WITH_HOOK(attr_name, field_path, hook)       \
 static PyObject *                                                          \
 sandbox_get_##attr_name(_PySandboxObject *self, void *closure)             \
 {                                                                          \
@@ -285,8 +285,12 @@ sandbox_set_##attr_name(_PySandboxObject *self, PyObject *value, void *closure) 
     PyInterpreterState *interp = sandbox_get_interp();                     \
     if (interp == NULL) return -1;                                         \
     interp->sandbox.field_path = (uint64_t)v;                              \
+    hook                                                                   \
     return 0;                                                              \
 }
+
+#define SANDBOX_UINT64_GETSET(attr_name, field_path) \
+    SANDBOX_UINT64_GETSET_WITH_HOOK(attr_name, field_path, /* no hook */)
 
 /* int (bool) property getter/setter helpers */
 #define SANDBOX_BOOL_GETSET(attr_name, field_path)                         \
@@ -335,9 +339,15 @@ SANDBOX_SSIZE_GETSET(max_tuple_size, limits.max_tuple_size)
 
 /* ---- uint64_t R/W properties ---- */
 SANDBOX_UINT64_GETSET(max_allocations, limits.max_allocations)
-SANDBOX_UINT64_GETSET(max_statements, limits.max_statements)
 SANDBOX_UINT64_GETSET(max_iterations, limits.max_iterations)
 SANDBOX_UINT64_GETSET(max_operations, limits.max_operations)
+
+/* max_statements needs to update tracing state when changed */
+#define UPDATE_TRACING_STATE_HOOK \
+    { PyThreadState *tstate = _PyThreadState_GET(); \
+      if (tstate != NULL) _PyThreadState_UpdateTracingState(tstate); }
+
+SANDBOX_UINT64_GETSET_WITH_HOOK(max_statements, limits.max_statements, UPDATE_TRACING_STATE_HOOK)
 
 /* ---- bool R/W properties ---- */
 SANDBOX_BOOL_GETSET(allow_float, limits.allow_float)

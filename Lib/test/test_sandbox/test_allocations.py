@@ -70,17 +70,18 @@ for _ in range(100):
 
     def test_exceeding_scoped_allocation_limit_raises_memory_error(self):
         """Exceeding scoped allocation limit should raise SandboxMemoryError."""
+        # Note: We don't use try/except in the sandboxed code because exception
+        # handling itself requires allocations, which can cause cascading failures.
+        # Instead, we just let the error propagate and check stderr.
         code = '''
 import sys
-sys.sandbox.set_limits(max_allocations=100)
+sys.sandbox.set_limits(max_allocations=500)
 sys.sandbox.enter_scope()
 a = []
-try:
-    for i in range(1200):
-        a = [a]
-    sys.exit(2)  # Should not reach here
-except SandboxMemoryError:
-    sys.exit(0)  # Successfully caught SandboxMemoryError
+for i in range(2000):
+    a.append([i])
+# Should not reach here
+sys.exit(2)
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -88,18 +89,13 @@ except SandboxMemoryError:
             text=True,
             timeout=10
         )
-        # Exit codes: 0 = success (caught SandboxMemoryError), 2 = error not raised
-        # Any other code indicates unexpected behavior
-        if result.returncode == 0:
-            return  # Test passed - SandboxMemoryError was raised and caught
+        # Exit code 1 with SandboxMemoryError in stderr means limit was enforced
+        if result.returncode == 1 and "SandboxMemoryError" in result.stderr:
+            return  # Test passed
         elif result.returncode == 2:
             self.fail("SandboxMemoryError was not raised - loop completed without limit")
-        elif result.returncode == 1:
-            # Uncaught exception - check if it was SandboxMemoryError
-            self.assertIn("SandboxMemoryError", result.stderr,
-                          f"Unexpected error: stdout={result.stdout!r} stderr={result.stderr!r}")
         else:
-            self.fail(f"Unexpected exit code {result.returncode}: "
+            self.fail(f"Unexpected result: returncode={result.returncode} "
                      f"stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_reset_allocation_count(self):

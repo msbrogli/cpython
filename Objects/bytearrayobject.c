@@ -6,6 +6,7 @@
 #include "pycore_bytes_methods.h"
 #include "pycore_bytesobject.h"
 #include "pycore_object.h"        // _PyObject_GC_UNTRACK()
+#include "pycore_sandbox.h"       // _PySandbox_CheckBytesLength()
 #include "pycore_strhex.h"        // _Py_strhex_with_sep()
 #include "pycore_long.h"          // _PyLong_FromUnsignedChar()
 #include "bytesobject.h"
@@ -121,6 +122,11 @@ PyByteArray_FromStringAndSize(const char *bytes, Py_ssize_t size)
         return PyErr_NoMemory();
     }
 
+    /* Check sandbox limits before allocation */
+    if (_PySandbox_CheckBytesLength(size) < 0) {
+        return NULL;
+    }
+
     new = PyObject_New(PyByteArrayObject, &PyByteArray_Type);
     if (new == NULL)
         return NULL;
@@ -187,6 +193,13 @@ PyByteArray_Resize(PyObject *self, Py_ssize_t requested_size)
     }
     if (!_canresize(obj)) {
         return -1;
+    }
+
+    /* Check sandbox limits when growing */
+    if (requested_size > Py_SIZE(self)) {
+        if (_PySandbox_CheckBytesLength(requested_size) < 0) {
+            return -1;
+        }
     }
 
     if (size + logical_offset + 1 <= alloc) {

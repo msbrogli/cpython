@@ -1506,6 +1506,10 @@ bytes_repeat(PyBytesObject *a, Py_ssize_t n)
         Py_INCREF(a);
         return (PyObject *)a;
     }
+    /* Check sandbox limits before allocation */
+    if (_PySandbox_CheckBytesLength(size) < 0) {
+        return NULL;
+    }
     nbytes = (size_t)size;
     if (nbytes + PyBytesObject_SIZE <= nbytes) {
         PyErr_SetString(PyExc_OverflowError,

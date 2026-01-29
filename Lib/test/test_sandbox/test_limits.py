@@ -293,6 +293,142 @@ class TupleLimitsTests(unittest.TestCase):
         self.assertIn("sandbox limit", str(cm.exception))
 
 
+class BytesLimitsTests(unittest.TestCase):
+    """Test bytes length limits."""
+
+    def setUp(self):
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        try:
+            sys.sandbox.remove_filename(SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
+            pass
+        sys.sandbox.set_limits(**self.original_limits)
+
+    def test_small_bytes_allowed(self):
+        """Small bytes should always be allowed."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        globs = _run_scoped("b = bytes(50)")
+        self.assertEqual(len(globs['b']), 50)
+
+    def test_large_bytes_blocked(self):
+        """Large bytes exceeding limit should raise SandboxOverflowError."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("b = bytes(200)")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+    def test_bytes_multiplication_blocked(self):
+        """Bytes multiplication exceeding limit should raise SandboxOverflowError.
+
+        Note: Uses runtime variable to avoid compile-time constant folding.
+        """
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("n = 200; b = b'a' * n")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+
+class BytearrayLimitsTests(unittest.TestCase):
+    """Test bytearray length limits (uses same max_bytes_length as bytes)."""
+
+    def setUp(self):
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        try:
+            sys.sandbox.remove_filename(SCOPED_FILENAME)
+        except (RuntimeError, KeyError):
+            pass
+        sys.sandbox.set_limits(**self.original_limits)
+
+    def test_small_bytearray_allowed(self):
+        """Small bytearray should always be allowed."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        globs = _run_scoped("ba = bytearray(50)")
+        self.assertEqual(len(globs['ba']), 50)
+
+    def test_large_bytearray_creation_blocked(self):
+        """Large bytearray(n) exceeding limit should raise SandboxOverflowError."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("ba = bytearray(200)")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+    def test_bytearray_append_blocked_at_limit(self):
+        """bytearray.append() exceeding limit should raise SandboxOverflowError."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("""
+ba = bytearray()
+for i in range(200):
+    ba.append(65)
+""")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+    def test_bytearray_extend_blocked(self):
+        """bytearray.extend() exceeding limit should raise SandboxOverflowError."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("ba = bytearray(); ba.extend(b'x' * 200)")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+    def test_bytearray_multiplication_blocked(self):
+        """bytearray multiplication exceeding limit should raise SandboxOverflowError."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("ba = bytearray(b'a') * 200")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+    def test_bytearray_inplace_multiplication_blocked(self):
+        """bytearray in-place multiplication (ba *= n) exceeding limit should raise."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("ba = bytearray(b'abc'); ba *= 50")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+    def test_bytearray_concat_blocked(self):
+        """bytearray concatenation exceeding limit should raise SandboxOverflowError."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("ba = bytearray(b'a' * 60) + bytearray(b'b' * 60)")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+    def test_bytearray_inplace_concat_blocked(self):
+        """bytearray in-place concatenation (ba += x) exceeding limit should raise."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("ba = bytearray(b'a' * 60); ba += b'b' * 60")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+    def test_bytearray_from_iterable_blocked(self):
+        """bytearray from iterable exceeding limit should raise SandboxOverflowError."""
+        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        with self.assertRaises(SandboxOverflowError) as cm:
+            _run_scoped("ba = bytearray(range(200))")
+        self.assertIn("sandbox limit", str(cm.exception))
+
+    def test_no_limit_allows_large_bytearray(self):
+        """With no limit (0), large bytearray should be allowed."""
+        sys.sandbox.set_limits(max_bytes_length=0)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        globs = _run_scoped("ba = bytearray(1000)")
+        self.assertEqual(len(globs['ba']), 1000)
+
+
 class TypeRestrictionTests(unittest.TestCase):
     """Test type restriction (float, complex)."""
 

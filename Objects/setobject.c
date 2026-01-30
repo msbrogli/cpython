@@ -579,6 +579,13 @@ set_merge(PySetObject *so, PyObject *otherset)
     if (other == so || other->used == 0)
         /* a.update(a) or a.update(set()); nothing to do */
         return 0;
+
+    /* Sandbox check: verify final size is within limits.
+     * This is an upper bound - actual size may be smaller due to overlapping keys. */
+    if (_PySandbox_CheckSetSize(so->used + other->used) < 0) {
+        return -1;
+    }
+
     /* Do one big resize at the start, rather than
      * incrementally resizing as we insert new keys.  Expect
      * that there will be no (or few) overlapping keys.

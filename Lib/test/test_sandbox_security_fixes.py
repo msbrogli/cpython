@@ -288,5 +288,75 @@ except SandboxSecurityError:
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
 
+class SetCopyBypassTest(unittest.TestCase):
+    """Test that set copy operations respect size limits (security fix)."""
+
+    def test_set_copy_blocked(self):
+        """set.copy() should be blocked when source exceeds limit."""
+        code = '''
+import sys
+# Create large set BEFORE sandbox
+big_set = {i for i in range(500)}
+sys.sandbox.max_set_size = 100
+sys.sandbox.add_filename('<string>')
+try:
+    copy = big_set.copy()
+    print(f"FAIL: copied {len(copy)} items")
+except SandboxOverflowError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_set_update_from_large_set_blocked(self):
+        """set.update() from large set should be blocked."""
+        code = '''
+import sys
+big_set = {i for i in range(500)}
+sys.sandbox.max_set_size = 100
+sys.sandbox.add_filename('<string>')
+try:
+    small_set = set()
+    small_set.update(big_set)
+    print(f"FAIL: updated to {len(small_set)} items")
+except SandboxOverflowError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_set_union_blocked(self):
+        """set.union() should be blocked when result exceeds limit."""
+        code = '''
+import sys
+big_set = {i for i in range(500)}
+sys.sandbox.max_set_size = 100
+sys.sandbox.add_filename('<string>')
+try:
+    result = set().union(big_set)
+    print(f"FAIL: union created {len(result)} items")
+except SandboxOverflowError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_set_copy_allowed_under_limit(self):
+        """set.copy() should work when source is under limit."""
+        code = '''
+import sys
+small_set = {1, 2, 3, 4, 5}
+sys.sandbox.max_set_size = 100
+sys.sandbox.add_filename('<string>')
+copy = small_set.copy()
+if len(copy) == 5:
+    print("PASS")
+else:
+    print(f"FAIL: {len(copy)}")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
 if __name__ == '__main__':
     unittest.main()

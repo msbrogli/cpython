@@ -3082,6 +3082,12 @@ handle_eval_breaker:
 
         TARGET(LOAD_NAME) {
             PyObject *name = GETITEM(names, oparg);
+
+            /* Sandbox check: block dunder variable names (e.g., __builtins__) */
+            if (_PySandbox_CheckDunderAccess(name) < 0) {
+                goto error;
+            }
+
             PyObject *locals = LOCALS();
             PyObject *v;
             if (locals == NULL) {
@@ -3149,6 +3155,12 @@ handle_eval_breaker:
             int push_null = oparg & 1;
             PEEK(0) = NULL;
             PyObject *name = GETITEM(names, oparg>>1);
+
+            /* Sandbox check: block dunder variable names (e.g., __builtins__) */
+            if (_PySandbox_CheckDunderAccess(name) < 0) {
+                goto error;
+            }
+
             PyObject *v;
             if (PyDict_CheckExact(GLOBALS())
                 && PyDict_CheckExact(BUILTINS()))

@@ -556,6 +556,8 @@ Called from:
 | `Python/ceval.c` | line tracing | `_PySandbox_CheckScopeStatement()` |
 | `Python/ceval.c` | `SANDBOX_COUNT` | `_PySandbox_CheckScopeOperation()` |
 | `Python/ceval.c` | `LOAD_ATTR`, etc. | `_PySandbox_CheckDunderAccess()` |
+| `Python/ceval.c` | `LOAD_NAME` (dunder variables) | `_PySandbox_CheckDunderAccess()` |
+| `Python/ceval.c` | `LOAD_GLOBAL` (dunder variables) | `_PySandbox_CheckDunderAccess()` |
 | `Modules/_io/_iomodule.c` | `_io_open_impl()` | `_PySandbox_CheckIOAllowed()` |
 | `Modules/_io/fileio.c` | `_io_FileIO___init___impl()` | `_PySandbox_CheckIOAllowed()` |
 | `Modules/socketmodule.c` | `sock_initobj_impl()` | `_PySandbox_CheckIOAllowed()` |

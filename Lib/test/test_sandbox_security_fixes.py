@@ -494,6 +494,56 @@ else:
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
 
+class DunderVariableAccessTest(unittest.TestCase):
+    """Test that dunder variable names are blocked via LOAD_NAME/LOAD_GLOBAL."""
+
+    def test_builtins_access_blocked(self):
+        """__builtins__ should be blocked via LOAD_NAME when allow_dunder_access=0."""
+        code = '''
+import sys
+sys.sandbox.allow_dunder_access = 0
+sys.sandbox.add_filename('<string>')
+try:
+    x = __builtins__
+    print(f"FAIL: accessed __builtins__")
+except SandboxAttributeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_name_access_blocked(self):
+        """__name__ should be blocked via LOAD_NAME when allow_dunder_access=0."""
+        code = '''
+import sys
+sys.sandbox.allow_dunder_access = 0
+sys.sandbox.add_filename('<string>')
+try:
+    x = __name__
+    print(f"FAIL: accessed __name__")
+except SandboxAttributeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_dunder_access_allowed_by_default(self):
+        """Dunder variable access should be allowed by default."""
+        code = '''
+import sys
+sys.sandbox.add_filename('<string>')
+# allow_dunder_access defaults to 1 (allowed)
+x = __name__
+# __name__ is "__main__" when running with -c
+if x is not None:
+    print("PASS")
+else:
+    print("FAIL: __name__ is None")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
 class DictUpdateBypassTest(unittest.TestCase):
     """Test that dict.update() respects size limits (security fix)."""
 

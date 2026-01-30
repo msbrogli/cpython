@@ -35,11 +35,13 @@ class StatementLimitPropertySetterTest(unittest.TestCase):
         """Statement count should increment when max_statements is set via property."""
         code = '''
 import sys
-sys.sandbox.max_statements = 1000
-sys.sandbox.add_filename('<string>')
-initial = sys.sandbox.statement_count
+# Store reference to sandbox before entering scope (sys access is blocked in scope)
+sandbox = sys.sandbox
+sandbox.max_statements = 1000
+sandbox.add_filename('<string>')
+initial = sandbox.statement_count
 for i in range(10): pass
-final = sys.sandbox.statement_count
+final = sandbox.statement_count
 if final > initial:
     print("PASS")
 else:
@@ -328,6 +330,26 @@ except SandboxTypeError:
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
+    def test_float_constant_folded_blocked(self):
+        """Constant-folded float literals are blocked by LOAD_CONST check.
+
+        `1 / 2` is constant-folded at compile time to 0.5. The LOAD_CONST
+        opcode check blocks loading this float constant when allow_float=0.
+        """
+        code = '''
+import sys
+sys.sandbox.allow_float = 0
+sys.sandbox.add_filename('<string>')
+try:
+    # 1/2 is constant-folded to 0.5 at compile time
+    x = 1 / 2
+    print(f"FAIL: created float {x}")
+except SandboxTypeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
     def test_float_allowed_by_default(self):
         """Float should be allowed by default."""
         code = '''
@@ -383,6 +405,25 @@ except SandboxTypeError:
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
+    def test_complex_literal_blocked(self):
+        """Complex literals are blocked by LOAD_CONST check.
+
+        `1+2j` is a complex literal that gets loaded via LOAD_CONST.
+        The LOAD_CONST opcode check blocks loading this when allow_complex=0.
+        """
+        code = '''
+import sys
+sys.sandbox.allow_complex = 0
+sys.sandbox.add_filename('<string>')
+try:
+    x = 1+2j  # Complex literal
+    print(f"FAIL: created complex {x}")
+except SandboxTypeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
     def test_complex_allowed_by_default(self):
         """Complex should be allowed by default."""
         code = '''
@@ -393,6 +434,61 @@ if x == (1+2j):
     print("PASS")
 else:
     print(f"FAIL: {x}")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
+class LoadConstSizeCheckTest(unittest.TestCase):
+    """Test that LOAD_CONST checks size limits on constant literals."""
+
+    def test_large_string_literal_blocked(self):
+        """Large string literal should be blocked when it exceeds max_str_length."""
+        # Create code with a large string literal
+        large_string = 'x' * 1000
+        code = f'''
+import sys
+sys.sandbox.max_str_length = 100
+sys.sandbox.add_filename('<string>')
+try:
+    s = "{large_string}"
+    print(f"FAIL: created string of length {{len(s)}}")
+except SandboxOverflowError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_large_tuple_literal_blocked(self):
+        """Large tuple literal should be blocked when it exceeds max_tuple_size."""
+        # Create a tuple literal with many elements
+        tuple_elements = ', '.join(['1'] * 200)
+        code = f'''
+import sys
+sys.sandbox.max_tuple_size = 50
+sys.sandbox.add_filename('<string>')
+try:
+    t = ({tuple_elements})
+    print(f"FAIL: created tuple of size {{len(t)}}")
+except SandboxOverflowError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_small_constants_allowed(self):
+        """Small constants should be allowed when under limits."""
+        code = '''
+import sys
+sys.sandbox.max_str_length = 100
+sys.sandbox.max_tuple_size = 50
+sys.sandbox.add_filename('<string>')
+s = "hello"
+t = (1, 2, 3)
+if len(s) == 5 and len(t) == 3:
+    print("PASS")
+else:
+    print(f"FAIL: s={len(s)}, t={len(t)}")
 '''
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")

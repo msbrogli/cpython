@@ -549,6 +549,8 @@ Called from:
 | `Objects/tupleobject.c` | `PyTuple_New()` | `_PySandbox_CheckTupleSize()` |
 | `Objects/floatobject.c` | `PyFloat_FromDouble()` | `_PySandbox_CheckTypeAllowed()` |
 | `Objects/complexobject.c` | `PyComplex_FromCComplex()` | `_PySandbox_CheckTypeAllowed()` |
+| `Python/ceval.c` | `LOAD_CONST` (type checks) | `_PySandbox_CheckTypeAllowed()` (float/complex) |
+| `Python/ceval.c` | `LOAD_CONST` (size checks) | `_PySandbox_CheckStrLength()`, `_PySandbox_CheckBytesLength()`, `_PySandbox_CheckTupleSize()`, `_PySandbox_CheckIntSize()` |
 | `Objects/typeobject.c` | `type_call()` | `_PySandbox_CheckTypeAllowed()` |
 | `Modules/gcmodule.c` | `_PyObject_GC_Alloc()` | `_PySandbox_CheckAllocation()` |
 | `Python/ceval.c` | line tracing | `_PySandbox_CheckScopeStatement()` |

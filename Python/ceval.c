@@ -1847,6 +1847,39 @@ handle_eval_breaker:
         TARGET(LOAD_CONST) {
             PREDICTED(LOAD_CONST);
             PyObject *value = GETITEM(consts, oparg);
+
+            /* Sandbox checks for type restrictions and size limits on constants */
+            if (PyFloat_Check(value)) {
+                if (_PySandbox_CheckTypeAllowed(&PyFloat_Type) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyComplex_Check(value)) {
+                if (_PySandbox_CheckTypeAllowed(&PyComplex_Type) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyUnicode_Check(value)) {
+                if (_PySandbox_CheckStrLength(PyUnicode_GET_LENGTH(value)) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyBytes_Check(value)) {
+                if (_PySandbox_CheckBytesLength(PyBytes_GET_SIZE(value)) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyTuple_Check(value)) {
+                if (_PySandbox_CheckTupleSize(PyTuple_GET_SIZE(value)) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyLong_Check(value)) {
+                if (_PySandbox_CheckIntSize(Py_ABS(Py_SIZE(value))) < 0) {
+                    goto error;
+                }
+            }
+
             Py_INCREF(value);
             PUSH(value);
             DISPATCH();
@@ -1887,6 +1920,39 @@ handle_eval_breaker:
             Py_INCREF(value);
             PUSH(value);
             value = GETITEM(consts, oparg);
+
+            /* Sandbox checks for type restrictions and size limits on constants */
+            if (PyFloat_Check(value)) {
+                if (_PySandbox_CheckTypeAllowed(&PyFloat_Type) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyComplex_Check(value)) {
+                if (_PySandbox_CheckTypeAllowed(&PyComplex_Type) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyUnicode_Check(value)) {
+                if (_PySandbox_CheckStrLength(PyUnicode_GET_LENGTH(value)) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyBytes_Check(value)) {
+                if (_PySandbox_CheckBytesLength(PyBytes_GET_SIZE(value)) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyTuple_Check(value)) {
+                if (_PySandbox_CheckTupleSize(PyTuple_GET_SIZE(value)) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyLong_Check(value)) {
+                if (_PySandbox_CheckIntSize(Py_ABS(Py_SIZE(value))) < 0) {
+                    goto error;
+                }
+            }
+
             Py_INCREF(value);
             PUSH(value);
             DISPATCH();
@@ -1918,6 +1984,39 @@ handle_eval_breaker:
 
         TARGET(LOAD_CONST__LOAD_FAST) {
             PyObject *value = GETITEM(consts, oparg);
+
+            /* Sandbox checks for type restrictions and size limits on constants */
+            if (PyFloat_Check(value)) {
+                if (_PySandbox_CheckTypeAllowed(&PyFloat_Type) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyComplex_Check(value)) {
+                if (_PySandbox_CheckTypeAllowed(&PyComplex_Type) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyUnicode_Check(value)) {
+                if (_PySandbox_CheckStrLength(PyUnicode_GET_LENGTH(value)) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyBytes_Check(value)) {
+                if (_PySandbox_CheckBytesLength(PyBytes_GET_SIZE(value)) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyTuple_Check(value)) {
+                if (_PySandbox_CheckTupleSize(PyTuple_GET_SIZE(value)) < 0) {
+                    goto error;
+                }
+            }
+            else if (PyLong_Check(value)) {
+                if (_PySandbox_CheckIntSize(Py_ABS(Py_SIZE(value))) < 0) {
+                    goto error;
+                }
+            }
+
             NEXTOPARG();
             next_instr++;
             Py_INCREF(value);

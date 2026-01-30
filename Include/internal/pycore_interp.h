@@ -179,9 +179,6 @@ struct _is {
 
     int int_max_str_digits;
 
-    /* Sandbox state: resource limits and object creation hooks */
-    _PySandboxState sandbox;
-
     /* The following fields are here to avoid allocation during init.
        The data is exposed through PyInterpreterState pointer fields.
        These fields should not be accessed directly outside of init.
@@ -196,6 +193,11 @@ struct _is {
 
     /* the initial PyInterpreterState.threads.head */
     PyThreadState _initial_thread;
+
+    /* Sandbox state: resource limits and object creation hooks.
+       Placed at end of struct to maintain ABI compatibility with v3.11.14 -
+       all fields above retain their original offsets. */
+    _PySandboxState sandbox;
 };
 
 

@@ -99,9 +99,6 @@ struct _ts {
     int recursion_limit;
     int recursion_headroom; /* Allow 50 more calls to handle any errors. */
 
-    /* Sandbox recursion depth: count of sandbox-scoped frames in call stack */
-    uint64_t sandbox_recursion_depth;
-
     /* 'tracing' keeps track of the execution depth when tracing/profiling.
        This is to prevent the actual trace/profile code from being recorded in
        the trace/profile. */
@@ -186,6 +183,11 @@ struct _ts {
     PyObject **datastack_top;
     PyObject **datastack_limit;
     /* XXX signal handlers should also be here */
+
+    /* Sandbox recursion depth: count of sandbox-scoped frames in call stack.
+       Placed here (before exc_state) to maintain ABI compatibility with v3.11.14 -
+       all fields above retain their original offsets. */
+    uint64_t sandbox_recursion_depth;
 
     /* The following fields are here to avoid allocation during init.
        The data is exposed through PyThreadState pointer fields.

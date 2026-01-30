@@ -146,6 +146,8 @@ except Exception as e:
 import sys
 import os
 sys.sandbox.reset()
+sys.sandbox.allowed_imports = {('os', '')}
+sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = True
 sys.sandbox.add_filename('<string>')
 try:
@@ -191,6 +193,7 @@ import sys
 import os
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
+sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename('<string>')
 try:
@@ -216,6 +219,7 @@ import sys
 import os
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
+sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename('<string>')
 try:
@@ -236,6 +240,7 @@ import sys
 import os
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
+sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename('<string>')
 try:
@@ -260,6 +265,7 @@ import sys
 import os
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
+sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename('<string>')
 try:
@@ -280,6 +286,7 @@ import sys
 import os
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
+sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename('<string>')
 try:
@@ -304,6 +311,7 @@ import sys
 import os
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
+sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename('<string>')
 try:
@@ -325,6 +333,7 @@ import sys
 import os
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
+sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename('<string>')
 try:
@@ -349,6 +358,7 @@ import sys
 import os
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
+sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename('<string>')
 try:
@@ -375,6 +385,7 @@ import sys
 import _socket
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('_socket', '')}
+sys.sandbox.allowed_modules = {'_socket'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename('<string>')
 try:
@@ -396,6 +407,7 @@ import sys
 import _socket
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('_socket', '')}
+sys.sandbox.allowed_modules = {'_socket'}
 sys.sandbox.allow_io = True
 sys.sandbox.add_filename('<string>')
 try:
@@ -415,6 +427,7 @@ import sys
 import socket
 sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('_socket', ''), ('socket', '')}
+sys.sandbox.allowed_modules = {'_socket', 'socket'}
 sys.sandbox.allow_io = False
 sys.sandbox.add_filename(socket.__file__)  # Add socket.py to scope
 sys.sandbox.add_filename('<string>')

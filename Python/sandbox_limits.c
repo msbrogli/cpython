@@ -582,6 +582,11 @@ PySandbox_SetLimits(
     Py_ssize_t max_set_size,
     int allow_float)
 {
+    /* Block from within sandbox scope. */
+    if (_PySandbox_CheckConfigModification() < 0) {
+        return -1;
+    }
+
     /* Validate parameters */
     if (max_int_digits < 0) {
         PyErr_SetString(PyExc_ValueError, "max_int_digits cannot be negative");

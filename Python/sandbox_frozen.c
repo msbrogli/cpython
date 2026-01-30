@@ -196,6 +196,11 @@ _PySandbox_CheckFrozen(PyObject *obj)
 void
 PySandbox_SetFrozenMode(int mode)
 {
+    /* Block from within sandbox scope. */
+    if (_PySandbox_CheckConfigModification() < 0) {
+        return;
+    }
+
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp != NULL) {
         interp->sandbox.frozen_mode = mode ? 1 : 0;
@@ -218,6 +223,11 @@ void
 PySandbox_FreezeObject(PyObject *obj)
 {
     if (obj == NULL) {
+        return;
+    }
+
+    /* Block from within sandbox scope. */
+    if (_PySandbox_CheckConfigModification() < 0) {
         return;
     }
 
@@ -253,6 +263,11 @@ void
 PySandbox_SetObjectMutable(PyObject *obj, int mutable)
 {
     if (obj == NULL) {
+        return;
+    }
+
+    /* Block from within sandbox scope. */
+    if (_PySandbox_CheckConfigModification() < 0) {
         return;
     }
 
@@ -325,6 +340,11 @@ _PySandbox_MaybeMarkMutable(PyObject *obj)
 void
 PySandbox_SetAutoMutableMode(int mode)
 {
+    /* Block from within sandbox scope. */
+    if (_PySandbox_CheckConfigModification() < 0) {
+        return;
+    }
+
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp != NULL) {
         interp->sandbox.auto_mutable = mode ? 1 : 0;

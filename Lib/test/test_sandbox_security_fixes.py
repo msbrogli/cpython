@@ -804,5 +804,102 @@ else:
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
 
+class TracebackFrameBlockingTest(unittest.TestCase):
+    """Test that tb_frame access is blocked in sandbox scope."""
+
+    def test_tb_frame_blocked(self):
+        """tb.tb_frame should be blocked in sandbox scope."""
+        code = '''
+import sys
+# Store sys reference before entering sandbox scope
+exc_info = sys.exc_info
+sys.sandbox.module_access_restrict_mode = True
+sys.sandbox.allowed_modules = frozenset({"sys"})
+sys.sandbox.add_filename('<string>')
+try:
+    raise ValueError("test")
+except:
+    _, _, tb = exc_info()
+    try:
+        frame = tb.tb_frame
+        print(f"FAIL: accessed tb_frame")
+    except SandboxSecurityError:
+        print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_tb_frame_allowed_outside_scope(self):
+        """tb.tb_frame should be accessible outside sandbox scope."""
+        code = '''
+import sys
+# Don't add filename - we're testing outside sandbox scope
+try:
+    raise ValueError("test")
+except:
+    _, _, tb = sys.exc_info()
+    frame = tb.tb_frame
+    if frame is not None:
+        print("PASS")
+    else:
+        print("FAIL: frame is None")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_frame_traversal_blocked(self):
+        """Frame traversal via traceback should be blocked in sandbox scope."""
+        code = '''
+import sys
+# Store sys reference before entering sandbox scope
+exc_info = sys.exc_info
+
+def trusted_func():
+    secret = "sensitive_data"
+    raise ValueError("error")
+
+sys.sandbox.module_access_restrict_mode = True
+sys.sandbox.allowed_modules = frozenset({"sys"})
+sys.sandbox.add_filename('<string>')
+try:
+    trusted_func()
+except:
+    _, _, tb = exc_info()
+    try:
+        # Attempt to traverse frames and leak data
+        frame = tb.tb_frame
+        # If we get here, try to access f_back (but should never reach this)
+        while frame:
+            frame = frame.f_back
+        print("FAIL: frame traversal succeeded")
+    except SandboxSecurityError:
+        print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_exc_info_tb_frame_blocked(self):
+        """sys.exc_info()[2].tb_frame should be blocked in sandbox scope."""
+        code = '''
+import sys
+# Store sys reference before entering sandbox scope
+exc_info = sys.exc_info
+sys.sandbox.module_access_restrict_mode = True
+sys.sandbox.allowed_modules = frozenset({"sys"})
+sys.sandbox.add_filename('<string>')
+try:
+    1/0
+except ZeroDivisionError:
+    tb = exc_info()[2]
+    try:
+        _ = tb.tb_frame
+        print("FAIL: accessed tb_frame via exc_info")
+    except SandboxSecurityError:
+        print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
 if __name__ == '__main__':
     unittest.main()

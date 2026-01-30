@@ -337,6 +337,11 @@ _PySandbox_ResetCounters(void)
 int
 PySandbox_Suspend(void)
 {
+    /* Block from within sandbox scope. */
+    if (_PySandbox_CheckConfigModification() < 0) {
+        return -1;
+    }
+
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No interpreter state");
@@ -355,6 +360,11 @@ PySandbox_Suspend(void)
 int
 PySandbox_Resume(void)
 {
+    /* Block from within sandbox scope. */
+    if (_PySandbox_CheckConfigModification() < 0) {
+        return -1;
+    }
+
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp == NULL) {
         PyErr_SetString(PyExc_RuntimeError, "No interpreter state");

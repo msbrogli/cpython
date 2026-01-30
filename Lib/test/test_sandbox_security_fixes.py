@@ -600,6 +600,48 @@ print("PASS")
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
 
+class InputBlockingTest(unittest.TestCase):
+    """Test that input() is blocked in sandbox (DoS prevention)."""
+
+    def test_input_blocked(self):
+        """input() should be blocked when allow_unsafe=0."""
+        code = '''
+import sys
+sys.sandbox.allow_unsafe = 0
+sys.sandbox.add_filename('<string>')
+try:
+    x = input("Enter: ")
+    print("FAIL: input() allowed")
+except SandboxSecurityError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_input_allowed_with_allow_unsafe(self):
+        """input() should not raise SandboxSecurityError when allow_unsafe=1."""
+        # We can't fully test input() working because it would block on stdin.
+        # Instead, verify that the sandbox check passes by checking the error type.
+        # With allow_unsafe=1 and stdin not a TTY, input() will get EOF and raise EOFError
+        # or return empty string, but NOT raise SandboxSecurityError.
+        code = '''
+import sys
+sys.sandbox.allow_unsafe = 1
+sys.sandbox.add_filename('<string>')
+try:
+    # input() with no actual stdin will raise EOFError or RuntimeError
+    x = input()
+    print("PASS: input() returned (no SandboxSecurityError)")
+except SandboxSecurityError:
+    print("FAIL: SandboxSecurityError raised with allow_unsafe=1")
+except (EOFError, RuntimeError, ValueError) as e:
+    # These are expected when stdin is not available/TTY
+    print(f"PASS: {type(e).__name__} (not SandboxSecurityError)")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
 class DictUpdateBypassTest(unittest.TestCase):
     """Test that dict.update() respects size limits (security fix)."""
 

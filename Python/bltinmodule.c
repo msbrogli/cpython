@@ -2117,6 +2117,11 @@ static PyObject *
 builtin_input_impl(PyObject *module, PyObject *prompt)
 /*[clinic end generated code: output=83db5a191e7a0d60 input=159c46d4ae40977e]*/
 {
+    /* Sandbox check: block input() - causes DoS by blocking indefinitely */
+    if (_PySandbox_CheckUnsafeBlocked("input") < 0) {
+        return NULL;
+    }
+
     PyThreadState *tstate = _PyThreadState_GET();
     PyObject *fin = _PySys_GetAttr(
         tstate, &_Py_ID(stdin));

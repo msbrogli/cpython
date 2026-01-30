@@ -249,6 +249,16 @@ typedef struct {
      * Stored as frozenset for O(1) getter performance. */
     PyObject *allowed_modules;
 
+    /* Side tables for frozen mode (avoids per-object ob_flags ABI change).
+     * mutable_objects: set of objects allowed to be mutated in frozen mode.
+     * frozen_objects: set of individually frozen objects.
+     * Uses weak references where possible, allowing tracked objects to be
+     * garbage collected. Objects that don't support weak references (e.g.,
+     * built-in type instances) fall back to strong references.
+     * NULL when not in use (lazy-initialized). */
+    PyObject *mutable_objects;
+    PyObject *frozen_objects;
+
     /* Recursion prevention - nonzero during limit check (to avoid recursive
        checks when error handling creates strings/integers) */
     int suppress_checks;
@@ -269,6 +279,8 @@ typedef struct {
     .registered_filenames = NULL,           \
     .allowed_imports = NULL,                \
     .allowed_modules = NULL,                \
+    .mutable_objects = NULL,                \
+    .frozen_objects = NULL,                 \
     .suppress_checks = 0,                          \
     .suspended = 0,                         \
 }
@@ -324,14 +336,14 @@ PyAPI_FUNC(int) _PySandbox_CheckIOAllowed(const char *operation);
 
 /* Check if attribute mutation is blocked on an object.
  * Returns 0 if mutation is allowed, -1 if blocked (sets SandboxAttributeError).
- * Checks: per-instance Py_OBJFLAGS_MUTABLE (fast exit),
- *         per-instance Py_OBJFLAGS_FROZEN, global frozen_mode.
- * Respects sandbox suspend state. */
+ * Checks: mutable_objects set (fast exit), frozen_objects set, global frozen_mode.
+ * Respects sandbox suspend state. Uses side tables to avoid ABI changes. */
 PyAPI_FUNC(int) _PySandbox_CheckFrozen(PyObject *obj);
 
-/* Auto-mutable: mark a newly created object as mutable if auto_mutable
- * and frozen_mode are both active and the current frame is in sandbox scope.
- * This is a no-op when either flag is off or the frame is out of scope. */
+/* Auto-mutable: add a newly created object to the mutable_objects set
+ * if auto_mutable and frozen_mode are both active and the current frame
+ * is in sandbox scope. This is a no-op when either flag is off or the
+ * frame is out of scope. */
 PyAPI_FUNC(void) _PySandbox_MaybeMarkMutable(PyObject *obj);
 
 /* Opcode restriction check - called from DO_TRACING in ceval.c.
@@ -446,23 +458,23 @@ PyAPI_FUNC(int) PySandbox_Resume(void);
 PyAPI_FUNC(int) PySandbox_IsSuspended(void);
 
 /* Set/get global frozen mode. When active, all attribute mutations are blocked
- * unless the target object has Py_OBJFLAGS_MUTABLE set. */
+ * unless the target object is in the mutable_objects set. */
 PyAPI_FUNC(void) PySandbox_SetFrozenMode(int mode);
 PyAPI_FUNC(int) PySandbox_GetFrozenMode(void);
 
-/* Freeze a specific object (set Py_OBJFLAGS_FROZEN) */
+/* Freeze a specific object (add to frozen_objects set) */
 PyAPI_FUNC(void) PySandbox_FreezeObject(PyObject *obj);
 
-/* Check if a specific object is frozen */
+/* Check if a specific object is frozen (in frozen_objects set) */
 PyAPI_FUNC(int) PySandbox_IsObjectFrozen(PyObject *obj);
 
 /* Mark an object as mutable (override frozen mode).
- * If mutable is nonzero, sets Py_OBJFLAGS_MUTABLE; otherwise clears it. */
+ * If mutable is nonzero, adds to mutable_objects set; otherwise removes. */
 PyAPI_FUNC(void) PySandbox_SetObjectMutable(PyObject *obj, int mutable);
 
 /* Set/get auto-mutable mode. When enabled alongside frozen mode,
  * newly created functions, classes, and instances within sandbox scope
- * are automatically marked as mutable (Py_OBJFLAGS_MUTABLE). */
+ * are automatically added to the mutable_objects set. */
 PyAPI_FUNC(void) PySandbox_SetAutoMutableMode(int mode);
 PyAPI_FUNC(int) PySandbox_GetAutoMutableMode(void);
 

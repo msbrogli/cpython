@@ -7,7 +7,7 @@
 # Summary
 [summary]: #summary
 
-The sandbox frozen module provides attribute mutation control through two complementary mechanisms: global frozen mode (blocking all attribute mutations) and per-object freeze/mutable flags. Auto-mutable mode automatically marks objects created within sandbox scope as mutable, allowing sandboxed code to modify its own objects while protecting shared state.
+The sandbox frozen module provides attribute mutation control through two complementary mechanisms: global frozen mode (blocking all attribute mutations) and per-object freeze/mutable tracking. Auto-mutable mode automatically marks objects created within sandbox scope as mutable, allowing sandboxed code to modify its own objects while protecting shared state.
 
 # Motivation
 [motivation]: #motivation
@@ -102,10 +102,10 @@ Without auto-mutable mode, the same code would fail on `MyClass.x = 2`.
 
 The mutation check follows this priority:
 
-1. **Mutable flag** (`Py_OBJFLAGS_MUTABLE`): If set, always allow
+1. **Mutable set**: If object is in `mutable_objects` set, always allow
 2. **Suspended**: If sandbox is suspended, allow
 3. **Scope check**: Only block mutations from within sandbox scope
-4. **Per-object frozen** (`Py_OBJFLAGS_FROZEN`): If set, block
+4. **Frozen set**: If object is in `frozen_objects` set, block
 5. **Global frozen mode**: If active, block
 
 ```python
@@ -133,7 +133,7 @@ LocalConfig.value = 99   # Allowed (mutable override)
 ## Checking Object State
 
 ```python
-sys.sandbox.is_frozen(obj)  # True if Py_OBJFLAGS_FROZEN is set
+sys.sandbox.is_frozen(obj)  # True if object is in frozen_objects set
 
 # Note: There's no is_mutable() API; check via object inspection
 # or trust that auto-mutable mode is handling it
@@ -142,23 +142,95 @@ sys.sandbox.is_frozen(obj)  # True if Py_OBJFLAGS_FROZEN is set
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
-## Object Flags
+## Side Tables for Frozen/Mutable Tracking
 
-Per-object flags are stored in `ob_flags` (added to `PyObject`):
+The implementation uses side tables (Python sets) stored in `_PySandboxState` rather than per-object flags. This avoids breaking ABI compatibility:
 
 ```c
-typedef struct _object {
-    Py_ssize_t ob_refcnt;
-    uint32_t ob_flags;      /* Per-instance sandbox flags */
-    PyTypeObject *ob_type;
-} PyObject;
+typedef struct {
+    // ... other sandbox fields ...
 
-#define Py_OBJFLAGS_FROZEN    (1U << 0)  /* Object is individually frozen */
-#define Py_OBJFLAGS_MUTABLE   (1U << 1)  /* Override: allow mutation even in frozen mode */
+    /* Side tables for frozen mode (avoids per-object ob_flags ABI change).
+     * mutable_objects: set of objects allowed to be mutated in frozen mode.
+     * frozen_objects: set of individually frozen objects.
+     * Uses weak references where possible, allowing tracked objects to be
+     * garbage collected. Objects that don't support weak references (e.g.,
+     * built-in type instances) fall back to strong references.
+     * NULL when not in use (lazy-initialized). */
+    PyObject *mutable_objects;
+    PyObject *frozen_objects;
 
-#define Py_IS_FROZEN(op)  (((PyObject*)(op))->ob_flags & Py_OBJFLAGS_FROZEN)
-#define Py_IS_MUTABLE(op) (((PyObject*)(op))->ob_flags & Py_OBJFLAGS_MUTABLE)
+    // ... other fields ...
+} _PySandboxState;
 ```
+
+### Why Sets Instead of Per-Object Flags?
+
+The side-table approach was chosen over per-object flags because:
+
+1. **ABI Compatibility**: Adding fields to `PyObject` breaks binary compatibility with all existing C extensions, requiring full ecosystem recompilation.
+
+2. **Sandbox-Specific**: Frozen/mutable tracking is only needed for sandbox functionality. Adding overhead to every Python object for a feature most users won't use is wasteful.
+
+3. **Garbage Collection**: Using weak references where possible allows tracked objects to be garbage collected when no other references exist. This prevents memory leaks in long-running sandbox sessions.
+
+### Weak Reference Implementation
+
+Objects are tracked using weak references where possible:
+
+```c
+/* Add an object to a tracking set using weak references where possible. */
+static int
+add_to_weak_set(PyObject **setp, PyObject *obj)
+{
+    /* Lazy-init the set */
+    if (*setp == NULL) {
+        *setp = PySet_New(NULL);
+        if (*setp == NULL) {
+            return -1;
+        }
+    }
+
+    /* Try to create a weak reference */
+    PyObject *ref = PyWeakref_NewRef(obj, NULL);
+    if (ref != NULL) {
+        /* Object supports weak references - add the weakref */
+        int rc = PySet_Add(*setp, ref);
+        Py_DECREF(ref);
+        return rc;
+    }
+
+    /* Object doesn't support weak references - use strong ref */
+    PyErr_Clear();
+    return PySet_Add(*setp, obj);
+}
+```
+
+For membership checks, we create a temporary weak reference for comparison (weak references to the same object compare equal):
+
+```c
+static int
+in_weak_set(PyObject *set, PyObject *obj)
+{
+    if (set == NULL) return 0;
+
+    /* Try weak reference lookup first */
+    PyObject *ref = PyWeakref_NewRef(obj, NULL);
+    if (ref != NULL) {
+        int result = PySet_Contains(set, ref);
+        Py_DECREF(ref);
+        if (result >= 0) return result;
+        PyErr_Clear();
+    } else {
+        PyErr_Clear();
+    }
+
+    /* Fall back to direct lookup (for non-weakrefable objects) */
+    return PySet_Contains(set, obj);
+}
+```
+
+**Fallback behavior**: Objects that don't support weak references (e.g., instances of built-in types without `__weakref__` slot) are stored as strong references. This is a necessary trade-off since these objects cannot be weakly referenced.
 
 ## Frozen Check Function
 
@@ -166,8 +238,7 @@ typedef struct _object {
 int
 _PySandbox_CheckFrozen(PyObject *obj)
 {
-    /* Fast path: mutable objects are always allowed */
-    if (Py_IS_MUTABLE(obj)) {
+    if (obj == NULL) {
         return 0;
     }
 
@@ -176,19 +247,43 @@ _PySandbox_CheckFrozen(PyObject *obj)
         return 0;
     }
 
-    int obj_frozen = Py_IS_FROZEN(obj);
-    if (!obj_frozen && !interp->sandbox.frozen_mode) {
-        return 0;  /* No frozen restrictions */
+    _PySandboxState *sandbox = &interp->sandbox;
+
+    /* Fast path: check mutable set first */
+    if (sandbox->mutable_objects != NULL) {
+        int in_mutable = PySet_Contains(sandbox->mutable_objects, obj);
+        if (in_mutable > 0) {
+            return 0;  /* Allow - object is in mutable set */
+        }
+        if (in_mutable < 0) {
+            PyErr_Clear();  /* Ignore lookup errors */
+        }
     }
 
-    /* Only enforce within sandbox scope */
-    _PySandboxState *sandbox = &interp->sandbox;
-    _PyInterpreterFrame *frame = get_current_interpreter_frame();
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+    /* Check if object is individually frozen */
+    int is_frozen = 0;
+    if (sandbox->frozen_objects != NULL) {
+        int in_frozen = PySet_Contains(sandbox->frozen_objects, obj);
+        if (in_frozen > 0) {
+            is_frozen = 1;
+        } else if (in_frozen < 0) {
+            PyErr_Clear();
+        }
+    }
+
+    /* Fast path: no frozen restrictions exist */
+    if (!is_frozen && !sandbox->frozen_mode) {
         return 0;
     }
 
-    if (obj_frozen) {
+    /* Only enforce within sandbox scope */
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope <= 0) {
+        return 0;
+    }
+
+    if (is_frozen) {
         PyErr_Format(PyExc_SandboxAttributeError,
                      "cannot modify frozen object '%.100s'",
                      Py_TYPE(obj)->tp_name);
@@ -224,13 +319,25 @@ _PySandbox_MaybeMarkMutable(PyObject *obj)
 
     /* Check if current frame is in sandbox scope */
     _PySandboxState *sandbox = &interp->sandbox;
-    _PyInterpreterFrame *frame = get_current_interpreter_frame();
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope <= 0) {
         return;
     }
 
-    /* Mark the object as mutable */
-    obj->ob_flags |= Py_OBJFLAGS_MUTABLE;
+    /* Lazy-init the mutable set */
+    if (sandbox->mutable_objects == NULL) {
+        sandbox->mutable_objects = PySet_New(NULL);
+        if (sandbox->mutable_objects == NULL) {
+            PyErr_Clear();
+            return;
+        }
+    }
+
+    /* Add to mutable set */
+    if (PySet_Add(sandbox->mutable_objects, obj) < 0) {
+        PyErr_Clear();  /* Ignore errors (unhashable objects, etc.) */
+    }
 }
 ```
 
@@ -243,11 +350,11 @@ _PySandbox_MaybeMarkMutable(PyObject *obj)
 void PySandbox_SetFrozenMode(int mode);
 int PySandbox_GetFrozenMode(void);
 
-/* Per-object freeze */
+/* Per-object freeze (adds to frozen_objects set) */
 void PySandbox_FreezeObject(PyObject *obj);
 int PySandbox_IsObjectFrozen(PyObject *obj);
 
-/* Mutable override */
+/* Mutable override (adds/removes from mutable_objects set) */
 void PySandbox_SetObjectMutable(PyObject *obj, int mutable);
 ```
 
@@ -275,9 +382,9 @@ void _PySandbox_MaybeMarkMutable(PyObject *obj);
 
 | Method | Description |
 |--------|-------------|
-| `freeze(obj)` | Set `Py_OBJFLAGS_FROZEN` on object |
-| `is_frozen(obj)` | Check if object has `Py_OBJFLAGS_FROZEN` |
-| `set_mutable(obj, mutable=True)` | Set/clear `Py_OBJFLAGS_MUTABLE` |
+| `freeze(obj)` | Add object to `frozen_objects` set |
+| `is_frozen(obj)` | Check if object is in `frozen_objects` set |
+| `set_mutable(obj, mutable=True)` | Add/remove object from `mutable_objects` set |
 
 ## Integration Points
 
@@ -309,21 +416,67 @@ All frozen mode violations raise `SandboxAttributeError`:
 # Drawbacks
 [drawbacks]: #drawbacks
 
-1. **Object Size Increase**: `ob_flags` adds 4 bytes to every Python object.
+1. **Non-Weakrefable Objects**: Objects that don't support weak references (e.g., instances of many built-in types) are stored as strong references and will be kept alive until removed or sandbox is reset.
 
-2. **Performance Impact**: Every attribute mutation checks frozen mode, even when disabled (though fast-exit minimizes overhead).
+2. **Set Lookup Overhead**: Each mutation check requires a set lookup (O(1) average case) plus a weak reference creation for comparison. This is slower than per-object flags but avoids ABI breakage.
 
-3. **Incomplete Coverage**: Some mutation paths may not call `_PySandbox_CheckFrozen()` (C extensions, direct struct access).
+3. **Unhashable Objects**: Objects that are not hashable cannot be tracked. Errors are silently ignored.
 
-4. **Auto-Mutable Scope**: Objects created by trusted code called from sandboxed code may be incorrectly marked mutable.
+4. **Dead Weak References**: When tracked objects are garbage collected, their weak references remain in the set until explicitly cleaned up or the sandbox is reset. This is minor overhead but not a memory leak.
+
+5. **Performance Impact**: Every attribute mutation checks frozen mode, even when disabled (though fast-exit minimizes overhead).
+
+6. **Incomplete Coverage**: Some mutation paths may not call `_PySandbox_CheckFrozen()` (C extensions, direct struct access).
+
+7. **Auto-Mutable Scope**: Objects created by trusted code called from sandboxed code may be incorrectly marked mutable.
 
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
 
-## Why Object Flags vs. Separate Registry?
+## Why Side Tables vs. Per-Object Flags?
 
-**Alternative**: Maintain a separate `frozenset` of frozen object IDs.
-- Rejected: O(1) flag check is faster than set lookup; no memory for registry.
+The chosen implementation uses side tables (Python sets) stored in interpreter state. This approach:
+
+- **Preserves ABI**: No changes to `PyObject` structure
+- **Lazy allocation**: Sets are only created when needed
+- **Clean reset**: `sandbox.reset()` clears all tracking
+
+### Alternative: Per-Object Flags (Rejected)
+
+An alternative implementation would add flags directly to `PyObject`:
+
+```c
+typedef struct _object {
+    Py_ssize_t ob_refcnt;
+    uint32_t ob_flags;      /* Per-instance sandbox flags */
+    PyTypeObject *ob_type;
+} PyObject;
+
+#define Py_OBJFLAGS_FROZEN    (1U << 0)
+#define Py_OBJFLAGS_MUTABLE   (1U << 1)
+
+#define Py_IS_FROZEN(op)  (((PyObject*)(op))->ob_flags & Py_OBJFLAGS_FROZEN)
+#define Py_IS_MUTABLE(op) (((PyObject*)(op))->ob_flags & Py_OBJFLAGS_MUTABLE)
+```
+
+**Why this was rejected:**
+
+1. **ABI Breaking Change**: Adding `ob_flags` to `PyObject` changes the memory layout of every Python object. This breaks binary compatibility with:
+   - All compiled C extensions (numpy, pandas, etc.)
+   - Cython-compiled modules
+   - CFFI bindings
+   - Any code that assumes `PyObject` size
+
+2. **Ecosystem-Wide Recompilation**: All packages with C extensions would need to be recompiled. This is impractical for:
+   - Production deployments
+   - Users who can't rebuild packages
+   - Binary wheels on PyPI
+
+3. **Memory Overhead**: Adds 4 bytes to every Python object, even when sandbox is not used.
+
+4. **Upstream Rejection Risk**: Changes to `PyObject` structure are extremely unlikely to be accepted upstream.
+
+The side-table approach avoids all these issues while providing equivalent functionality.
 
 ## Why Both Global and Per-Object Modes?
 
@@ -370,6 +523,8 @@ Auto-mutable solves this elegantly by marking `Foo` as mutable when it's created
 
 3. Should there be a way to "deep freeze" an object and its attributes?
 
+4. Should WeakSets be used to avoid keeping tracked objects alive? (Current implementation accepts the trade-off for simplicity.)
+
 # Future possibilities
 [future-possibilities]: #future-possibilities
 
@@ -380,3 +535,7 @@ Auto-mutable solves this elegantly by marking `Foo` as mutable when it's created
 3. **Copy-on-Write**: Instead of blocking, create a copy when mutation is attempted.
 
 4. **Audit Logging**: Log all mutation attempts on frozen objects.
+
+5. **WeakSet Optimization**: Use WeakSets to allow garbage collection of tracked objects (requires callback mechanism to handle cleanup).
+
+6. **Bloom Filter**: Add a "definitely not tracked" bloom filter to speed up the common case where objects are not in any set.

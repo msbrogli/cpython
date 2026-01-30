@@ -360,6 +360,8 @@ SANDBOX_BOOL_GETSET(frozen_mode, frozen_mode)
 SANDBOX_BOOL_GETSET(auto_mutable, auto_mutable)
 SANDBOX_BOOL_GETSET(import_restrict_mode, limits.import_restrict_mode)
 SANDBOX_BOOL_GETSET(import_allow_submodules, limits.import_allow_submodules)
+SANDBOX_BOOL_GETSET(module_access_restrict_mode, limits.module_access_restrict_mode)
+SANDBOX_BOOL_GETSET(allow_submodules, limits.allow_submodules)
 
 /* opcode_restrict_mode needs special setter to update tracing state */
 static PyObject *
@@ -459,6 +461,49 @@ sandbox_set_allowed_imports(_PySandboxObject *self, PyObject *value, void *closu
     return PySandbox_SetAllowedImports(value);
 }
 
+/* allowed_modules: frozenset getter / set|frozenset|iterable setter
+ * Stored internally as frozenset for O(1) getter.
+ * When module_access_restrict_mode=True, only these modules can be accessed. */
+static PyObject *
+sandbox_get_allowed_modules(_PySandboxObject *self, void *closure)
+{
+    PyInterpreterState *interp = sandbox_get_interp();
+    if (interp == NULL) return NULL;
+
+    PyObject *allowed = interp->sandbox.allowed_modules;
+    if (allowed == NULL) {
+        Py_RETURN_NONE;  /* NULL means no restriction (when mode is off) */
+    }
+    return Py_NewRef(allowed);
+}
+
+static int
+sandbox_set_allowed_modules(_PySandboxObject *self, PyObject *value, void *closure)
+{
+    if (_PySandbox_CheckConfigModification() < 0) return -1;
+    if (value == NULL) {
+        PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");
+        return -1;
+    }
+
+    PyInterpreterState *interp = sandbox_get_interp();
+    if (interp == NULL) return -1;
+
+    if (value == Py_None) {
+        Py_CLEAR(interp->sandbox.allowed_modules);
+        return 0;
+    }
+
+    /* Convert to frozenset for immutability and O(1) getter */
+    PyObject *new_frozenset = PyFrozenSet_New(value);
+    if (new_frozenset == NULL) {
+        return -1;
+    }
+
+    Py_XSETREF(interp->sandbox.allowed_modules, new_frozenset);
+    return 0;
+}
+
 /* ---- Read-only properties (counters) ---- */
 SANDBOX_UINT64_GETTER(allocation_count, counters.allocation_count)
 SANDBOX_UINT64_GETTER(statement_count, counters.statement_count)
@@ -524,6 +569,10 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_import_restrict_mode, "Import restriction mode (True by default)", NULL},
     {"import_allow_submodules", (getter)sandbox_get_import_allow_submodules,
      (setter)sandbox_set_import_allow_submodules, "Allow submodules of allowed modules", NULL},
+    {"module_access_restrict_mode", (getter)sandbox_get_module_access_restrict_mode,
+     (setter)sandbox_set_module_access_restrict_mode, "Module access restriction mode (default False)", NULL},
+    {"allow_submodules", (getter)sandbox_get_allow_submodules,
+     (setter)sandbox_set_allow_submodules, "Allow submodules when parent module is allowed (default True)", NULL},
     /* R/W special */
     {"banned_opcodes", (getter)sandbox_get_banned_opcodes,
      (setter)sandbox_set_banned_opcodes, "Banned opcodes (frozenset of ints)", NULL},
@@ -531,6 +580,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_creation_hook, "Object creation hook (callable or None)", NULL},
     {"allowed_imports", (getter)sandbox_get_allowed_imports,
      (setter)sandbox_set_allowed_imports, "Allowed imports (set of (module, name) tuples)", NULL},
+    {"allowed_modules", (getter)sandbox_get_allowed_modules,
+     (setter)sandbox_set_allowed_modules, "Allowed modules for access (set of module names, None=no restriction)", NULL},
     /* R/O counters */
     {"allocation_count", (getter)sandbox_get_allocation_count,
      NULL, "Current scoped allocation count", NULL},
@@ -703,6 +754,89 @@ sandbox_reset(_PySandboxObject *self, PyObject *Py_UNUSED(args))
     Py_RETURN_NONE;
 }
 
+/* Default allowed modules - generally safe modules from stdlib */
+static const char *DEFAULT_ALLOWED_MODULES[] = {
+    /* Data types and collections */
+    "json", "collections", "enum", "dataclasses", "typing", "types",
+    "copy", "pprint", "reprlib",
+
+    /* Math and numbers */
+    "math", "decimal", "fractions", "statistics",
+
+    /* String processing */
+    "string", "re", "textwrap", "unicodedata",
+
+    /* Date/time */
+    "datetime", "calendar", "zoneinfo",
+
+    /* Binary data */
+    "struct", "base64", "binascii", "quopri", "uu",
+
+    /* Cryptographic hashing (not encryption) */
+    "hashlib", "hmac",
+
+    /* Functional programming */
+    "functools", "itertools", "operator",
+
+    /* Context managers */
+    "contextlib",
+
+    /* Abstract base classes */
+    "abc",
+
+    /* File formats (parsing only, no I/O) */
+    "csv", "html", "html.parser", "html.entities",
+
+    /* Misc utilities */
+    "bisect", "heapq", "array",
+    "weakref", "graphlib",
+
+    /* Constants */
+    "errno", "stat",
+
+    /* Compression (in-memory only) */
+    "zlib",
+
+    NULL  /* Sentinel */
+};
+
+static PyObject *
+sandbox_use_default_allowed_modules(_PySandboxObject *self, PyObject *Py_UNUSED(args))
+{
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
+    PyInterpreterState *interp = sandbox_get_interp();
+    if (interp == NULL) return NULL;
+
+    /* Build the set of default allowed modules */
+    PyObject *modules_set = PySet_New(NULL);
+    if (modules_set == NULL) return NULL;
+
+    for (const char **p = DEFAULT_ALLOWED_MODULES; *p != NULL; p++) {
+        PyObject *name = PyUnicode_FromString(*p);
+        if (name == NULL) {
+            Py_DECREF(modules_set);
+            return NULL;
+        }
+        int rc = PySet_Add(modules_set, name);
+        Py_DECREF(name);
+        if (rc < 0) {
+            Py_DECREF(modules_set);
+            return NULL;
+        }
+    }
+
+    /* Convert to frozenset */
+    PyObject *frozenset = PyFrozenSet_New(modules_set);
+    Py_DECREF(modules_set);
+    if (frozenset == NULL) return NULL;
+
+    /* Set allowed_modules and enable restrict mode */
+    Py_XSETREF(interp->sandbox.allowed_modules, frozenset);
+    interp->sandbox.limits.module_access_restrict_mode = 1;
+
+    Py_RETURN_NONE;
+}
+
 static PyObject *
 sandbox_enter_scope(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
@@ -853,6 +987,8 @@ static PyMethodDef sandbox_methods[] = {
      "reset_counts() -- Reset all counters to 0."},
     {"reset", (PyCFunction)sandbox_reset, METH_NOARGS,
      "reset() -- Reset all sandbox state to defaults."},
+    {"use_default_allowed_modules", (PyCFunction)sandbox_use_default_allowed_modules, METH_NOARGS,
+     "use_default_allowed_modules() -- Set allowed_modules to safe defaults and enable module_access_restrict_mode."},
     {"enter_scope", (PyCFunction)sandbox_enter_scope, METH_NOARGS,
      "enter_scope() -- Enter sandbox scope (register current frame)."},
     {"exit_scope", (PyCFunction)sandbox_exit_scope, METH_NOARGS,

@@ -31,6 +31,8 @@ class IntegrationTests(unittest.TestCase):
         """Test running sandboxed code with all limit types."""
         code = '''
 import sys
+# Disable module access restrictions for this test
+sys.sandbox.module_access_restrict_mode = False
 sys.sandbox.set_limits(
     max_int_digits=100,
     max_str_length=10000,

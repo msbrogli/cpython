@@ -120,6 +120,16 @@ typedef struct {
     /* Import restrictions */
     int import_restrict_mode;     /* 0 = off, 1 = enforce allowed_imports (default) */
     int import_allow_submodules;  /* 1 = allow submodules, 0 = deny (default) */
+
+    /* Module access restriction mode.
+     * When module_access_restrict_mode=1, only modules in allowed_modules can be accessed.
+     * When module_access_restrict_mode=0 (default), all modules can be accessed. */
+    int module_access_restrict_mode;
+
+    /* Allow submodules when parent is allowed.
+     * When allow_submodules=1 (default), allowing 'xml' also allows 'xml.etree.ElementTree'.
+     * When allow_submodules=0, only exact module names in allowed_modules are allowed. */
+    int allow_submodules;
 } _PySandboxLimits;
 
 /* Sandbox counters - separated from limits for clarity */
@@ -151,6 +161,8 @@ typedef struct {
     .allow_io = 0,                  \
     .import_restrict_mode = 1,      \
     .import_allow_submodules = 0,   \
+    .module_access_restrict_mode = 1, \
+    .allow_submodules = 1,          \
 }
 
 #define _PySandboxCounters_INIT { \
@@ -228,6 +240,13 @@ typedef struct {
      * NULL or empty set means no imports allowed when mode is active. */
     PyObject *allowed_imports;
 
+    /* Allowed modules - Python frozenset of module names (strings).
+     * When set (non-NULL), only modules in this set can be accessed in sandbox scope.
+     * NULL = all modules allowed (no restriction).
+     * This provides defense in depth even if attacker has a module reference.
+     * Stored as frozenset for O(1) getter performance. */
+    PyObject *allowed_modules;
+
     /* Recursion prevention - nonzero during limit check (to avoid recursive
        checks when error handling creates strings/integers) */
     int suppress_checks;
@@ -247,6 +266,7 @@ typedef struct {
     .banned_opcodes = {{0}},                \
     .registered_filenames = NULL,           \
     .allowed_imports = NULL,                \
+    .allowed_modules = NULL,                \
     .suppress_checks = 0,                          \
     .suspended = 0,                         \
 }
@@ -329,6 +349,12 @@ PyAPI_FUNC(int) PySandbox_SetAllowedImports(PyObject *modules);
 /* Get the import allowlist. Returns a new reference to a frozenset,
  * or NULL on error. */
 PyAPI_FUNC(PyObject *) PySandbox_GetAllowedImports(void);
+
+/* Check if accessing a module is allowed.
+ * Returns 0 if allowed, -1 if blocked (sets SandboxSecurityError).
+ * Called from module_getattro() before attribute access.
+ * When module_access_restrict_mode=1, checks if module is in allowed_modules. */
+PyAPI_FUNC(int) _PySandbox_CheckModuleAccess(PyObject *module);
 
 /* Sandbox scope management */
 PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */

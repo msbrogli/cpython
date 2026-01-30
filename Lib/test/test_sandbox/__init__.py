@@ -44,8 +44,8 @@ def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
     Returns:
         subprocess.CompletedProcess with returncode, stdout, and stderr
     """
-    # Prepend import restriction disabling for legacy tests
-    preamble = "import sys; sys.sandbox.import_restrict_mode = False\n"
+    # Prepend import and module access restriction disabling for legacy tests
+    preamble = "import sys; sys.sandbox.import_restrict_mode = False; sys.sandbox.module_access_restrict_mode = False\n"
     return subprocess.run(
         [sys.executable, '-c', preamble + code],
         capture_output=True,
@@ -72,8 +72,9 @@ def _run_scoped_test(limit_name, limit_value, test_code, extra_setup=""):
     """
     code = f'''
 import sys
-# Disable import restrictions for legacy tests
+# Disable import and module access restrictions for legacy tests
 sys.sandbox.import_restrict_mode = False
+sys.sandbox.module_access_restrict_mode = False
 {extra_setup}
 sys.sandbox.set_limits({limit_name}={limit_value})
 sys.sandbox.enter_scope()
@@ -114,6 +115,12 @@ class SandboxTestCase(unittest.TestCase):
         # (tests weren't designed with import restrictions in mind)
         try:
             sys.sandbox.import_restrict_mode = False
+        except SandboxSecurityError:
+            pass
+        # Disable module access restrictions for existing tests
+        # (tests weren't designed with module access restrictions in mind)
+        try:
+            sys.sandbox.module_access_restrict_mode = False
         except SandboxSecurityError:
             pass
         # Reset counters for clean test state (may fail if in scope)

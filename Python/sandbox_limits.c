@@ -581,6 +581,105 @@ _PySandbox_CheckIOAllowed(const char *operation)
     return -1;
 }
 
+/* ============ Module Access Checking ============ */
+
+/* _PySandbox_CheckModuleAccess - Check if accessing a module is allowed
+ *
+ * When module_access_restrict_mode is enabled, this function checks if a module
+ * is in the allowed_modules set. It is called from module_getattro() before
+ * allowing any attribute access on the module.
+ *
+ * This provides defense in depth: even if an attacker obtains a reference
+ * to a dangerous module (e.g., via sys.modules before sandbox activation),
+ * they cannot use it within sandbox scope unless it's in the allowlist.
+ *
+ * Returns: 0 if allowed, -1 if blocked (SandboxSecurityError set)
+ */
+int
+_PySandbox_CheckModuleAccess(PyObject *module)
+{
+    _PySandboxState *sandbox = get_sandbox_state();
+    if (sandbox == NULL || sandbox->suspended || sandbox->suppress_checks) {
+        return 0;
+    }
+
+    /* Fast exit if module access restriction is not enabled */
+    if (!sandbox->limits.module_access_restrict_mode) {
+        return 0;
+    }
+
+    if (sandbox->registered_filenames == NULL) {
+        return 0;  /* No scope registered */
+    }
+
+    /* Check if currently in sandbox scope */
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;  /* Error during scope check */
+    }
+    if (!in_scope) {
+        return 0;  /* Not in scope */
+    }
+
+    /* Get module name */
+    PyObject *mod_name = PyModule_GetNameObject(module);
+    if (mod_name == NULL) {
+        PyErr_Clear();
+        return 0;  /* Can't determine name, allow */
+    }
+
+    /* If no allowlist is set, block everything */
+    if (sandbox->allowed_modules == NULL ||
+        PySet_GET_SIZE(sandbox->allowed_modules) == 0) {
+        sandbox->suppress_checks = 1;
+        PyErr_Format(PyExc_SandboxSecurityError,
+                     "access to module '%U' is not allowed in sandbox (no modules allowed)", mod_name);
+        sandbox->suppress_checks = 0;
+        Py_DECREF(mod_name);
+        return -1;
+    }
+
+    /* Check if module is in allowlist */
+    int allowed = PySet_Contains(sandbox->allowed_modules, mod_name);
+    if (allowed < 0) {
+        Py_DECREF(mod_name);
+        return -1;  /* Error during set lookup */
+    }
+
+    /* Also check base module name for submodules (e.g., "xml" for "xml.etree.ElementTree")
+     * Only if allow_submodules is enabled (default). */
+    if (!allowed && sandbox->limits.allow_submodules) {
+        const char *name_str = PyUnicode_AsUTF8(mod_name);
+        if (name_str) {
+            const char *dot = strchr(name_str, '.');
+            if (dot) {
+                PyObject *base = PyUnicode_FromStringAndSize(name_str, dot - name_str);
+                if (base) {
+                    allowed = PySet_Contains(sandbox->allowed_modules, base);
+                    Py_DECREF(base);
+                    if (allowed < 0) {
+                        Py_DECREF(mod_name);
+                        return -1;  /* Error during set lookup */
+                    }
+                }
+            }
+        }
+    }
+
+    if (!allowed) {
+        sandbox->suppress_checks = 1;
+        PyErr_Format(PyExc_SandboxSecurityError,
+                     "access to module '%U' is not allowed in sandbox", mod_name);
+        sandbox->suppress_checks = 0;
+        Py_DECREF(mod_name);
+        return -1;
+    }
+
+    Py_DECREF(mod_name);
+    return 0;
+}
+
 /* ============ Public C API ============ */
 
 int

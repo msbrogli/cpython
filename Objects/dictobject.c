@@ -2846,6 +2846,13 @@ dict_merge(PyObject *a, PyObject *b, int override)
         if (other == mp || other->ma_used == 0)
             /* a.update(a) or a.update({}); nothing to do */
             return 0;
+
+        /* Sandbox check: verify final size is within limits.
+         * This is an upper bound - actual size may be smaller due to overlapping keys. */
+        if (_PySandbox_CheckDictSize(mp->ma_used + other->ma_used) < 0) {
+            return -1;
+        }
+
         if (mp->ma_used == 0) {
             /* Since the target dict is empty, PyDict_GetItem()
              * always returns NULL.  Setting override to 1

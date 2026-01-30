@@ -288,6 +288,61 @@ except SandboxSecurityError:
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
 
+class DictUpdateBypassTest(unittest.TestCase):
+    """Test that dict.update() respects size limits (security fix)."""
+
+    def test_dict_update_blocked(self):
+        """dict.update() should be blocked when result exceeds limit."""
+        code = '''
+import sys
+big_dict = {i: i for i in range(500)}
+sys.sandbox.max_dict_size = 100
+sys.sandbox.add_filename('<string>')
+try:
+    small_dict = {}
+    small_dict.update(big_dict)
+    print(f"FAIL: updated to {len(small_dict)} items")
+except SandboxOverflowError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_dict_ior_blocked(self):
+        """dict |= other should be blocked when result exceeds limit."""
+        code = '''
+import sys
+big_dict = {i: i for i in range(500)}
+sys.sandbox.max_dict_size = 100
+sys.sandbox.add_filename('<string>')
+try:
+    small_dict = {}
+    small_dict |= big_dict
+    print(f"FAIL: updated to {len(small_dict)} items")
+except SandboxOverflowError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_dict_update_allowed_under_limit(self):
+        """dict.update() should work when result is under limit."""
+        code = '''
+import sys
+small_update = {1: 'a', 2: 'b'}
+sys.sandbox.max_dict_size = 100
+sys.sandbox.add_filename('<string>')
+d = {}
+d.update(small_update)
+if len(d) == 2:
+    print("PASS")
+else:
+    print(f"FAIL: {len(d)}")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
 class DictCopyBypassTest(unittest.TestCase):
     """Test that dict.copy() respects size limits (security fix)."""
 

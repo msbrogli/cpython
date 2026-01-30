@@ -205,35 +205,35 @@ except SandboxSecurityError:
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
-    def test_eval_code_object_allowed(self):
-        """eval() with code object should still work."""
+    def test_eval_code_object_blocked(self):
+        """eval() with code object should be blocked (security fix)."""
         code = '''
 import sys
 # Compile BEFORE entering sandbox scope
 code = compile('2+2', '<test>', 'eval')
 sys.sandbox.add_filename('<string>')
-result = eval(code)
-if result == 4:
+try:
+    result = eval(code)
+    print(f"FAIL: eval returned {result}")
+except SandboxSecurityError:
     print("PASS")
-else:
-    print(f"FAIL: {result}")
 '''
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
-    def test_exec_code_object_allowed(self):
-        """exec() with code object should still work."""
+    def test_exec_code_object_blocked(self):
+        """exec() with code object should be blocked (security fix)."""
         code = '''
 import sys
 # Compile BEFORE entering sandbox scope
 code = compile('test_var = 42', '<test>', 'exec')
 sys.sandbox.add_filename('<string>')
-ns = {}
-exec(code, ns)
-if ns.get('test_var') == 42:
+try:
+    ns = {}
+    exec(code, ns)
+    print(f"FAIL: exec succeeded")
+except SandboxSecurityError:
     print("PASS")
-else:
-    print(f"FAIL: {ns}")
 '''
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")

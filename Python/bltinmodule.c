@@ -913,12 +913,10 @@ builtin_eval_impl(PyObject *module, PyObject *source, PyObject *globals,
     PyObject *result, *source_copy;
     const char *str;
 
-    /* Block eval() with string arguments in sandbox scope when allow_unsafe=0.
-     * Code objects are allowed since they were already compiled outside scope. */
-    if (!PyCode_Check(source)) {
-        if (_PySandbox_CheckUnsafeBlocked("eval") < 0) {
-            return NULL;
-        }
+    /* Block eval() in sandbox scope when allow_unsafe=0.
+     * Both strings and code objects are blocked to prevent scope escape. */
+    if (_PySandbox_CheckUnsafeBlocked("eval") < 0) {
+        return NULL;
     }
 
     if (locals != Py_None && !PyMapping_Check(locals)) {
@@ -1013,12 +1011,10 @@ builtin_exec_impl(PyObject *module, PyObject *source, PyObject *globals,
 {
     PyObject *v;
 
-    /* Block exec() with string arguments in sandbox scope when allow_unsafe=0.
-     * Code objects are allowed since they were already compiled outside scope. */
-    if (!PyCode_Check(source)) {
-        if (_PySandbox_CheckUnsafeBlocked("exec") < 0) {
-            return NULL;
-        }
+    /* Block exec() in sandbox scope when allow_unsafe=0.
+     * Both strings and code objects are blocked to prevent scope escape. */
+    if (_PySandbox_CheckUnsafeBlocked("exec") < 0) {
+        return NULL;
     }
 
     if (globals == Py_None) {

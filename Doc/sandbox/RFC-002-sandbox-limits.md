@@ -130,7 +130,7 @@ except SandboxAttributeError as e:
 
 ## Unsafe Operation Blocking
 
-Block dangerous operations:
+Block dangerous operations when `allow_unsafe=False` (default):
 
 ```python
 sys.sandbox.allow_unsafe = False
@@ -140,6 +140,16 @@ try:
 except SandboxSecurityError as e:
     print(e)  # "compile() is not allowed in sandbox"
 ```
+
+When `allow_unsafe=False`, the following operations are blocked in sandbox scope:
+- `compile()` - Blocks dynamic code compilation
+- `eval()` - Blocks all eval calls (strings AND code objects)
+- `exec()` - Blocks all exec calls (strings AND code objects)
+- `gc.get_objects()`, `gc.get_referrers()`, `gc.get_referents()` - Blocks GC introspection
+
+**Note:** Both `eval()` and `exec()` are blocked even with pre-compiled code objects
+to prevent scope escape attacks where code compiled with an unregistered filename
+could bypass sandbox limits.
 
 ## I/O Operation Blocking
 

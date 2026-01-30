@@ -139,17 +139,11 @@ _PyThreadState_UpdateTracingState(PyThreadState *tstate)
 {
     /* Enable tracing if:
      * 1. Not currently in tracing mode, AND
-     * 2. A trace/profile function is set, OR
-     * 3. Sandbox scoped statement limit is active (not suspended) */
-    PyInterpreterState *interp = tstate->interp;
-    int sandbox_needs_tracing = (interp != NULL &&
-                                  (interp->sandbox.limits.max_statements > 0) &&
-                                  !interp->sandbox.suspended);
+     * 2. A trace/profile function is set */
     bool use_tracing =
         (tstate->tracing == 0) &&
         (tstate->c_tracefunc != NULL ||
-         tstate->c_profilefunc != NULL ||
-         sandbox_needs_tracing);
+         tstate->c_profilefunc != NULL);
     tstate->cframe->use_tracing = (use_tracing ? 255 : 0);
 }
 

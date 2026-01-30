@@ -55,17 +55,6 @@ class SandboxConfigModificationBlockedTests(SandboxTestCase):
         finally:
             sys.sandbox.remove_filename(filename)
 
-    def test_set_max_statements_blocked_from_scope(self):
-        """Setting max_statements from scope should raise SandboxSecurityError."""
-        with self.assertRaises(SandboxSecurityError) as ctx:
-            self._run_in_scope("sys.sandbox.max_statements = 99999")
-        self.assertIn("Cannot modify sandbox configuration", str(ctx.exception))
-
-    def test_set_max_allocations_blocked_from_scope(self):
-        """Setting max_allocations from scope should raise SandboxSecurityError."""
-        with self.assertRaises(SandboxSecurityError):
-            self._run_in_scope("sys.sandbox.max_allocations = 99999")
-
     def test_set_max_iterations_blocked_from_scope(self):
         """Setting max_iterations from scope should raise SandboxSecurityError."""
         with self.assertRaises(SandboxSecurityError):
@@ -168,7 +157,7 @@ class SandboxMethodsBlockedTests(SandboxTestCase):
     def test_set_limits_blocked_from_scope(self):
         """Calling set_limits() from scope should raise SandboxSecurityError."""
         with self.assertRaises(SandboxSecurityError):
-            self._run_in_scope("sys.sandbox.set_limits(max_statements=99999)")
+            self._run_in_scope("sys.sandbox.set_limits(max_iterations=99999)")
 
     def test_reset_blocked_from_scope(self):
         """Calling reset() from scope should raise SandboxSecurityError."""
@@ -295,16 +284,16 @@ class SandboxReadAllowedFromScopeTests(SandboxTestCase):
         result = self._run_in_scope("result = sys.sandbox.is_frozen(object())")
         self.assertFalse(result)
 
-    def test_read_max_statements_allowed_from_scope(self):
-        """Reading max_statements property should work from scope."""
-        sys.sandbox.max_statements = 1000
-        result = self._run_in_scope("result = sys.sandbox.max_statements")
+    def test_read_max_iterations_allowed_from_scope(self):
+        """Reading max_iterations property should work from scope."""
+        sys.sandbox.max_iterations = 1000
+        result = self._run_in_scope("result = sys.sandbox.max_iterations")
         self.assertEqual(result, 1000)
 
-    def test_read_max_allocations_allowed_from_scope(self):
-        """Reading max_allocations property should work from scope."""
-        sys.sandbox.max_allocations = 2000
-        result = self._run_in_scope("result = sys.sandbox.max_allocations")
+    def test_read_max_operations_allowed_from_scope(self):
+        """Reading max_operations property should work from scope."""
+        sys.sandbox.max_operations = 2000
+        result = self._run_in_scope("result = sys.sandbox.max_operations")
         self.assertEqual(result, 2000)
 
     def test_read_frozen_mode_allowed_from_scope(self):
@@ -317,14 +306,14 @@ class SandboxReadAllowedFromScopeTests(SandboxTestCase):
         result = self._run_in_scope("result = sys.sandbox.suspended")
         self.assertFalse(result)
 
-    def test_read_allocation_count_allowed_from_scope(self):
-        """Reading allocation_count property should work from scope."""
-        result = self._run_in_scope("result = sys.sandbox.allocation_count")
+    def test_read_iteration_count_allowed_from_scope(self):
+        """Reading iteration_count property should work from scope."""
+        result = self._run_in_scope("result = sys.sandbox.iteration_count")
         self.assertIsInstance(result, int)
 
-    def test_read_statement_count_allowed_from_scope(self):
-        """Reading statement_count property should work from scope."""
-        result = self._run_in_scope("result = sys.sandbox.statement_count")
+    def test_read_operation_count_allowed_from_scope(self):
+        """Reading operation_count property should work from scope."""
+        result = self._run_in_scope("result = sys.sandbox.operation_count")
         self.assertIsInstance(result, int)
 
     def test_read_banned_opcodes_allowed_from_scope(self):
@@ -355,7 +344,7 @@ class SandboxNestedCallBlockedTests(SandboxTestCase):
         """A nested function in scope should not be able to modify config."""
         code = """
 def attempt_escape():
-    sys.sandbox.max_statements = 99999
+    sys.sandbox.max_iterations = 99999
 
 attempt_escape()
 """
@@ -367,7 +356,7 @@ attempt_escape()
         code = """
 class Attacker:
     def escape(self):
-        sys.sandbox.max_statements = 99999
+        sys.sandbox.max_iterations = 99999
 
 Attacker().escape()
 """
@@ -378,10 +367,10 @@ Attacker().escape()
 class SandboxModificationOutsideScopeAllowedTests(SandboxTestCase):
     """Test that config modifications work normally outside sandbox scope."""
 
-    def test_set_max_statements_allowed_outside_scope(self):
-        """Setting max_statements outside scope should work."""
-        sys.sandbox.max_statements = 5000
-        self.assertEqual(sys.sandbox.max_statements, 5000)
+    def test_set_max_iterations_allowed_outside_scope(self):
+        """Setting max_iterations outside scope should work."""
+        sys.sandbox.max_iterations = 5000
+        self.assertEqual(sys.sandbox.max_iterations, 5000)
 
     def test_set_limits_allowed_outside_scope(self):
         """Calling set_limits() outside scope should work."""
@@ -399,9 +388,9 @@ class SandboxModificationOutsideScopeAllowedTests(SandboxTestCase):
 
     def test_reset_allowed_outside_scope(self):
         """Calling reset() outside scope should work."""
-        sys.sandbox.max_statements = 1000
+        sys.sandbox.max_iterations = 1000
         sys.sandbox.reset()
-        self.assertEqual(sys.sandbox.max_statements, 0)
+        self.assertEqual(sys.sandbox.max_iterations, 0)
 
     def test_scope_context_manager_allowed_outside_scope(self):
         """Using scope() context manager outside scope should work."""

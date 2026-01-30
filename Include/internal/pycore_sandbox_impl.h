@@ -20,10 +20,6 @@ extern "C" {
 #include "pycore_pystate.h"
 #include "pycore_sandbox.h"
 
-/* Grace allocation headroom to allow for error handling after limit is hit.
- * This allows Python to format and print MemoryError without cascading failures. */
-#define ALLOCATION_GRACE_HEADROOM 1000
-
 /* ============ Thread-safe counter macros ============
  *
  * For GIL-enabled builds (default): use regular increments, protected by the GIL.
@@ -68,9 +64,8 @@ extern "C" {
 #endif
 
 /* Maximum allowed value for uint64_t limits to prevent overflow when doing
- * comparisons like `count == max + 1` or `count > max + ALLOCATION_GRACE_HEADROOM`.
- * We use UINT64_MAX - ALLOCATION_GRACE_HEADROOM as the safe maximum. */
-#define SANDBOX_MAX_LIMIT (UINT64_MAX - ALLOCATION_GRACE_HEADROOM)
+ * comparisons like `count == max + 1`. We use UINT64_MAX - 1000 as the safe maximum. */
+#define SANDBOX_MAX_LIMIT (UINT64_MAX - 1000)
 
 /* ============ Inline Helpers ============ */
 

@@ -180,13 +180,8 @@ _PySandbox_EnterScope(void)
     }
 
     /* Reset scope counters */
-    sandbox->counters.statement_count = 0;
-    sandbox->counters.allocation_count = 0;
     sandbox->counters.iteration_count = 0;
     sandbox->counters.operation_count = 0;
-
-    /* Update tracing state - statement counting requires tracing enabled */
-    _PyThreadState_UpdateTracingState(tstate);
 
     return 0;
 }
@@ -332,8 +327,6 @@ _PySandbox_ResetCounters(void)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp != NULL) {
-        interp->sandbox.counters.statement_count = 0;
-        interp->sandbox.counters.allocation_count = 0;
         interp->sandbox.counters.iteration_count = 0;
         interp->sandbox.counters.operation_count = 0;
     }

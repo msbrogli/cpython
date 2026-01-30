@@ -57,7 +57,6 @@ class SandboxLimitsTests(unittest.TestCase):
         expected_keys = {
             'max_int_digits', 'max_str_length', 'max_bytes_length',
             'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
-            'max_statements', 'max_allocations',
             'max_iterations', 'max_operations',
             'allow_float', 'allow_complex', 'allow_dunder_access',
             'allow_io',
@@ -69,7 +68,7 @@ class SandboxLimitsTests(unittest.TestCase):
         """getsandboxcounts should return a dictionary with count keys."""
         counts = sys.sandbox.get_counts()
         self.assertIsInstance(counts, dict)
-        expected_keys = {'allocation_count', 'statement_count', 'iteration_count', 'operation_count'}
+        expected_keys = {'iteration_count', 'operation_count'}
         self.assertEqual(set(counts.keys()), expected_keys)
 
     def test_default_limits_are_zero(self):
@@ -82,8 +81,6 @@ class SandboxLimitsTests(unittest.TestCase):
         self.assertEqual(limits['max_dict_size'], 0)
         self.assertEqual(limits['max_set_size'], 0)
         self.assertEqual(limits['max_tuple_size'], 0)
-        self.assertEqual(limits['max_statements'], 0)
-        self.assertEqual(limits['max_allocations'], 0)
         self.assertTrue(limits['allow_float'])
         self.assertTrue(limits['allow_complex'])
         self.assertTrue(limits['allow_dunder_access'])
@@ -704,7 +701,7 @@ class ResetLimitsTests(unittest.TestCase):
     def test_reset_clears_all_state(self):
         """reset() should clear all limits, counters, and modes."""
         # Set some limits
-        sys.sandbox.set_limits(max_list_size=100, max_statements=1000)
+        sys.sandbox.set_limits(max_list_size=100, max_iterations=1000)
         sys.sandbox.frozen_mode = True
         sys.sandbox.auto_mutable = True
 
@@ -719,12 +716,10 @@ class ResetLimitsTests(unittest.TestCase):
         # Verify limits cleared
         limits = sys.sandbox.get_limits()
         self.assertEqual(limits['max_list_size'], 0)
-        self.assertEqual(limits['max_statements'], 0)
+        self.assertEqual(limits['max_iterations'], 0)
 
         # Verify counters cleared
         counts = sys.sandbox.get_counts()
-        self.assertEqual(counts['allocation_count'], 0)
-        self.assertEqual(counts['statement_count'], 0)
         self.assertEqual(counts['iteration_count'], 0)
         self.assertEqual(counts['operation_count'], 0)
 

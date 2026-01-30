@@ -1,8 +1,7 @@
 """Tests for opcode-based operation counting (SANDBOX_COUNT).
 
 Tests the PyCF_SANDBOX_COUNT compile flag and the max_operations /
-operation_count mechanism, which is independent of the tracing-based
-statement counting (max_statements / statement_count).
+operation_count mechanism.
 """
 
 import sys
@@ -368,13 +367,10 @@ class OperationLimitTests(unittest.TestCase):
         count = sys.sandbox.get_counts()["operation_count"]
         self.assertEqual(count, 2)
 
-    def test_both_mechanisms_independent(self):
-        """scope_max_operations and scope_max_statements are independent."""
-        # Set both limits
-        sys.sandbox.set_limits(
-            max_statements=100000,
-            max_operations=100000
-        )
+    def test_operations_counting_works(self):
+        """Operation counting works correctly."""
+        # Set operation limit
+        sys.sandbox.set_limits(max_operations=100000)
         sys.sandbox.add_filename(SANDBOX_FILENAME)
         sys.sandbox.reset_counts()
 
@@ -384,8 +380,6 @@ class OperationLimitTests(unittest.TestCase):
         counts = sys.sandbox.get_counts()
         # Operation count should reflect SANDBOX_COUNT opcodes
         self.assertEqual(counts["operation_count"], 3)
-        # Statement count should reflect tracing (if enabled)
-        # Both should work independently
 
     def test_reset_clears_operation_count(self):
         """resetsandboxcounters should reset operation_count."""

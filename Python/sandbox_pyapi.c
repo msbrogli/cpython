@@ -338,17 +338,9 @@ SANDBOX_SSIZE_GETSET(max_set_size, limits.max_set_size)
 SANDBOX_SSIZE_GETSET(max_tuple_size, limits.max_tuple_size)
 
 /* ---- uint64_t R/W properties ---- */
-SANDBOX_UINT64_GETSET(max_allocations, limits.max_allocations)
 SANDBOX_UINT64_GETSET(max_iterations, limits.max_iterations)
 SANDBOX_UINT64_GETSET(max_operations, limits.max_operations)
 SANDBOX_UINT64_GETSET(max_recursion_depth, limits.max_recursion_depth)
-
-/* max_statements needs to update tracing state when changed */
-#define UPDATE_TRACING_STATE_HOOK \
-    { PyThreadState *tstate = _PyThreadState_GET(); \
-      if (tstate != NULL) _PyThreadState_UpdateTracingState(tstate); }
-
-SANDBOX_UINT64_GETSET_WITH_HOOK(max_statements, limits.max_statements, UPDATE_TRACING_STATE_HOOK)
 
 /* ---- bool R/W properties ---- */
 SANDBOX_BOOL_GETSET(allow_float, limits.allow_float)
@@ -506,8 +498,6 @@ sandbox_set_allowed_modules(_PySandboxObject *self, PyObject *value, void *closu
 }
 
 /* ---- Read-only properties (counters) ---- */
-SANDBOX_UINT64_GETTER(allocation_count, counters.allocation_count)
-SANDBOX_UINT64_GETTER(statement_count, counters.statement_count)
 SANDBOX_UINT64_GETTER(iteration_count, counters.iteration_count)
 SANDBOX_UINT64_GETTER(operation_count, counters.operation_count)
 
@@ -552,10 +542,6 @@ static PyGetSetDef sandbox_getsetters[] = {
     {"max_tuple_size", (getter)sandbox_get_max_tuple_size,
      (setter)sandbox_set_max_tuple_size, "Max tuple size (0=no limit)", NULL},
     /* R/W uint64_t */
-    {"max_allocations", (getter)sandbox_get_max_allocations,
-     (setter)sandbox_set_max_allocations, "Max scoped allocations (0=no limit)", NULL},
-    {"max_statements", (getter)sandbox_get_max_statements,
-     (setter)sandbox_set_max_statements, "Max scoped statement executions (0=no limit)", NULL},
     {"max_iterations", (getter)sandbox_get_max_iterations,
      (setter)sandbox_set_max_iterations, "Max scoped iterator steps (0=no limit)", NULL},
     {"max_operations", (getter)sandbox_get_max_operations,
@@ -599,10 +585,6 @@ static PyGetSetDef sandbox_getsetters[] = {
     {"allowed_modules", (getter)sandbox_get_allowed_modules,
      (setter)sandbox_set_allowed_modules, "Allowed modules for access (set of module names, None=no restriction)", NULL},
     /* R/O counters */
-    {"allocation_count", (getter)sandbox_get_allocation_count,
-     NULL, "Current scoped allocation count", NULL},
-    {"statement_count", (getter)sandbox_get_statement_count,
-     NULL, "Current scoped statement count", NULL},
     {"iteration_count", (getter)sandbox_get_iteration_count,
      NULL, "Current scoped iteration count", NULL},
     {"operation_count", (getter)sandbox_get_operation_count,
@@ -624,7 +606,6 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     static char *kwlist[] = {
         "max_int_digits", "max_str_length", "max_bytes_length",
         "max_list_size", "max_dict_size", "max_set_size", "max_tuple_size",
-        "max_statements", "max_allocations",
         "max_iterations", "max_operations",
         "allow_float", "allow_complex", "allow_dunder_access",
         "count_iterations_as_operations", "allow_io", NULL
@@ -643,8 +624,6 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     Py_ssize_t max_dict_size = limits->max_dict_size;
     Py_ssize_t max_set_size = limits->max_set_size;
     Py_ssize_t max_tuple_size = limits->max_tuple_size;
-    unsigned long long max_statements = (unsigned long long)limits->max_statements;
-    unsigned long long max_allocations = (unsigned long long)limits->max_allocations;
     unsigned long long max_iterations = (unsigned long long)limits->max_iterations;
     unsigned long long max_operations = (unsigned long long)limits->max_operations;
     int allow_float = limits->allow_float;
@@ -653,12 +632,11 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     int count_iterations_as_operations = limits->count_iterations_as_operations;
     int allow_io = limits->allow_io;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKKppppp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKppppp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
                                      &max_tuple_size,
-                                     &max_statements, &max_allocations,
                                      &max_iterations, &max_operations,
                                      &allow_float, &allow_complex,
                                      &allow_dunder_access,
@@ -668,14 +646,6 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     }
 
     /* Validate that uint64_t limits don't exceed SANDBOX_MAX_LIMIT to prevent overflow */
-    if (max_statements > SANDBOX_MAX_LIMIT) {
-        PyErr_SetString(PyExc_OverflowError, "max_statements exceeds maximum allowed value");
-        return NULL;
-    }
-    if (max_allocations > SANDBOX_MAX_LIMIT) {
-        PyErr_SetString(PyExc_OverflowError, "max_allocations exceeds maximum allowed value");
-        return NULL;
-    }
     if (max_iterations > SANDBOX_MAX_LIMIT) {
         PyErr_SetString(PyExc_OverflowError, "max_iterations exceeds maximum allowed value");
         return NULL;
@@ -692,8 +662,6 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     limits->max_dict_size = max_dict_size;
     limits->max_set_size = max_set_size;
     limits->max_tuple_size = max_tuple_size;
-    limits->max_statements = (uint64_t)max_statements;
-    limits->max_allocations = (uint64_t)max_allocations;
     limits->max_iterations = (uint64_t)max_iterations;
     limits->max_operations = (uint64_t)max_operations;
     limits->allow_float = allow_float;
@@ -701,12 +669,6 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     limits->allow_dunder_access = allow_dunder_access;
     limits->count_iterations_as_operations = count_iterations_as_operations;
     limits->allow_io = allow_io;
-
-    /* Update tracing state */
-    PyThreadState *tstate = _PyThreadState_GET();
-    if (tstate != NULL) {
-        _PyThreadState_UpdateTracingState(tstate);
-    }
 
     Py_RETURN_NONE;
 }
@@ -720,7 +682,7 @@ sandbox_get_limits(_PySandboxObject *self, PyObject *Py_UNUSED(args))
     _PySandboxLimits *limits = &sandbox->limits;
 
     return Py_BuildValue(
-        "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, s:K, s:O, s:O, s:O, s:O, s:O}",
+        "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:O, s:O, s:O, s:O, s:O}",
         "max_int_digits", limits->max_int_digits,
         "max_str_length", limits->max_str_length,
         "max_bytes_length", limits->max_bytes_length,
@@ -728,8 +690,6 @@ sandbox_get_limits(_PySandboxObject *self, PyObject *Py_UNUSED(args))
         "max_dict_size", limits->max_dict_size,
         "max_set_size", limits->max_set_size,
         "max_tuple_size", limits->max_tuple_size,
-        "max_statements", (unsigned long long)limits->max_statements,
-        "max_allocations", (unsigned long long)limits->max_allocations,
         "max_iterations", (unsigned long long)limits->max_iterations,
         "max_operations", (unsigned long long)limits->max_operations,
         "allow_float", limits->allow_float ? Py_True : Py_False,
@@ -747,9 +707,7 @@ sandbox_get_counts(_PySandboxObject *self, PyObject *Py_UNUSED(args))
     _PySandboxState *sandbox = &interp->sandbox;
 
     return Py_BuildValue(
-        "{s:K, s:K, s:K, s:K}",
-        "allocation_count", (unsigned long long)sandbox->counters.allocation_count,
-        "statement_count", (unsigned long long)sandbox->counters.statement_count,
+        "{s:K, s:K}",
         "iteration_count", (unsigned long long)sandbox->counters.iteration_count,
         "operation_count", (unsigned long long)sandbox->counters.operation_count);
 }

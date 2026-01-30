@@ -37,8 +37,8 @@ sys.sandbox.set_limits(
     max_int_digits=100,
     max_str_length=10000,
     max_list_size=1000,
-    max_statements=10000,
-    max_allocations=5000,
+    max_iterations=10000,
+    max_operations=5000,
 )
 sys.sandbox.allow_unsafe = 1  # Allow exec with string in scope
 sys.sandbox.reset_counts()

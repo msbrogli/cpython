@@ -28,25 +28,16 @@ struct _frame;
  *
  * == Important Implementation Details ==
  *
- * Grace Headroom (Allocation Limits):
- *   When max_allocations is exceeded, the sandbox allows an additional
- *   ALLOCATION_GRACE_HEADROOM (1000) allocations before hard-failing.
- *   This "grace period" allows Python to allocate memory for error
- *   handling (e.g., creating the MemoryError exception and traceback)
- *   without cascading failures. The soft error is raised at count == max+1,
- *   and the hard error at count > max+ALLOCATION_GRACE_HEADROOM.
- *
- * Single-Raise Behavior (Statement/Iteration/Operation Limits):
+ * Single-Raise Behavior (Iteration/Operation Limits):
  *   These limits only raise an error ONCE, at count == max+1.
  *   Subsequent operations beyond the limit do NOT raise additional errors.
  *   This prevents cascading failures during error handling when Python
  *   needs to execute statements to format and display the exception.
  *
  * Overflow Protection:
- *   All uint64_t limits (max_statements, max_allocations, max_iterations,
- *   max_operations) are capped at SANDBOX_MAX_LIMIT = UINT64_MAX - 1000.
- *   This ensures that comparisons like `count == max + 1` or
- *   `count > max + ALLOCATION_GRACE_HEADROOM` cannot overflow.
+ *   All uint64_t limits (max_iterations, max_operations) are capped at
+ *   SANDBOX_MAX_LIMIT = UINT64_MAX - 1000. This ensures that comparisons
+ *   like `count == max + 1` cannot overflow.
  *
  * Thread Safety:
  *   The sandbox relies on the GIL for thread safety. Non-atomic counter
@@ -92,8 +83,6 @@ typedef struct {
     Py_ssize_t max_tuple_size;
 
     /* Scoped limits - only enforced within sandbox scope (selected frames) */
-    uint64_t max_statements;      /* 0 = no limit */
-    uint64_t max_allocations;     /* 0 = no limit */
     uint64_t max_iterations;      /* 0 = no limit */
     uint64_t max_operations;      /* 0 = no limit */
     uint64_t max_recursion_depth; /* 0 = no limit */
@@ -135,8 +124,6 @@ typedef struct {
 
 /* Sandbox counters - separated from limits for clarity */
 typedef struct {
-    uint64_t statement_count;     /* Line executions in scope */
-    uint64_t allocation_count;    /* Allocations in scope */
     uint64_t iteration_count;     /* Iterator calls in scope */
     uint64_t operation_count;     /* Counted operations (SANDBOX_COUNT opcode) in scope */
 } _PySandboxCounters;
@@ -150,8 +137,6 @@ typedef struct {
     .max_dict_size = 0,             \
     .max_set_size = 0,              \
     .max_tuple_size = 0,            \
-    .max_statements = 0,            \
-    .max_allocations = 0,           \
     .max_iterations = 0,            \
     .max_operations = 0,            \
     .max_recursion_depth = 0,       \
@@ -168,8 +153,6 @@ typedef struct {
 }
 
 #define _PySandboxCounters_INIT { \
-    .statement_count = 0,           \
-    .allocation_count = 0,          \
     .iteration_count = 0,           \
     .operation_count = 0,           \
 }
@@ -304,12 +287,6 @@ PyAPI_FUNC(int) _PySandbox_CheckTupleSize(Py_ssize_t size);
 
 /* Check if a type is allowed. Returns 0 if allowed, -1 if forbidden (sets exception) */
 PyAPI_FUNC(int) _PySandbox_CheckTypeAllowed(PyTypeObject *type);
-
-/* Check allocation count against limits. Returns 0 if OK, -1 if exceeded (sets exception) */
-PyAPI_FUNC(int) _PySandbox_CheckAllocation(void);
-
-/* Scoped statement checking - returns -1 and sets exception when limit exceeded */
-PyAPI_FUNC(int) _PySandbox_CheckScopeStatement(void);
 
 /* Scoped operation checking (SANDBOX_COUNT opcode) - returns -1 and sets exception when limit exceeded */
 PyAPI_FUNC(int) _PySandbox_CheckScopeOperation(void);

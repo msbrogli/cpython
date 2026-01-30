@@ -30,7 +30,6 @@
 #include "pycore_object.h"
 #include "pycore_pyerrors.h"
 #include "pycore_pystate.h"     // _PyThreadState_GET()
-#include "pycore_sandbox.h"     // _PySandbox_CheckAllocation()
 #include "pydtrace.h"
 
 typedef struct _gc_runtime_state GCState;
@@ -2300,11 +2299,6 @@ _PyObject_GC_Link(PyObject *op)
 static PyObject *
 gc_alloc(size_t basicsize, size_t presize)
 {
-    /* Check sandbox allocation limit */
-    if (_PySandbox_CheckAllocation() < 0) {
-        return NULL;
-    }
-
     PyThreadState *tstate = _PyThreadState_GET();
     if (basicsize > PY_SSIZE_T_MAX - presize) {
         return _PyErr_NoMemory(tstate);

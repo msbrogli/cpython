@@ -50,48 +50,6 @@ class LimitBoundaryTests(SandboxTestCase):
         with self.assertRaises(SandboxOverflowError):
             _run_scoped("large_lst = list(range(100))")
 
-    def test_limit_small_statements(self):
-        """Setting a small statement limit should block after threshold."""
-        # Note: The statement limit error is raised AFTER the limit is exceeded
-        # (at count == max + 1). We use filename-based scope to avoid counting
-        # the setup code's statements.
-        code = '''
-import sys
-sys.sandbox.set_limits(max_statements=5)
-sys.sandbox.add_filename("<sandbox>")
-try:
-    # This will execute many statements and should trigger the limit
-    exec(compile("x = 0\\nfor i in range(100):\\n    x += 1", "<sandbox>", "exec"))
-    sys.exit(2)  # Should not reach here
-except SandboxRuntimeError as e:
-    if "statement limit" in str(e):
-        sys.exit(0)
-    sys.exit(3)
-'''
-        result = _run_sandboxed_code(code)
-        self.assertEqual(result.returncode, 0,
-                        f"Statement limit not enforced: {result.stderr}")
-
-    def test_limit_one_allocation(self):
-        """Setting max_allocations to 1 should allow very few allocations."""
-        # Note: We don't use try/except because exception handling requires
-        # allocations, which causes cascading failures with very low limits.
-        code = '''
-import sys
-sys.sandbox.set_limits(max_allocations=1)
-sys.sandbox.enter_scope()
-a = []
-for i in range(100):
-    a.append([i])  # Each append creates a new list
-sys.exit(2)  # Should not reach here
-'''
-        result = _run_sandboxed_code(code)
-        # Exit code 1 with SandboxMemoryError in stderr means limit was enforced
-        if result.returncode == 1 and "SandboxMemoryError" in result.stderr:
-            return  # Test passed - limit enforced
-        if result.returncode == 2:
-            self.fail("Allocation limit=1 not enforced - loop completed")
-        self.fail(f"Unexpected result: returncode={result.returncode} stderr={result.stderr!r}")
 
     def test_limit_one_iteration(self):
         """Setting max_iterations to 1 should allow exactly one iteration."""
@@ -141,18 +99,6 @@ class NegativeLimitTests(SandboxTestCase):
 class OverflowProtectionTests(SandboxTestCase):
     """Test overflow protection for uint64_t limits."""
 
-    def test_max_statements_overflow_rejected(self):
-        """Setting max_statements near UINT64_MAX should raise OverflowError."""
-        # SANDBOX_MAX_LIMIT = UINT64_MAX - 1000
-        # Anything above that should be rejected
-        with self.assertRaises(OverflowError):
-            sys.sandbox.max_statements = (2**64 - 1)  # UINT64_MAX
-
-    def test_max_allocations_overflow_rejected(self):
-        """Setting max_allocations near UINT64_MAX should raise OverflowError."""
-        with self.assertRaises(OverflowError):
-            sys.sandbox.max_allocations = (2**64 - 1)
-
     def test_max_iterations_overflow_rejected(self):
         """Setting max_iterations near UINT64_MAX should raise OverflowError."""
         with self.assertRaises(OverflowError):
@@ -166,7 +112,7 @@ class OverflowProtectionTests(SandboxTestCase):
     def test_set_limits_overflow_rejected(self):
         """set_limits() should reject overflow values."""
         with self.assertRaises(OverflowError):
-            sys.sandbox.set_limits(max_statements=(2**64 - 1))
+            sys.sandbox.set_limits(max_iterations=(2**64 - 1))
 
 
 class NestedScopeTests(SandboxTestCase):
@@ -187,7 +133,7 @@ class NestedScopeTests(SandboxTestCase):
         """
         code = '''
 import sys
-sys.sandbox.set_limits(max_statements=100000, max_allocations=100000)
+sys.sandbox.set_limits(max_iterations=100000, max_operations=100000)
 sys.sandbox.enter_scope()
 
 # Do some work to increment counters
@@ -210,7 +156,7 @@ except SandboxSecurityError:
         """Nested scopes with different filenames should work correctly."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_statements=1000000)
+sys.sandbox.set_limits(max_operations=1000000)
 
 # Register first filename
 sys.sandbox.add_filename("<outer>")
@@ -222,7 +168,7 @@ for i in range(10):
     x += 1
 """, "<outer>", "exec"))
 
-outer_count = sys.sandbox.get_counts()['statement_count']
+outer_count = sys.sandbox.get_counts()['operation_count']
 
 # Add inner filename (both should now be tracked)
 sys.sandbox.add_filename("<inner>")
@@ -234,7 +180,7 @@ for i in range(10):
     y += 1
 """, "<inner>", "exec"))
 
-combined_count = sys.sandbox.get_counts()['statement_count']
+combined_count = sys.sandbox.get_counts()['operation_count']
 sys.sandbox.clear_filenames()
 
 # Both should have contributed
@@ -258,7 +204,6 @@ class DeeplyNestedCodeTests(SandboxTestCase):
 
     def test_deeply_nested_functions(self):
         """Deeply nested function definitions should work correctly."""
-        sys.sandbox.set_limits(max_statements=100000)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Create deeply nested functions
@@ -278,7 +223,6 @@ result = level1()
 
     def test_deeply_nested_lambdas(self):
         """Deeply nested lambdas should work correctly."""
-        sys.sandbox.set_limits(max_statements=100000)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Create deeply nested lambdas
@@ -288,34 +232,6 @@ result = f()
 """)
         self.assertEqual(globs['result'], 42)
 
-    def test_recursive_function_with_limit(self):
-        """Recursive functions should be limited by statement count."""
-        code = '''
-import sys
-sys.sandbox.set_limits(max_statements=50)
-sys.sandbox.enter_scope()
-
-def factorial(n):
-    if n <= 1:
-        return 1
-    return n * factorial(n - 1)
-
-try:
-    result = factorial(100)  # Should exceed statement limit
-    sys.exit(2)
-except SandboxRuntimeError as e:
-    if "statement limit" in str(e):
-        sys.exit(0)
-    sys.exit(3)
-'''
-        result = _run_sandboxed_code(code)
-        # With >= checks, cascading errors may occur during exception handling.
-        # Accept either: exit 0 (caught cleanly) or exit 1 with correct error in stderr.
-        if result.returncode == 0:
-            return  # Test passed - exception caught cleanly
-        if result.returncode == 1 and "statement limit" in result.stderr:
-            return  # Test passed - limit enforced, cascading error during handling
-        self.fail(f"Recursive limit not enforced: {result.stderr}")
 
 
 class ScopeContextManagerTests(SandboxTestCase):
@@ -323,8 +239,6 @@ class ScopeContextManagerTests(SandboxTestCase):
 
     def test_scope_context_manager_exception_handling(self):
         """Scope context manager should properly exit on exception."""
-        sys.sandbox.set_limits(max_statements=100000)
-
         try:
             with sys.sandbox.scope():
                 self.assertTrue(sys.sandbox.in_scope())
@@ -337,13 +251,11 @@ class ScopeContextManagerTests(SandboxTestCase):
 
     def test_nested_scope_context_managers(self):
         """Nested scope context managers should work correctly."""
-        sys.sandbox.set_limits(max_statements=100000)
-
         with sys.sandbox.scope():
             self.assertTrue(sys.sandbox.in_scope())
             # Can't really nest scopes since they share the same filename
             # but the context manager should still work
-            count1 = sys.sandbox.get_counts()['statement_count']
+            count1 = sys.sandbox.get_counts()['operation_count']
 
         self.assertFalse(sys.sandbox.in_scope())
 

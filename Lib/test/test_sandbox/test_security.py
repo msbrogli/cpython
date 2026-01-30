@@ -735,5 +735,153 @@ class AllowUnsafePropertyTests(SandboxTestCase):
         self.assertFalse(sys.sandbox.allow_unsafe)
 
 
+class GeneratorFrameAccessBlockedTests(SandboxTestCase):
+    """Test that generator/coroutine frame access is blocked in sandbox scope.
+
+    Generators, coroutines, and async generators created outside sandbox scope
+    could expose their local variables via gi_frame, cr_frame, and ag_frame
+    attributes. This would allow sandboxed code to leak information from
+    outside the sandbox. These tests verify that frame access is blocked.
+    """
+
+    def _run_in_scope(self, code_str, extra_globals=None):
+        """Execute code in sandbox scope via compile/exec."""
+        filename = "<sandbox_test>"
+        sys.sandbox.add_filename(filename)
+        try:
+            code = compile(code_str, filename, "exec")
+            ns = {"sys": sys}
+            if extra_globals:
+                ns.update(extra_globals)
+            exec(code, ns)
+            return ns
+        finally:
+            sys.sandbox.remove_filename(filename)
+
+    def test_generator_gi_frame_blocked_in_scope(self):
+        """gi_frame access should be blocked in sandbox scope."""
+        # Create generator outside sandbox with secrets
+        def gen_with_secrets():
+            secret = "SECRET_VALUE"
+            yield 1
+
+        gen = gen_with_secrets()
+        next(gen)  # Start generator to populate frame
+
+        with self.assertRaises(SandboxSecurityError) as ctx:
+            self._run_in_scope("frame = gen.gi_frame", {"gen": gen})
+        self.assertIn("frame access", str(ctx.exception).lower())
+
+    def test_coroutine_cr_frame_blocked_in_scope(self):
+        """cr_frame access should be blocked in sandbox scope."""
+        # Create coroutine outside sandbox
+        async def coro_with_secrets():
+            secret = "COROUTINE_SECRET"
+            return secret
+
+        coro = coro_with_secrets()
+
+        try:
+            with self.assertRaises(SandboxSecurityError) as ctx:
+                self._run_in_scope("frame = coro.cr_frame", {"coro": coro})
+            self.assertIn("frame access", str(ctx.exception).lower())
+        finally:
+            coro.close()
+
+    def test_async_gen_ag_frame_blocked_in_scope(self):
+        """ag_frame access should be blocked in sandbox scope."""
+        # Create async generator outside sandbox
+        async def async_gen_with_secrets():
+            secret = "ASYNC_GEN_SECRET"
+            yield 1
+
+        agen = async_gen_with_secrets()
+
+        try:
+            with self.assertRaises(SandboxSecurityError) as ctx:
+                self._run_in_scope("frame = agen.ag_frame", {"agen": agen})
+            self.assertIn("frame access", str(ctx.exception).lower())
+        finally:
+            # Clean up async generator
+            try:
+                agen.aclose()
+            except:
+                pass
+
+    def test_generator_frame_access_allowed_outside_scope(self):
+        """gi_frame access should work outside sandbox scope."""
+        def gen_with_value():
+            value = 42
+            yield 1
+
+        gen = gen_with_value()
+        next(gen)
+
+        # Access frame outside scope - should work
+        frame = gen.gi_frame
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame.f_locals.get("value"), 42)
+
+    def test_coroutine_frame_access_allowed_outside_scope(self):
+        """cr_frame access should work outside sandbox scope."""
+        async def coro_with_value():
+            value = 123
+            return value
+
+        coro = coro_with_value()
+
+        try:
+            # Access frame outside scope - should work
+            frame = coro.cr_frame
+            self.assertIsNotNone(frame)
+        finally:
+            coro.close()
+
+    def test_async_gen_frame_access_allowed_outside_scope(self):
+        """ag_frame access should work outside sandbox scope."""
+        async def agen_with_value():
+            value = 999
+            yield 1
+
+        agen = agen_with_value()
+
+        try:
+            # Access frame outside scope - should work (frame may be None until started)
+            frame = agen.ag_frame
+            # Frame access succeeds (no exception), that's the test
+        finally:
+            try:
+                agen.aclose()
+            except:
+                pass
+
+    def test_generator_frame_leak_prevented(self):
+        """Verify that secrets cannot be leaked via gi_frame."""
+        # This is a more complete test showing the actual attack scenario
+        secret_value = "TOP_SECRET_DATA"
+
+        def leaky_generator():
+            # This local variable should NOT be accessible from sandbox
+            leaked_secret = secret_value
+            yield 1
+            yield 2
+
+        gen = leaky_generator()
+        next(gen)  # Populate frame with locals
+
+        # Attempt to leak the secret from within sandbox
+        attack_code = '''
+try:
+    frame = gen.gi_frame
+    leaked = frame.f_locals.get("leaked_secret")
+    result = {"leaked": True, "value": leaked}
+except SandboxSecurityError:
+    result = {"leaked": False}
+'''
+        ns = self._run_in_scope(attack_code, {"gen": gen})
+        self.assertFalse(ns.get("result", {}).get("leaked", True),
+                         "Secret was leaked via gi_frame!")
+
+
 if __name__ == '__main__':
     unittest.main()

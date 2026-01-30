@@ -9,6 +9,7 @@
 #include "pycore_opcode.h"        // _PyOpcode_Deopt
 #include "pycore_pyerrors.h"      // _PyErr_ClearExcState()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_IsInScope()
 #include "structmember.h"         // PyMemberDef
 #include "opcode.h"               // SEND
 
@@ -773,6 +774,14 @@ gen_getsuspended(PyGenObject *gen, void *Py_UNUSED(ignored))
 static PyObject *
 _gen_getframe(PyGenObject *gen, const char *const name)
 {
+    /* Block frame access from sandbox scope to prevent information leakage.
+     * Generators/coroutines created outside sandbox could expose their
+     * local variables via gi_frame/cr_frame/ag_frame attributes. */
+    if (_PySandbox_IsInScope()) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "generator/coroutine frame access is blocked in sandbox scope");
+        return NULL;
+    }
     if (PySys_Audit("object.__getattr__", "Os", gen, name) < 0) {
         return NULL;
     }

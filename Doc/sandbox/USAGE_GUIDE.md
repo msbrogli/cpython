@@ -948,6 +948,7 @@ Exception
       +-- SandboxRuntimeError        # Statement/iteration/operation limit, banned opcode
       +-- SandboxTypeError           # Forbidden type creation
       +-- SandboxAttributeError      # Frozen mode or dunder access blocked
+      +-- SandboxSecurityError       # Security violation (I/O, config, frame access)
 ```
 
 ### Catching All Sandbox Errors
@@ -975,6 +976,8 @@ except SandboxTypeError:
     print("Forbidden type creation attempted")
 except SandboxAttributeError:
     print("Attribute access blocked (frozen mode or dunder)")
+except SandboxSecurityError:
+    print("Security violation (I/O blocked, config modification, frame access)")
 except SandboxError:
     print("Other sandbox violation")
 ```
@@ -1323,7 +1326,32 @@ sys.sandbox.set_mutable(output)
 # Sandboxed code can write to output even in frozen mode
 ```
 
-### 7. Security Warning
+### 7. Generator/Coroutine Frame Access is Blocked
+
+The sandbox automatically blocks access to generator, coroutine, and async generator frames from within sandbox scope. This prevents information leakage when generators/coroutines created outside the sandbox are passed to sandboxed code.
+
+```python
+# Outside sandbox
+def gen_with_secret():
+    api_key = "SECRET_KEY"
+    yield 1
+
+gen = gen_with_secret()
+next(gen)
+
+# Inside sandbox
+sys.sandbox.add_filename("<sandbox>")
+code = compile("frame = gen.gi_frame", "<sandbox>", "exec")  # Raises SandboxSecurityError
+```
+
+Blocked attributes:
+- `generator.gi_frame`
+- `coroutine.cr_frame`
+- `async_generator.ag_frame`
+
+Note: These attributes work normally outside sandbox scope.
+
+### 8. Security Warning
 
 The sandbox limits are designed for resource protection, not as a complete security boundary. Code with access to C extensions, `ctypes`, or other low-level APIs can bypass these limits. For maximum restriction:
 
@@ -1404,6 +1432,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `SandboxRuntimeError` | Statement/iteration/operation limit or banned opcode |
 | `SandboxTypeError` | Forbidden type creation |
 | `SandboxAttributeError` | Frozen mode or dunder access blocked |
+| `SandboxSecurityError` | Security violation (I/O blocked, config modification, frame access, etc.) |
 
 ### `set_limits()` Parameters
 

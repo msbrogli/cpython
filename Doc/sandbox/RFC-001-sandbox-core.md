@@ -285,6 +285,36 @@ _PySandbox_CheckConfigModification(void)
 }
 ```
 
+### Security: Generator/Coroutine Frame Access
+
+Generators, coroutines, and async generators expose their execution frame through `gi_frame`, `cr_frame`, and `ag_frame` attributes respectively. These frames contain local variables (`f_locals`) that could leak sensitive information if the generator/coroutine was created outside sandbox scope.
+
+The sandbox blocks frame access from within sandbox scope:
+
+```c
+// Objects/genobject.c - _gen_getframe()
+static PyObject *
+_gen_getframe(PyGenObject *gen, const char *const name)
+{
+    /* Block frame access from sandbox scope to prevent information leakage.
+     * Generators/coroutines created outside sandbox could expose their
+     * local variables via gi_frame/cr_frame/ag_frame attributes. */
+    if (_PySandbox_IsInScope()) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "generator/coroutine frame access is blocked in sandbox scope");
+        return NULL;
+    }
+    // ... rest of implementation
+}
+```
+
+**Blocked attributes:**
+- `generator.gi_frame` → `SandboxSecurityError`
+- `coroutine.cr_frame` → `SandboxSecurityError`
+- `async_generator.ag_frame` → `SandboxSecurityError`
+
+**Security rationale:** Without this check, passing a generator created outside sandbox to sandboxed code would allow the sandbox to access the generator's local variables, potentially leaking API keys, passwords, or other sensitive data stored in the creating scope.
+
 ## Implementation Files
 
 | File | Purpose |
@@ -370,6 +400,8 @@ Without nesting, `inner()` would prematurely re-enable limits.
 
 2. **Per-Scope Limits**: Different limits for different registered filenames.
 
-3. **Async Support**: Special handling for async generators and coroutines that may interleave.
+3. ~~**Async Support**: Special handling for async generators and coroutines that may interleave.~~ **IMPLEMENTED**: Generator, coroutine, and async generator frame access (`gi_frame`, `cr_frame`, `ag_frame`) is blocked from sandbox scope to prevent information leakage. See "Security: Generator/Coroutine Frame Access" section above.
 
 4. **Audit Logging**: Optional logging of all scope entries/exits for debugging.
+
+5. **Recursion Depth Limit**: Add `max_recursion_depth` to sandbox limits to prevent interpreter crashes from deep recursion with exception re-raising.

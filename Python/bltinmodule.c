@@ -177,6 +177,14 @@ builtin___build_class__(PyObject *self, PyObject *const *args, Py_ssize_t nargs,
     }
     /* else: meta is not a class, so we cannot do the metaclass
        calculation, so we will use the explicitly given object as it is */
+
+    /* Sandbox check: block custom metaclasses (only allow type) */
+    if (meta != (PyObject *)&PyType_Type) {
+        if (_PySandbox_CheckUnsafeBlocked("metaclass") < 0) {
+            goto error;
+        }
+    }
+
     if (_PyObject_LookupAttr(meta, &_Py_ID(__prepare__), &prep) < 0) {
         ns = NULL;
     }

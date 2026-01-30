@@ -544,6 +544,62 @@ else:
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
 
+class MetaclassBlockingTest(unittest.TestCase):
+    """Test that custom metaclasses are blocked in sandbox."""
+
+    def test_custom_metaclass_blocked(self):
+        """Custom metaclasses should be blocked when allow_unsafe=0."""
+        code = '''
+import sys
+sys.sandbox.allow_unsafe = 0
+sys.sandbox.add_filename('<string>')
+try:
+    class Meta(type):
+        pass
+    class Foo(metaclass=Meta):
+        pass
+    print("FAIL: custom metaclass allowed")
+except SandboxSecurityError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_normal_class_allowed(self):
+        """Normal class definitions should work in sandbox."""
+        code = '''
+import sys
+sys.sandbox.allow_unsafe = 0
+sys.sandbox.add_filename('<string>')
+class Foo:
+    def __init__(self):
+        self.x = 1
+
+f = Foo()
+if f.x == 1:
+    print("PASS")
+else:
+    print("FAIL")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_metaclass_allowed_with_allow_unsafe(self):
+        """Custom metaclasses should work when allow_unsafe=1."""
+        code = '''
+import sys
+sys.sandbox.allow_unsafe = 1
+sys.sandbox.add_filename('<string>')
+class Meta(type):
+    pass
+class Foo(metaclass=Meta):
+    pass
+print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
 class DictUpdateBypassTest(unittest.TestCase):
     """Test that dict.update() respects size limits (security fix)."""
 

@@ -288,6 +288,43 @@ except SandboxSecurityError:
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
 
+class DictCopyBypassTest(unittest.TestCase):
+    """Test that dict.copy() respects size limits (security fix)."""
+
+    def test_dict_copy_blocked(self):
+        """dict.copy() should be blocked when source exceeds limit."""
+        code = '''
+import sys
+# Create large dict BEFORE sandbox
+big_dict = {i: i for i in range(500)}
+sys.sandbox.max_dict_size = 100
+sys.sandbox.add_filename('<string>')
+try:
+    copy = big_dict.copy()
+    print(f"FAIL: copied {len(copy)} items")
+except SandboxOverflowError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_dict_copy_allowed_under_limit(self):
+        """dict.copy() should work when source is under limit."""
+        code = '''
+import sys
+small_dict = {1: 'a', 2: 'b', 3: 'c'}
+sys.sandbox.max_dict_size = 100
+sys.sandbox.add_filename('<string>')
+copy = small_dict.copy()
+if len(copy) == 3:
+    print("PASS")
+else:
+    print(f"FAIL: {len(copy)}")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
 class SetCopyBypassTest(unittest.TestCase):
     """Test that set copy operations respect size limits (security fix)."""
 

@@ -534,7 +534,7 @@ Called from:
 | `Objects/unicodeobject.c` | `PyUnicode_New()` | `_PySandbox_CheckStrLength()` |
 | `Objects/bytesobject.c` | `PyBytes_FromStringAndSize()` | `_PySandbox_CheckBytesLength()` |
 | `Objects/listobject.c` | `list_resize()`, others | `_PySandbox_CheckListSize()` |
-| `Objects/dictobject.c` | insertion functions | `_PySandbox_CheckDictSize()` |
+| `Objects/dictobject.c` | insertion functions, `PyDict_Copy()` | `_PySandbox_CheckDictSize()` |
 | `Objects/setobject.c` | `set_add_entry()`, `set_merge()` | `_PySandbox_CheckSetSize()` |
 | `Objects/tupleobject.c` | `PyTuple_New()` | `_PySandbox_CheckTupleSize()` |
 | `Objects/floatobject.c` | creation functions | `_PySandbox_CheckTypeAllowed()` |

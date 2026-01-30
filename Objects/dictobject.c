@@ -3039,6 +3039,11 @@ PyDict_Copy(PyObject *o)
         return PyDict_New();
     }
 
+    /* Sandbox check: verify copy size is within limits */
+    if (_PySandbox_CheckDictSize(mp->ma_used) < 0) {
+        return NULL;
+    }
+
     if (_PyDict_HasSplitTable(mp)) {
         PyDictObject *split_copy;
         Py_ssize_t size = shared_keys_usable_size(mp->ma_keys);

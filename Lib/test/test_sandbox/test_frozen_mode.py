@@ -796,6 +796,7 @@ import sys
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
+sys.sandbox.allow_unsafe = True  # Allow metaclasses
 code = compile("""
 class Meta(type):
     pass

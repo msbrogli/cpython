@@ -49,10 +49,11 @@ except SandboxAttributeError as e:
         """Writing dunder attributes blocked when configured."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
-sys.sandbox.enter_scope()
+# Define class BEFORE entering sandbox scope
 class Foo:
     pass
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.enter_scope()
 try:
     Foo.__doc__ = "hacked"
     print("ERROR: should have raised")
@@ -71,10 +72,11 @@ except SandboxAttributeError as e:
         """Deleting dunder attributes blocked when configured."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
-sys.sandbox.enter_scope()
+# Define class BEFORE entering sandbox scope
 class Foo:
     __doc__ = "test"
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.enter_scope()
 try:
     del Foo.__doc__
     print("ERROR: should have raised")
@@ -93,10 +95,11 @@ except SandboxAttributeError as e:
         """Normal attributes still allowed when dunder blocked."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
-sys.sandbox.enter_scope()
+# Define class BEFORE entering sandbox scope
 class Foo:
     pass
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.enter_scope()
 Foo.bar = 42
 print("OK:", Foo.bar)
 sys.exit(0)
@@ -164,10 +167,11 @@ sys.exit(0)
         """Single underscore attributes should still be allowed."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
-sys.sandbox.enter_scope()
+# Define class BEFORE entering sandbox scope
 class Foo:
     pass
+sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.enter_scope()
 Foo._private = 42
 print("OK:", Foo._private)
 sys.exit(0)

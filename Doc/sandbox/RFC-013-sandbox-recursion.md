@@ -52,6 +52,30 @@ except SandboxRecursionError as e:
     print(f"Recursion limit exceeded: {e}")
 ```
 
+## Reading the Current Depth
+
+The current recursion depth can be read via `sys.sandbox.recursion_depth` (read-only):
+
+```python
+import sys
+
+sys.sandbox.max_recursion_depth = 100
+sys.sandbox.add_filename("<sandbox>")
+
+def capture_depth():
+    """Trusted helper to read depth from sandboxed code."""
+    return sys.sandbox.recursion_depth
+
+code = '''
+def nested():
+    return capture_depth()  # Returns 2 (module + nested)
+print(nested())
+'''
+exec(compile(code, "<sandbox>", "exec"), {'capture_depth': capture_depth})
+```
+
+Note: Sandboxed code cannot directly access `sys.sandbox` due to module access restrictions. Use a trusted helper function as shown above.
+
 ## How Depth is Counted
 
 The recursion depth counts the **total number of sandbox-scoped frames** currently in the call stack. A frame is "in scope" if its `co_filename` is in the registered filenames set.
@@ -163,17 +187,19 @@ typedef struct {
 Called at frame entry (in `ceval.c` at `start_frame` label):
 
 1. Fast-path exits if: suspended, suppress_checks, limit is 0, no registered filenames
-2. Check if frame is in sandbox scope via `frame_in_sandbox_scope()`
+2. Check if frame is in sandbox scope via `filename_is_registered(frame->f_code->co_filename)`
 3. If in scope, increment `tstate->sandbox_recursion_depth`
 4. If depth exceeds limit, set `SandboxRecursionError` and return -1
 5. Return 0 on success
+
+**Important**: Unlike other sandbox checks that use `frame_in_sandbox_scope()` (which skips incomplete frames to find the "current executing frame"), the recursion tracking directly checks the specific frame being entered/exited. This prevents double-counting that would occur if incomplete frames were skipped during entry.
 
 ### `_PySandbox_ExitFrame(frame)`
 
 Called at frame exit (RETURN_VALUE, YIELD_VALUE, exit_unwind):
 
 1. Fast-path exits matching EnterFrame conditions
-2. Check if frame is in sandbox scope
+2. Check if frame is in sandbox scope via `filename_is_registered()`
 3. If in scope and depth > 0, decrement `tstate->sandbox_recursion_depth`
 
 ## Hook Locations in ceval.c
@@ -215,6 +241,13 @@ Exception
     └── SandboxImportError
 ```
 
+## Python API Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `sys.sandbox.max_recursion_depth` | R/W `int` | Maximum allowed sandbox recursion depth (0 = no limit) |
+| `sys.sandbox.recursion_depth` | R/O `int` | Current sandbox recursion depth (per-thread) |
+
 ## Files Modified
 
 | File | Changes |
@@ -224,9 +257,10 @@ Exception
 | `Include/pyerrors.h` | Add `PyExc_SandboxRecursionError` |
 | `Objects/exceptions.c` | Define `SandboxRecursionError` |
 | `Python/sandbox_recursion.c` | New file with `_PySandbox_EnterFrame`, `_PySandbox_ExitFrame` |
-| `Python/sandbox_pyapi.c` | Add `max_recursion_depth` property |
+| `Python/sandbox_pyapi.c` | Add `max_recursion_depth` (R/W) and `recursion_depth` (R/O) properties |
 | `Python/ceval.c` | Hook entry/exit points |
 | `Makefile.pre.in` | Add `sandbox_recursion.o` |
+| `Lib/test/test_sandbox_recursion.py` | New test file with 24 tests |
 
 # Drawbacks
 [drawbacks]: #drawbacks

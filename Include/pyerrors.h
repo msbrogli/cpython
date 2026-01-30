@@ -120,6 +120,7 @@ PyAPI_DATA(PyObject *) PyExc_SandboxError;
 PyAPI_DATA(PyObject *) PyExc_SandboxOverflowError;
 PyAPI_DATA(PyObject *) PyExc_SandboxMemoryError;
 PyAPI_DATA(PyObject *) PyExc_SandboxRuntimeError;
+PyAPI_DATA(PyObject *) PyExc_SandboxRecursionError;
 PyAPI_DATA(PyObject *) PyExc_SandboxTypeError;
 PyAPI_DATA(PyObject *) PyExc_SandboxAttributeError;
 PyAPI_DATA(PyObject *) PyExc_SandboxSecurityError;

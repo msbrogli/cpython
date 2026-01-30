@@ -531,6 +531,7 @@
     <ClCompile Include="..\Python\sandbox_limits.c" />
     <ClCompile Include="..\Python\sandbox_opcodes.c" />
     <ClCompile Include="..\Python\sandbox_pyapi.c" />
+    <ClCompile Include="..\Python\sandbox_recursion.c" />
     <ClCompile Include="..\Python\specialize.c" />
     <ClCompile Include="..\Python\suggestions.c" />
     <ClCompile Include="..\Python\structmember.c" />

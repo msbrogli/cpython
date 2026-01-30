@@ -422,6 +422,7 @@ PYTHON_OBJS=	\
 		Python/sandbox_limits.o \
 		Python/sandbox_opcodes.o \
 		Python/sandbox_pyapi.o \
+		Python/sandbox_recursion.o \
 		Python/pythonrun.o \
 		Python/pytime.o \
 		Python/bootstrap_hash.o \

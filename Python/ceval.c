@@ -1742,6 +1742,9 @@ start_frame:
         tstate->recursion_remaining--;
         goto exit_unwind;
     }
+    if (_PySandbox_EnterFrame(frame) < 0) {
+        goto exit_unwind;
+    }
 
 resume_frame:
     SET_LOCALS_FROM_FRAME();
@@ -2572,10 +2575,12 @@ handle_eval_breaker:
                 // GH-99729: We need to unlink the frame *before* clearing it:
                 _PyInterpreterFrame *dying = frame;
                 frame = cframe.current_frame = dying->previous;
+                _PySandbox_ExitFrame(dying);
                 _PyEvalFrameClearAndPop(tstate, dying);
                 _PyFrame_StackPush(frame, retval);
                 goto resume_frame;
             }
+            _PySandbox_ExitFrame(frame);
             /* Restore previous cframe and return. */
             tstate->cframe = cframe.previous;
             tstate->cframe->use_tracing = cframe.use_tracing;
@@ -2783,6 +2788,7 @@ handle_eval_breaker:
             TRACE_FUNCTION_EXIT();
             DTRACE_FUNCTION_EXIT();
             _Py_LeaveRecursiveCallTstate(tstate);
+            _PySandbox_ExitFrame(frame);
             /* Restore previous cframe and return. */
             tstate->cframe = cframe.previous;
             tstate->cframe->use_tracing = cframe.use_tracing;
@@ -6021,6 +6027,7 @@ exit_unwind:
     assert(_PyErr_Occurred(tstate));
     _Py_LeaveRecursiveCallTstate(tstate);
     if (frame->is_entry) {
+        _PySandbox_ExitFrame(frame);
         /* Restore previous cframe and exit */
         tstate->cframe = cframe.previous;
         tstate->cframe->use_tracing = cframe.use_tracing;
@@ -6030,6 +6037,7 @@ exit_unwind:
     // GH-99729: We need to unlink the frame *before* clearing it:
     _PyInterpreterFrame *dying = frame;
     frame = cframe.current_frame = dying->previous;
+    _PySandbox_ExitFrame(dying);
     _PyEvalFrameClearAndPop(tstate, dying);
 
 resume_with_error:

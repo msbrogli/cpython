@@ -99,6 +99,9 @@ struct _ts {
     int recursion_limit;
     int recursion_headroom; /* Allow 50 more calls to handle any errors. */
 
+    /* Sandbox recursion depth: count of sandbox-scoped frames in call stack */
+    uint64_t sandbox_recursion_depth;
+
     /* 'tracing' keeps track of the execution depth when tracing/profiling.
        This is to prevent the actual trace/profile code from being recorded in
        the trace/profile. */

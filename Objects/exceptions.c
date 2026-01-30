@@ -3349,6 +3349,8 @@ SimpleExtendsException(PyExc_SandboxError, SandboxMemoryError,
                        "Sandbox allocation limit exceeded.");
 SimpleExtendsException(PyExc_SandboxError, SandboxRuntimeError,
                        "Sandbox execution limit exceeded.");
+SimpleExtendsException(PyExc_SandboxError, SandboxRecursionError,
+                       "Sandbox recursion depth exceeded.");
 SimpleExtendsException(PyExc_SandboxError, SandboxTypeError,
                        "Type forbidden in sandbox.");
 SimpleExtendsException(PyExc_SandboxError, SandboxAttributeError,
@@ -3611,6 +3613,7 @@ static struct static_exception static_exceptions[] = {
     ITEM(SandboxOverflowError),   // base: SandboxError
     ITEM(SandboxMemoryError),     // base: SandboxError
     ITEM(SandboxRuntimeError),    // base: SandboxError
+    ITEM(SandboxRecursionError),  // base: SandboxError
     ITEM(SandboxTypeError),       // base: SandboxError
     ITEM(SandboxAttributeError),  // base: SandboxError
     ITEM(SandboxSecurityError),   // base: SandboxError

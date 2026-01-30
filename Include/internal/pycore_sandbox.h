@@ -96,6 +96,7 @@ typedef struct {
     uint64_t max_allocations;     /* 0 = no limit */
     uint64_t max_iterations;      /* 0 = no limit */
     uint64_t max_operations;      /* 0 = no limit */
+    uint64_t max_recursion_depth; /* 0 = no limit */
 
     /* Type restrictions */
     int allow_float;         /* 0 = forbidden, 1 = allowed (default) */
@@ -153,6 +154,7 @@ typedef struct {
     .max_allocations = 0,           \
     .max_iterations = 0,            \
     .max_operations = 0,            \
+    .max_recursion_depth = 0,       \
     .allow_float = 1,               \
     .allow_complex = 1,             \
     .allow_dunder_access = 1,       \
@@ -355,6 +357,10 @@ PyAPI_FUNC(PyObject *) PySandbox_GetAllowedImports(void);
  * Called from module_getattro() before attribute access.
  * When module_access_restrict_mode=1, checks if module is in allowed_modules. */
 PyAPI_FUNC(int) _PySandbox_CheckModuleAccess(PyObject *module);
+
+/* Sandbox recursion depth tracking */
+PyAPI_FUNC(int) _PySandbox_EnterFrame(struct _PyInterpreterFrame *frame);  /* Check/increment depth on frame entry */
+PyAPI_FUNC(void) _PySandbox_ExitFrame(struct _PyInterpreterFrame *frame);  /* Decrement depth on frame exit */
 
 /* Sandbox scope management */
 PyAPI_FUNC(int) _PySandbox_EnterScope(void);   /* Set current frame as entry, reset scope counters */

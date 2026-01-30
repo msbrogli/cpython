@@ -341,6 +341,7 @@ SANDBOX_SSIZE_GETSET(max_tuple_size, limits.max_tuple_size)
 SANDBOX_UINT64_GETSET(max_allocations, limits.max_allocations)
 SANDBOX_UINT64_GETSET(max_iterations, limits.max_iterations)
 SANDBOX_UINT64_GETSET(max_operations, limits.max_operations)
+SANDBOX_UINT64_GETSET(max_recursion_depth, limits.max_recursion_depth)
 
 /* max_statements needs to update tracing state when changed */
 #define UPDATE_TRACING_STATE_HOOK \
@@ -510,6 +511,19 @@ SANDBOX_UINT64_GETTER(statement_count, counters.statement_count)
 SANDBOX_UINT64_GETTER(iteration_count, counters.iteration_count)
 SANDBOX_UINT64_GETTER(operation_count, counters.operation_count)
 
+/* recursion_depth: read-only, from thread state */
+static PyObject *
+sandbox_get_recursion_depth(_PySandboxObject *self, void *closure)
+{
+    PyThreadState *tstate = PyThreadState_Get();
+    if (tstate == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "No current thread state");
+        return NULL;
+    }
+    return PyLong_FromUnsignedLongLong(
+        (unsigned long long)tstate->sandbox_recursion_depth);
+}
+
 /* suspended: read-only bool */
 static PyObject *
 sandbox_get_suspended(_PySandboxObject *self, void *closure)
@@ -546,6 +560,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_max_iterations, "Max scoped iterator steps (0=no limit)", NULL},
     {"max_operations", (getter)sandbox_get_max_operations,
      (setter)sandbox_set_max_operations, "Max scoped SANDBOX_COUNT operations (0=no limit)", NULL},
+    {"max_recursion_depth", (getter)sandbox_get_max_recursion_depth,
+     (setter)sandbox_set_max_recursion_depth, "Max sandbox recursion depth (0=no limit)", NULL},
     /* R/W bool */
     {"allow_float", (getter)sandbox_get_allow_float,
      (setter)sandbox_set_allow_float, "Allow float creation", NULL},
@@ -591,6 +607,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      NULL, "Current scoped iteration count", NULL},
     {"operation_count", (getter)sandbox_get_operation_count,
      NULL, "Current scoped operation count", NULL},
+    {"recursion_depth", (getter)sandbox_get_recursion_depth,
+     NULL, "Current sandbox recursion depth (per-thread)", NULL},
     {"suspended", (getter)sandbox_get_suspended,
      NULL, "True if sandbox is currently suspended", NULL},
     {NULL}  /* Sentinel */

@@ -547,7 +547,8 @@ Called from:
 | `Objects/dictobject.c` | insertion functions, `PyDict_Copy()`, `dict_merge()` | `_PySandbox_CheckDictSize()` |
 | `Objects/setobject.c` | `set_add_entry()`, `set_merge()` | `_PySandbox_CheckSetSize()` |
 | `Objects/tupleobject.c` | `PyTuple_New()` | `_PySandbox_CheckTupleSize()` |
-| `Objects/floatobject.c` | creation functions | `_PySandbox_CheckTypeAllowed()` |
+| `Objects/floatobject.c` | `PyFloat_FromDouble()` | `_PySandbox_CheckTypeAllowed()` |
+| `Objects/complexobject.c` | `PyComplex_FromCComplex()` | `_PySandbox_CheckTypeAllowed()` |
 | `Objects/typeobject.c` | `type_call()` | `_PySandbox_CheckTypeAllowed()` |
 | `Modules/gcmodule.c` | `_PyObject_GC_Alloc()` | `_PySandbox_CheckAllocation()` |
 | `Python/ceval.c` | line tracing | `_PySandbox_CheckScopeStatement()` |

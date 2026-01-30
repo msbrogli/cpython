@@ -136,6 +136,11 @@ PyFloat_GetInfo(void)
 PyObject *
 PyFloat_FromDouble(double fval)
 {
+    /* Sandbox check: verify float type is allowed */
+    if (_PySandbox_CheckTypeAllowed(&PyFloat_Type) < 0) {
+        return NULL;
+    }
+
     PyFloatObject *op;
 #if PyFloat_MAXFREELIST > 0
     struct _Py_float_state *state = get_float_state();

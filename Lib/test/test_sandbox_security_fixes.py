@@ -288,6 +288,116 @@ except SandboxSecurityError:
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
 
+class FloatTypeBlockingTest(unittest.TestCase):
+    """Test that float creation is blocked when allow_float=0 (security fix)."""
+
+    def test_float_arithmetic_blocked(self):
+        """Float from runtime arithmetic should be blocked when allow_float=0.
+
+        Note: `1 / 2` is constant-folded at compile time to 0.5, so we use
+        variables to force runtime division which goes through PyFloat_FromDouble.
+        """
+        code = '''
+import sys
+sys.sandbox.allow_float = 0
+sys.sandbox.add_filename('<string>')
+# Use variables to prevent constant folding
+a = 1
+b = 2
+try:
+    x = a / b  # Runtime division, not constant-folded
+    print(f"FAIL: created float {x}")
+except SandboxTypeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_float_constructor_blocked(self):
+        """float() constructor should be blocked when allow_float=0."""
+        code = '''
+import sys
+sys.sandbox.allow_float = 0
+sys.sandbox.add_filename('<string>')
+try:
+    x = float(5)
+    print(f"FAIL: created float {x}")
+except SandboxTypeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_float_allowed_by_default(self):
+        """Float should be allowed by default."""
+        code = '''
+import sys
+sys.sandbox.add_filename('<string>')
+x = 1 / 2
+if x == 0.5:
+    print("PASS")
+else:
+    print(f"FAIL: {x}")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
+class ComplexTypeBlockingTest(unittest.TestCase):
+    """Test that complex creation is blocked when allow_complex=0 (security fix)."""
+
+    def test_complex_constructor_blocked(self):
+        """complex() constructor should be blocked when allow_complex=0."""
+        code = '''
+import sys
+sys.sandbox.allow_complex = 0
+sys.sandbox.add_filename('<string>')
+try:
+    x = complex(1, 2)
+    print(f"FAIL: created complex {x}")
+except SandboxTypeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_complex_arithmetic_blocked(self):
+        """Complex from runtime arithmetic should be blocked when allow_complex=0.
+
+        Note: `1j` is a literal that gets constant-folded, so we use
+        complex() with variables to force runtime creation.
+        """
+        code = '''
+import sys
+sys.sandbox.allow_complex = 0
+sys.sandbox.add_filename('<string>')
+# Use variables to prevent constant folding
+a = 1
+b = 2
+try:
+    x = complex(a, b)  # Runtime complex creation
+    print(f"FAIL: created complex {x}")
+except SandboxTypeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_complex_allowed_by_default(self):
+        """Complex should be allowed by default."""
+        code = '''
+import sys
+sys.sandbox.add_filename('<string>')
+x = complex(1, 2)
+if x == (1+2j):
+    print("PASS")
+else:
+    print(f"FAIL: {x}")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
 class DictUpdateBypassTest(unittest.TestCase):
     """Test that dict.update() respects size limits (security fix)."""
 

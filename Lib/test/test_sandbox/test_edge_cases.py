@@ -154,31 +154,34 @@ except SandboxSecurityError:
 
     def test_nested_scope_with_different_filenames(self):
         """Nested scopes with different filenames should work correctly."""
+        # PyCF_SANDBOX_COUNT flag is required for operation counting
+        PyCF_SANDBOX_COUNT = 0x8000
         code = '''
 import sys
+PyCF_SANDBOX_COUNT = 0x8000
 sys.sandbox.set_limits(max_operations=1000000)
 
 # Register first filename
 sys.sandbox.add_filename("<outer>")
 
-# Run outer code
+# Run outer code with SANDBOX_COUNT flag
 exec(compile("""
 x = 0
 for i in range(10):
     x += 1
-""", "<outer>", "exec"))
+""", "<outer>", "exec", flags=PyCF_SANDBOX_COUNT))
 
 outer_count = sys.sandbox.get_counts()['operation_count']
 
 # Add inner filename (both should now be tracked)
 sys.sandbox.add_filename("<inner>")
 
-# Run inner code
+# Run inner code with SANDBOX_COUNT flag
 exec(compile("""
 y = 0
 for i in range(10):
     y += 1
-""", "<inner>", "exec"))
+""", "<inner>", "exec", flags=PyCF_SANDBOX_COUNT))
 
 combined_count = sys.sandbox.get_counts()['operation_count']
 sys.sandbox.clear_filenames()

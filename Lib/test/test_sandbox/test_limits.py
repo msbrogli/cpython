@@ -37,8 +37,9 @@ class SandboxLimitsTests(unittest.TestCase):
     """Test sandbox limits functionality."""
 
     def setUp(self):
-        # Disable import restrictions for legacy tests
+        # Disable import and module access restrictions for legacy tests
         sys.sandbox.import_restrict_mode = False
+        sys.sandbox.module_access_restrict_mode = False
 
     def tearDown(self):
         # Exit scope if entered
@@ -487,8 +488,9 @@ class MinimalSafeLimitsTests(unittest.TestCase):
     }
 
     def setUp(self):
-        # Disable import restrictions for legacy tests
+        # Disable import and module access restrictions for legacy tests
         sys.sandbox.import_restrict_mode = False
+        sys.sandbox.module_access_restrict_mode = False
 
     def tearDown(self):
         try:

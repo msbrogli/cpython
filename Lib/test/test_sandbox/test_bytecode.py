@@ -311,10 +311,10 @@ class StatementNoSandboxCountTests(unittest.TestCase):
 
     def test_expr_wrapper_not_counted(self):
         """Expr statement wrapper does not add its own SANDBOX_COUNT;
-        only the inner expression (e.g. a Call) emits."""
+        the inner expression (e.g. a Call) and container constructions emit."""
         code = _compile_sandboxed("len([])")
-        # Only the Call itself should emit, not the Expr wrapper
-        self.assertEqual(_count_sandbox_count(code), 1)
+        # The Call and the list construction each emit SANDBOX_COUNT
+        self.assertEqual(_count_sandbox_count(code), 2)
 
 
 # ===================================================================
@@ -364,6 +364,21 @@ class ExpressionSandboxCountTests(unittest.TestCase):
         code = _compile_sandboxed("a[0]", mode="eval")
         self.assertEqual(_count_sandbox_count(code), 1)
 
+    def test_list(self):
+        """List: ``[1, 2]`` -> 1 (container construction is counted)."""
+        code = _compile_sandboxed("[1, 2]", mode="eval")
+        self.assertEqual(_count_sandbox_count(code), 1)
+
+    def test_dict(self):
+        """Dict: ``{1: 2}`` -> 1 (container construction is counted)."""
+        code = _compile_sandboxed("{1: 2}", mode="eval")
+        self.assertEqual(_count_sandbox_count(code), 1)
+
+    def test_set(self):
+        """Set: ``{1, 2}`` -> 1 (container construction is counted)."""
+        code = _compile_sandboxed("{1, 2}", mode="eval")
+        self.assertEqual(_count_sandbox_count(code), 1)
+
 
 # ===================================================================
 # 5. Expressions that should NOT emit
@@ -382,24 +397,9 @@ class ExpressionNoSandboxCountTests(unittest.TestCase):
         code = _compile_sandboxed("a", mode="eval")
         self.assertEqual(_count_sandbox_count(code), 0)
 
-    def test_list(self):
-        """List: ``[1, 2]`` -> 0."""
-        code = _compile_sandboxed("[1, 2]", mode="eval")
-        self.assertEqual(_count_sandbox_count(code), 0)
-
     def test_tuple(self):
-        """Tuple: ``(1, 2)`` -> 0."""
+        """Tuple: ``(1, 2)`` -> 0 (constant tuple is folded)."""
         code = _compile_sandboxed("(1, 2)", mode="eval")
-        self.assertEqual(_count_sandbox_count(code), 0)
-
-    def test_dict(self):
-        """Dict: ``{1: 2}`` -> 0."""
-        code = _compile_sandboxed("{1: 2}", mode="eval")
-        self.assertEqual(_count_sandbox_count(code), 0)
-
-    def test_set(self):
-        """Set: ``{1, 2}`` -> 0."""
-        code = _compile_sandboxed("{1, 2}", mode="eval")
         self.assertEqual(_count_sandbox_count(code), 0)
 
     def test_namedexpr(self):
@@ -489,9 +489,9 @@ class CombinedBytecodeSandboxCountTests(unittest.TestCase):
     """Exact totals for multi-node patterns."""
 
     def test_assign_with_constant_binop(self):
-        """``a = 1 + 2`` -> 1 (Assign only; BinOp is constant-folded)."""
+        """``a = 1 + 2`` -> 2 (Assign + BinOp; BinOp counted even if constant-folded)."""
         code = _compile_sandboxed("a = 1 + 2")
-        self.assertEqual(_count_sandbox_count(code), 1)
+        self.assertEqual(_count_sandbox_count(code), 2)
 
     def test_assign_with_call(self):
         """``a = f()`` -> 2 (Assign + Call)."""

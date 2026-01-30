@@ -31,8 +31,9 @@ class ScopedIterationCountTests(unittest.TestCase):
 
     def setUp(self):
         sys.sandbox.reset_counts()
-        # Disable import restrictions for legacy tests
+        # Disable import and module access restrictions for legacy tests
         sys.sandbox.import_restrict_mode = False
+        sys.sandbox.module_access_restrict_mode = False
 
     def tearDown(self):
         while sys.sandbox.suspended:

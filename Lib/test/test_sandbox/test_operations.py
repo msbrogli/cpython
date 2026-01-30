@@ -21,8 +21,9 @@ def _compile_sandboxed(source, filename=SANDBOX_FILENAME):
 
 def _run_and_count(source, max_ops=100000):
     """Compile with sandbox flag, execute, and return operation count."""
-    # Disable import restrictions for legacy tests
+    # Disable import and module access restrictions for legacy tests
     sys.sandbox.import_restrict_mode = False
+    sys.sandbox.module_access_restrict_mode = False
     sys.sandbox.set_limits(max_operations=max_ops)
     sys.sandbox.add_filename(SANDBOX_FILENAME)
     sys.sandbox.reset_counts()

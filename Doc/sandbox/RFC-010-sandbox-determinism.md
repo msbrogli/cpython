@@ -30,8 +30,6 @@ Understanding which counters are deterministic allows developers to choose the r
 |---------------|----------------|---------------------------|
 | `operation_count` | **YES** | **YES** |
 | `iteration_count` | **YES** | **YES** |
-| `statement_count` | **NO** | **NO** |
-| `allocation_count` | **NO** | **NO** |
 | Size limits | **YES** | **YES** |
 | Type restrictions | **YES** | **YES** |
 
@@ -64,21 +62,7 @@ sys.sandbox.set_limits(
     allow_complex=True,
     allow_dunder_access=False,
 )
-
-# WARNING: Do NOT rely on these for deterministic cost accounting:
-# max_statements=X     # Non-deterministic!
-# max_allocations=X    # Non-deterministic!
 ```
-
-## When Non-Deterministic Limits Are Acceptable
-
-Statement and allocation limits are still useful for:
-
-- **Soft timeouts**: Preventing runaway execution without exact guarantees
-- **Memory pressure protection**: Limiting total allocations as a safety net
-- **Defense in depth**: Additional protection layer alongside deterministic limits
-
-Just don't rely on exact counts being reproducible across environments.
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -162,103 +146,7 @@ All iterators are wrapped via `_PySandbox_WrapIterator()` when in sandbox scope.
 
 ---
 
-## 3. `statement_count` (line tracing)
-
-### Verdict: NOT DETERMINISTIC
-
-### How It Works
-
-Called from `ceval.c` during bytecode execution via the `DO_TRACING` mechanism. Counts on:
-- Line number changes
-- Backward jumps (loop iterations)
-
-### Implementation Detail
-
-```c
-int lastline = _PyCode_LineNumberFromArray(frame->f_code, instr_prev);
-int line = _PyCode_LineNumberFromArray(frame->f_code, _PyInterpreterFrame_LASTI(frame));
-
-if (line != -1 && (line != lastline || _PyInterpreterFrame_LASTI(frame) <= instr_prev)) {
-    _PySandbox_CheckScopeStatement();
-}
-```
-
-### Why It's NOT Deterministic
-
-1. **Depends on bytecode instruction sequence**
-   - Different compilation options = different bytecode
-   - Different bytecode = different instruction positions = different line transitions
-
-2. **Depends on line number table**
-   - Line table format changed between Python 3.10/3.11
-   - Same source may have different line mappings
-
-3. **Backward jump detection depends on instruction positions**
-   - `_PyInterpreterFrame_LASTI(frame) <= instr_prev` compares bytecode offsets
-   - Different bytecode = different offsets
-
-4. **Platform-specific optimizations**
-   - Peephole optimizer behavior may vary
-   - Specialized opcodes affect instruction sequence
-
-### Example of Non-Determinism
-
-```python
-for i in range(3):
-    x = i + 1
-```
-
-Could produce different statement counts depending on:
-- Whether loop is optimized
-- How line numbers are mapped to bytecode
-- Backward jump detection based on bytecode offsets
-
----
-
-## 4. `allocation_count` (GC tracking)
-
-### Verdict: NOT DETERMINISTIC
-
-### How It Works
-
-Called from `gc_alloc()` in `gcmodule.c` for each GC-tracked object allocation.
-
-### Why It's NOT Deterministic
-
-1. **Internal Python allocations vary**
-   - String interning behavior differs
-   - Small integer caching differs
-   - Frame object allocation patterns differ
-
-2. **GC implementation details**
-   - Which objects get tracked varies by version
-   - Container implementation changes affect allocations
-   - Exception handling allocates differently
-
-3. **Platform differences**
-   - Memory alignment may affect allocation patterns
-   - Some types may have platform-specific implementations
-
-4. **Version differences**
-   - Python 3.11 introduced structural changes (frame layout, etc.)
-   - String representation changes between versions
-   - Dict implementation changes
-
-### Example of Non-Determinism
-
-```python
-x = [1, 2, 3]
-y = {"a": 1, "b": 2}
-```
-
-Number of internal allocations depends on:
-- List/dict implementation
-- String interning for "a", "b"
-- Frame objects, code objects, etc.
-
----
-
-## 5. Size Limits
+## 3. Size Limits
 
 ### Verdict: DETERMINISTIC
 
@@ -276,7 +164,7 @@ All size limits measure **semantic properties** of data, not implementation deta
 
 ---
 
-## 6. Type Restrictions
+## 4. Type Restrictions
 
 ### Verdict: DETERMINISTIC
 
@@ -294,65 +182,49 @@ All size limits measure **semantic properties** of data, not implementation deta
 |---------|-------------|---------------------|---------------|---------------|----------------|
 | `operation_count` | ✓ | ✓ | ✓ | ~* | ✓ |
 | `iteration_count` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `statement_count` | ✓ | ~ | ~ | ✗ | ~ |
-| `allocation_count` | ~ | ~ | ~ | ✗ | ✗ |
 | Size limits | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Type restrictions | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 Legend:
 - ✓ = Deterministic
-- ~ = Mostly deterministic, minor variations possible
-- ✗ = Not deterministic
 - \* = Deterministic within minor versions, may change across major versions
 
 # Drawbacks
 [drawbacks]: #drawbacks
 
-1. **Complexity**: Users must understand which limits are deterministic
-2. **Documentation burden**: Need to clearly communicate determinism properties
-3. **Feature disparity**: Deterministic limits (operations) require extra compilation step
+1. **Compilation requirement**: Operation counting requires compiling with `PyCF_SANDBOX_COUNT` flag
+2. **Cross-version caveats**: AST changes between major Python versions may affect operation counts
 
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
 
-## Why Not Make All Counters Deterministic?
+## All Counters Are Deterministic
 
-**Statement counting**: Would require significant changes to CPython's tracing mechanism. Line-based tracing is inherently tied to bytecode structure.
+All sandbox counters (`operation_count`, `iteration_count`) are deterministic by design:
 
-**Allocation counting**: Would require tracking only "user-visible" allocations, which is complex to define and implement. Python's memory management is intentionally an implementation detail.
-
-## Why Keep Non-Deterministic Counters?
-
-They're still valuable for:
-- Defense in depth
-- Soft limits / safety nets
-- Single-environment consistency (same machine, same Python version)
+- **Operation counting** is based on AST structure, which is derived directly from source code
+- **Iteration counting** is based on the semantic data flow through iterators
+- **Size limits** measure semantic properties (length, count) not implementation details
 
 # Prior art
 [prior-art]: #prior-art
 
-1. **Ethereum Gas Metering**: Completely deterministic - each opcode has fixed cost. Achieved by having full control over the VM.
+1. **Ethereum Gas Metering**: Completely deterministic - each opcode has fixed cost. Achieved by having full control over the VM. Similar to our `operation_count`.
 
 2. **WebAssembly Fuel**: Deterministic instruction counting. Similar to our `operation_count`.
-
-3. **Python's `sys.settrace()`**: Non-deterministic by nature, as we document for `statement_count`.
 
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
-1. Should we deprecate or warn when using non-deterministic limits in contexts requiring determinism?
+1. How should AST changes between major Python versions be communicated?
 
-2. Should there be a "strict determinism" mode that only allows deterministic limits?
-
-3. How should AST changes between major Python versions be communicated?
+2. Should operation weights be configurable to allow more sophisticated cost models?
 
 # Future possibilities
 [future-possibilities]: #future-possibilities
 
-1. **Determinism Warnings**: Emit warnings when non-deterministic limits might cause issues
+1. **Operation Weights**: Allow configuring per-operation costs for more sophisticated metering
 
-2. **Operation Weights**: Allow configuring per-operation costs for more sophisticated metering
+2. **Version-Stable Counting**: Define a "stable subset" of operations that won't change across versions
 
-3. **Version-Stable Counting**: Define a "stable subset" of operations that won't change across versions
-
-4. **Formal Specification**: Document exact counting semantics as part of Python's language specification
+3. **Formal Specification**: Document exact counting semantics as part of Python's language specification

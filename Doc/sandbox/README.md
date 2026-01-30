@@ -27,8 +27,8 @@ sys.sandbox.set_limits(
     max_int_digits=100,
     max_str_length=100_000,
     max_list_size=1_000_000,
-    max_statements=100_000,
     max_iterations=1_000_000,
+    max_operations=100_000,  # AST-level operation counting
     allow_dunder_access=False,
     # allow_io=False,     # Default: blocks file/socket/fd operations
     # allow_unsafe=False, # Default: blocks compile(), gc introspection
@@ -37,8 +37,9 @@ sys.sandbox.set_limits(
 # Register sandbox scope
 sys.sandbox.add_filename("<sandbox>")
 
-# Compile and execute untrusted code
-code = compile(untrusted_source, "<sandbox>", "exec")
+# Compile with operation counting flag and execute untrusted code
+PyCF_SANDBOX_COUNT = 0x8000
+code = compile(untrusted_source, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
 
 try:
     with sys.sandbox.scope():
@@ -123,10 +124,9 @@ Exception
 | Dunder blocking | 002 | `allow_dunder_access` |
 | Unsafe blocking | 002 | `allow_unsafe` |
 | I/O blocking | 002 | `allow_io` |
-| Statement limit | 002 | `max_statements` |
-| Allocation limit | 002 | `max_allocations` |
 | Iteration limit | 004 | `max_iterations` |
 | Operation limit | 009 | `max_operations` |
+| Recursion limit | 013 | `max_recursion_depth` |
 | Iteration as ops | 004 | `count_iterations_as_operations` |
 | Global freeze | 003 | `frozen_mode` |
 | Per-object freeze | 003 | `freeze()`, `is_frozen()` |
@@ -146,18 +146,12 @@ Exception
 |---------|---------------|--------------------------|
 | `operation_count` | **Yes** | **Yes** - AST-based, compiler-emitted |
 | `iteration_count` | **Yes** | **Yes** - Counts actual yields |
-| `statement_count` | No | No - Depends on bytecode layout |
-| `allocation_count` | No | No - Depends on Python internals |
 | Size limits | **Yes** | **Yes** - Semantic values |
 | Type restrictions | **Yes** | **Yes** - Type-based checks |
 
-For deterministic cost accounting, prefer `max_operations` with `PyCF_SANDBOX_COUNT`.
+For deterministic cost accounting, use `max_operations` with `PyCF_SANDBOX_COUNT` compile flag.
 
-See [RFC-010: Determinism Analysis](RFC-010-sandbox-determinism.md) for detailed analysis of each counter's determinism properties, including:
-- Why `operation_count` and `iteration_count` are deterministic
-- Why `statement_count` and `allocation_count` are NOT deterministic
-- Recommended configuration for deterministic execution
-- Cross-version and cross-platform considerations
+See [RFC-010: Determinism Analysis](RFC-010-sandbox-determinism.md) for detailed analysis of each counter's determinism properties.
 
 ## Testing
 

@@ -112,7 +112,7 @@ import opcode
 
 # Multi-layered protection
 sys.sandbox.set_limits(
-    max_statements=10000,
+    max_operations=10000,
     allow_dunder_access=False,
 )
 
@@ -121,7 +121,7 @@ sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.frozen_mode = True
 
 # Now sandboxed code cannot:
-# - Execute more than 10000 statements
+# - Execute more than 10000 operations (with PyCF_SANDBOX_COUNT flag)
 # - Access __dunder__ attributes
 # - Use IMPORT_NAME opcode
 # - Modify any attributes

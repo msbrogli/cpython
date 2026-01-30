@@ -50,14 +50,16 @@ Exception
 ```python
 import sys
 
+PyCF_SANDBOX_COUNT = 0x8000
+
 sys.sandbox.set_limits(
     max_int_digits=100,
     max_list_size=1000,
-    max_statements=10000,
+    max_operations=10000,
 )
 sys.sandbox.add_filename("<sandbox>")
 
-code = compile(untrusted_source, "<sandbox>", "exec")
+code = compile(untrusted_source, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
 
 try:
     exec(code)

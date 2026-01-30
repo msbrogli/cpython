@@ -362,22 +362,17 @@ Operation counting is deterministic because:
 3. **Version-independent**: AST structure is stable across minor versions
 
 Compare to statement counting:
-- Statement counting uses line tracing, which depends on bytecode layout
-- Same source may have different statement counts on different Python versions
+## Determinism
 
-## Independence from Statement Counting
+Operation counting is deterministic:
 
-Operation counting is fully independent:
-
-| Aspect | Statement Counting | Operation Counting |
-|--------|-------------------|-------------------|
-| Counter | `statement_count` | `operation_count` |
-| Limit | `max_statements` | `max_operations` |
-| Mechanism | Line tracing | Compiler-emitted opcode |
-| Determinism | Non-deterministic | Deterministic |
-| Overhead | Always (when enabled) | Only in flagged code |
-
-Both can be used simultaneously.
+| Aspect | Description |
+|--------|-------------|
+| Counter | `operation_count` |
+| Limit | `max_operations` |
+| Mechanism | Compiler-emitted `SANDBOX_COUNT` opcode |
+| Determinism | **Yes** - same source always produces same count |
+| Overhead | Only in code compiled with `PyCF_SANDBOX_COUNT` flag |
 
 # Drawbacks
 [drawbacks]: #drawbacks

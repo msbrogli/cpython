@@ -7,7 +7,7 @@
 # Summary
 [summary]: #summary
 
-The sandbox limits module provides size limits for Python objects (integers, strings, containers), type restrictions (float, complex), and scoped execution counters (statements, allocations, iterations, operations). These limits prevent denial-of-service attacks through resource exhaustion.
+The sandbox limits module provides size limits for Python objects (integers, strings, containers), type restrictions (float, complex), and scoped execution counters (iterations, operations). These limits prevent denial-of-service attacks through resource exhaustion.
 
 # Motivation
 [motivation]: #motivation
@@ -16,12 +16,11 @@ Untrusted code can cause denial-of-service through:
 
 1. **Memory Exhaustion**: Creating huge integers (`2**10000000`), strings (`"x" * 10**9`), or containers
 2. **CPU Exhaustion**: Infinite loops, excessive computation
-3. **Allocation Bombs**: Creating millions of small objects
 
 The limits module addresses each attack vector:
 - **Size limits**: Cap the maximum size of individual objects
 - **Type restrictions**: Block creation of specific types entirely
-- **Scoped counters**: Limit total statements, allocations, iterations, or operations
+- **Scoped counters**: Limit total iterations or operations
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -79,17 +78,18 @@ Scoped limits only count operations within sandbox scope:
 ```python
 import sys
 
+PyCF_SANDBOX_COUNT = 0x8000
+
 # Configure limits
 sys.sandbox.set_limits(
-    max_statements=1000,    # Limit line executions
-    max_allocations=10000,  # Limit object allocations
     max_iterations=100000,  # Limit iterator steps
     max_operations=50000,   # Limit AST operations (requires PyCF_SANDBOX_COUNT)
+    max_recursion_depth=100, # Limit sandbox frame recursion
 )
 
-# Register scope and compile code
+# Register scope and compile code with operation counting
 sys.sandbox.add_filename("<sandbox>")
-code = compile(source, "<sandbox>", "exec")
+code = compile(source, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
 
 # Reset counters before each execution
 sys.sandbox.reset_counts()
@@ -97,17 +97,15 @@ sys.sandbox.reset_counts()
 try:
     exec(code)
 except SandboxRuntimeError as e:
-    print(e)  # "Sandbox statement limit exceeded" (or iteration/operation)
-except SandboxMemoryError as e:
-    print(e)  # "Sandbox allocation limit exceeded"
+    print(e)  # "Sandbox operation limit exceeded" (or iteration)
+except SandboxRecursionError as e:
+    print(e)  # "Sandbox recursion limit exceeded"
 ```
 
 ## Reading Counters
 
 ```python
 counts = sys.sandbox.get_counts()
-print(f"Statements: {counts['statement_count']}")
-print(f"Allocations: {counts['allocation_count']}")
 print(f"Iterations: {counts['iteration_count']}")
 print(f"Operations: {counts['operation_count']}")
 ```
@@ -192,10 +190,9 @@ typedef struct {
     Py_ssize_t max_tuple_size;      /* Tuple items */
 
     /* Scoped limits (0 = no limit) */
-    uint64_t max_statements;        /* Line executions */
-    uint64_t max_allocations;       /* GC-tracked allocations */
     uint64_t max_iterations;        /* Iterator yields */
     uint64_t max_operations;        /* SANDBOX_COUNT opcodes */
+    uint64_t max_recursion_depth;   /* Sandbox frame recursion depth */
 
     /* Type/access restrictions */
     int allow_float;                /* 1 = allowed, 0 = forbidden */
@@ -211,8 +208,6 @@ typedef struct {
 
 ```c
 typedef struct {
-    uint64_t statement_count;   /* Statements executed in scope */
-    uint64_t allocation_count;  /* Objects allocated in scope */
     uint64_t iteration_count;   /* Iterator yields in scope */
     uint64_t operation_count;   /* SANDBOX_COUNT opcodes in scope */
 } _PySandboxCounters;
@@ -294,16 +289,16 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
 
 ## Scoped Counter Functions
 
-### Statement Counting
+### Operation Counting
 
-Called from `Python/ceval.c` during line tracing:
+Called from `Python/ceval.c` when `SANDBOX_COUNT` opcode executes:
 
 ```c
 int
-_PySandbox_CheckScopeStatement(void)
+_PySandbox_CheckScopeOperation(void)
 {
     /* ... get sandbox state ... */
-    if (limits->max_statements == 0 ||
+    if (limits->max_operations == 0 ||
         sandbox->suppress_checks || sandbox->suspended) {
         return 0;
     }
@@ -312,13 +307,13 @@ _PySandbox_CheckScopeStatement(void)
         return 0;
     }
 
-    counters->statement_count++;
+    counters->operation_count++;
 
     /* Single-raise: only at exactly max+1 */
-    if (counters->statement_count == limits->max_statements + 1) {
+    if (counters->operation_count == limits->max_operations + 1) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
-                        "Sandbox statement limit exceeded");
+                        "Sandbox operation limit exceeded");
         sandbox->suppress_checks = 0;
         return -1;
     }
@@ -326,46 +321,6 @@ _PySandbox_CheckScopeStatement(void)
     return 0;
 }
 ```
-
-### Allocation Counting
-
-Called from `Modules/gcmodule.c`:
-
-```c
-int
-_PySandbox_CheckAllocation(void)
-{
-    /* ... get sandbox state ... */
-    if (limits->max_allocations == 0 ||
-        sandbox->suppress_checks || sandbox->suspended) {
-        return 0;
-    }
-
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
-        return 0;
-    }
-
-    counters->allocation_count++;
-
-    /* Grace headroom allows error handling to allocate */
-    if (counters->allocation_count > limits->max_allocations + ALLOCATION_GRACE_HEADROOM) {
-        PyErr_SetString(PyExc_SandboxMemoryError,
-                        "Sandbox allocation limit exceeded");
-        return -1;
-    }
-    if (counters->allocation_count == limits->max_allocations + 1) {
-        PyErr_SetString(PyExc_SandboxMemoryError,
-                        "Sandbox allocation limit exceeded");
-        return -1;
-    }
-
-    return 0;
-}
-```
-
-`ALLOCATION_GRACE_HEADROOM` is 1000, allowing error handling to allocate objects.
-
-### Iteration Counting
 
 Called from iterator wrapper's `tp_iternext`:
 
@@ -390,18 +345,6 @@ _PySandbox_CheckIteration(void)
 
     return 0;
 }
-```
-
-### Operation Counting
-
-Called from `Python/ceval.c` for `SANDBOX_COUNT` opcode:
-
-```c
-int
-_PySandbox_CheckScopeOperation(void)
-{
-    /* ... similar pattern ... */
-    counters->operation_count++;
 
     if (counters->operation_count == limits->max_operations + 1) {
         /* ... raise SandboxRuntimeError ... */
@@ -507,10 +450,9 @@ Called from:
 | `max_dict_size` | int | 0 | Max dict size |
 | `max_set_size` | int | 0 | Max set size |
 | `max_tuple_size` | int | 0 | Max tuple size |
-| `max_statements` | int | 0 | Max statements in scope |
-| `max_allocations` | int | 0 | Max allocations in scope |
 | `max_iterations` | int | 0 | Max iterations in scope |
 | `max_operations` | int | 0 | Max operations in scope |
+| `max_recursion_depth` | int | 0 | Max sandbox frame recursion depth |
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | True | Allow `__dunder__` access |
@@ -522,10 +464,9 @@ Called from:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `statement_count` | int | Statements executed in scope |
-| `allocation_count` | int | Allocations in scope |
 | `iteration_count` | int | Iterator yields in scope |
 | `operation_count` | int | Operations in scope |
+| `recursion_depth` | int | Current sandbox frame recursion depth |
 
 ### Methods
 
@@ -552,9 +493,8 @@ Called from:
 | `Python/ceval.c` | `LOAD_CONST` (type checks) | `_PySandbox_CheckTypeAllowed()` (float/complex) |
 | `Python/ceval.c` | `LOAD_CONST` (size checks) | `_PySandbox_CheckStrLength()`, `_PySandbox_CheckBytesLength()`, `_PySandbox_CheckTupleSize()`, `_PySandbox_CheckIntSize()` |
 | `Objects/typeobject.c` | `type_call()` | `_PySandbox_CheckTypeAllowed()` |
-| `Modules/gcmodule.c` | `_PyObject_GC_Alloc()` | `_PySandbox_CheckAllocation()` |
-| `Python/ceval.c` | line tracing | `_PySandbox_CheckScopeStatement()` |
 | `Python/ceval.c` | `SANDBOX_COUNT` | `_PySandbox_CheckScopeOperation()` |
+| `Python/ceval.c` | `start_frame` | `_PySandbox_EnterFrame()` |
 | `Python/ceval.c` | `LOAD_ATTR`, etc. | `_PySandbox_CheckDunderAccess()` |
 | `Python/ceval.c` | `LOAD_NAME` (dunder variables) | `_PySandbox_CheckDunderAccess()` |
 | `Python/ceval.c` | `LOAD_GLOBAL` (dunder variables) | `_PySandbox_CheckDunderAccess()` |
@@ -569,15 +509,15 @@ Called from:
 | Exception | Trigger |
 |-----------|---------|
 | `SandboxOverflowError` | Size limit exceeded |
-| `SandboxMemoryError` | Allocation limit exceeded |
-| `SandboxRuntimeError` | Statement/iteration/operation limit exceeded |
+| `SandboxRuntimeError` | Iteration/operation limit exceeded |
+| `SandboxRecursionError` | Recursion depth limit exceeded |
 | `SandboxTypeError` | Forbidden type creation |
 | `SandboxAttributeError` | Dunder access blocked |
 | `SandboxSecurityError` | Unsafe operation blocked |
 
 ## Single-Raise Behavior
 
-Statement, iteration, and operation limits raise exactly once (at `count == max + 1`). This allows exception handlers to execute without triggering additional errors:
+Iteration and operation limits raise exactly once (at `count == max + 1`). This allows exception handlers to execute without triggering additional errors:
 
 ```python
 try:
@@ -591,13 +531,11 @@ except SandboxRuntimeError:
 # Drawbacks
 [drawbacks]: #drawbacks
 
-1. **Statement Counting Non-Determinism**: Statement count depends on bytecode layout, not source structure. Different Python versions may count differently for the same source.
+1. **Size Limit Overhead**: Every object creation checks limits, even when disabled (though fast-exit minimizes impact).
 
-2. **Allocation Counting Non-Determinism**: Allocation count depends on Python internals (interning, caching). Same code may allocate differently across runs.
+2. **Integer Digit Units**: `max_int_digits` uses internal digits (~30 bits each), which is unintuitive for users.
 
-3. **Size Limit Overhead**: Every object creation checks limits, even when disabled (though fast-exit minimizes impact).
-
-4. **Integer Digit Units**: `max_int_digits` uses internal digits (~30 bits each), which is unintuitive for users.
+3. **Operation Counting Requires Compile Flag**: `max_operations` only works with code compiled using `PyCF_SANDBOX_COUNT` flag.
 
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives

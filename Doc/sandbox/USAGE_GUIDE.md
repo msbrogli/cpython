@@ -40,9 +40,8 @@ import sys
 sys.sandbox.set_limits(
     max_list_size=10_000,
     max_str_length=10_000,
-    max_statements=50_000,
     max_iterations=100_000,
-    max_allocations=5_000,
+    max_operations=50_000,  # AST-level operation counting
     allow_dunder_access=False,
 )
 
@@ -52,12 +51,13 @@ sys.sandbox.add_filename("<sandbox>")
 # 3. Reset counters before each execution
 sys.sandbox.reset_counts()
 
-# 4. Compile and execute untrusted code
+# 4. Compile with operation counting flag and execute untrusted code
 untrusted_code = """
 result = sum(range(100))
 """
 
-code = compile(untrusted_code, "<sandbox>", "exec")
+PyCF_SANDBOX_COUNT = 0x8000  # Flag for operation counting
+code = compile(untrusted_code, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
 namespace = {}
 try:
     exec(code, namespace)
@@ -82,10 +82,9 @@ All sandbox limits are scoped -- they only apply to code whose `co_filename` is 
 
 - Size limits (`max_list_size`, `max_str_length`, etc.)
 - Type restrictions (`allow_float`, `allow_complex`)
-- `max_statements` -- limits executed statements
-- `max_allocations` -- limits object allocations
 - `max_iterations` -- limits iterator steps
-- `max_operations` -- limits AST-level operations
+- `max_operations` -- limits AST-level operations (requires `PyCF_SANDBOX_COUNT` compile flag)
+- `max_recursion_depth` -- limits sandbox frame recursion depth
 
 Code outside the registered filenames (e.g., stdlib, builtins, your harness) is not affected by any sandbox limits.
 
@@ -176,7 +175,7 @@ All sandbox limits require registering filenames to determine which code is "in 
 For executing code in the current frame's context:
 
 ```python
-sys.sandbox.set_limits(max_statements=10_000)
+sys.sandbox.set_limits(max_iterations=10_000)
 
 sys.sandbox.enter_scope()  # Registers current frame's filename + resets counters
 try:
@@ -191,18 +190,20 @@ finally:
 For explicit control over what code is tracked:
 
 ```python
-sys.sandbox.set_limits(max_statements=10_000)
+PyCF_SANDBOX_COUNT = 0x8000
+
+sys.sandbox.set_limits(max_operations=10_000)
 
 # Register a virtual filename
 sys.sandbox.add_filename("<user-code>")
 sys.sandbox.reset_counts()
 
-# Compile untrusted code with that filename
-code = compile(user_source, "<user-code>", "exec")
+# Compile untrusted code with that filename and operation counting flag
+code = compile(user_source, "<user-code>", "exec", flags=PyCF_SANDBOX_COUNT)
 try:
     exec(code)
 except SandboxRuntimeError:
-    print("Statement limit exceeded")
+    print("Operation limit exceeded")
 finally:
     sys.sandbox.clear_filenames()
 ```
@@ -240,25 +241,27 @@ sys.sandbox.clear_filenames()               # Remove all filenames
 
 ## Execution Limits
 
-### Statement Limit
+### Operation Limit
 
-Prevents infinite loops and long-running code by counting statement executions within scope:
+Prevents infinite loops and long-running code by counting AST-level operations within scope. Operations are counted via `SANDBOX_COUNT` opcodes emitted by the compiler when `PyCF_SANDBOX_COUNT` flag is used:
 
 ```python
-sys.sandbox.set_limits(max_statements=1000)
+PyCF_SANDBOX_COUNT = 0x8000
+
+sys.sandbox.set_limits(max_operations=1000)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
 code = compile("""
 x = 0
 while True:
-    x += 1  # Each iteration counts as statements
-""", "<sandbox>", "exec")
+    x += 1  # Each iteration counts operations (While, AugAssign, BinOp)
+""", "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
 
 try:
     exec(code)
 except SandboxRuntimeError as e:
-    print(e)  # "Sandbox statement limit exceeded"
+    print(e)  # "Sandbox operation limit exceeded"
 ```
 
 ### Iteration Limit
@@ -282,25 +285,24 @@ except SandboxRuntimeError as e:
     print(e)  # "Sandbox iteration limit exceeded"
 ```
 
-### Allocation Limit
+### Recursion Limit
 
-Limits GC-tracked object allocations from code whose filename is registered:
+Limits the depth of sandbox-scoped frames in the call stack to prevent stack exhaustion:
 
 ```python
-sys.sandbox.set_limits(max_allocations=500)
+sys.sandbox.set_limits(max_recursion_depth=100)
 sys.sandbox.add_filename("<sandbox>")
-sys.sandbox.reset_counts()
 
 code = compile("""
-items = []
-for i in range(10000):
-    items.append([i])
+def recurse(n):
+    return recurse(n + 1)
+recurse(0)
 """, "<sandbox>", "exec")
 
 try:
     exec(code)
-except SandboxMemoryError:
-    print("Allocation limit reached")
+except SandboxRecursionError:
+    print("Recursion limit reached")
 ```
 
 ### Reading Counters
@@ -309,8 +311,6 @@ Check current counter values at any time:
 
 ```python
 counts = sys.sandbox.get_counts()
-print(f"Allocations: {counts['allocation_count']}")
-print(f"Statements executed: {counts['statement_count']}")
 print(f"Iterator steps: {counts['iteration_count']}")
 print(f"Operations counted: {counts['operation_count']}")
 ```
@@ -399,16 +399,7 @@ counts = sys.sandbox.get_counts()
 print(f"Operations: {counts['operation_count']}")
 ```
 
-### Independence from Statement Counting
-
-Operation counting (`max_operations`) and statement counting (`max_statements`) are independent mechanisms. You can use either or both:
-
-```python
-sys.sandbox.set_limits(
-    max_statements=100_000,   # Tracing-based line counting
-    max_operations=50_000,    # Opcode-based AST node counting
-)
-```
+### Zero Overhead When Disabled
 
 Code compiled **without** `PyCF_SANDBOX_COUNT` has zero operation counting overhead. Code compiled **with** the flag but without `max_operations` set has minimal overhead (one pointer dereference + comparison per counted node).
 
@@ -1197,7 +1188,7 @@ Use `sys.sandbox.scope()` for automatic scope entry/exit:
 ```python
 import sys
 
-sys.sandbox.set_limits(max_statements=1000)
+sys.sandbox.set_limits(max_iterations=1000)
 
 # Using the context manager
 with sys.sandbox.scope():
@@ -1249,7 +1240,7 @@ Context managers can be nested:
 import sys
 
 sys.sandbox.set_limits(
-    max_statements=1000,
+    max_iterations=1000,
     max_list_size=100,
 )
 
@@ -1350,21 +1341,22 @@ except SandboxOverflowError:
 
 ### Single-Raise Behavior
 
-Statement, iteration, and operation limits raise their exception **exactly once** on first violation. This allows `except` and `finally` blocks to execute normally:
+Iteration and operation limits raise their exception **exactly once** on first violation. This allows `except` and `finally` blocks to execute normally:
 
 ```python
-sys.sandbox.set_limits(max_statements=100)
+PyCF_SANDBOX_COUNT = 0x8000
+sys.sandbox.set_limits(max_operations=100)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
 code = compile("""
 try:
     while True:
-        pass  # Will hit statement limit
+        pass  # Will hit operation limit
 except SandboxRuntimeError:
     # This except block runs normally (no second exception)
     result = "caught"
-""", "<sandbox>", "exec")
+""", "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
 
 ns = {}
 exec(code, ns)
@@ -1380,7 +1372,9 @@ print(ns["result"])  # "caught"
 ```python
 import sys
 
-def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
+PyCF_SANDBOX_COUNT = 0x8000
+
+def safe_eval(source, allowed_globals=None, max_ops=100_000):
     """Safely evaluate Python code with sandbox limits."""
     # Save original limits
     original = sys.sandbox.get_limits()
@@ -1395,9 +1389,8 @@ def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
             max_dict_size=10_000,
             max_set_size=10_000,
             max_tuple_size=50_000,
-            max_statements=timeout_statements,
+            max_operations=max_ops,
             max_iterations=500_000,
-            max_allocations=5_000,
             allow_dunder_access=False,
         )
 
@@ -1420,8 +1413,8 @@ def safe_eval(source, allowed_globals=None, timeout_statements=100_000):
         # Mark namespace as mutable so sandboxed code can write results
         sys.sandbox.set_mutable(namespace)
 
-        # Compile and execute
-        code = compile(source, "<safe-eval>", "exec")
+        # Compile with operation counting and execute
+        code = compile(source, "<safe-eval>", "exec", flags=PyCF_SANDBOX_COUNT)
         exec(code, namespace)
 
         return namespace
@@ -1463,7 +1456,7 @@ def eval_expression(expr):
             allow_float=True,
             allow_complex=False,
             allow_dunder_access=False,
-            max_statements=100,
+            max_operations=100,
             max_iterations=1000,
         )
 
@@ -1506,12 +1499,13 @@ print(eval_expression("2 ** 10"))       # 1024
 ```python
 import sys
 
+PyCF_SANDBOX_COUNT = 0x8000
+
 class SandboxRunner:
     """Run code for multiple tenants with per-tenant limits."""
 
-    def __init__(self, max_statements=50_000, max_allocations=10_000):
-        self.max_statements = max_statements
-        self.max_allocations = max_allocations
+    def __init__(self, max_operations=50_000):
+        self.max_operations = max_operations
 
     def run(self, tenant_id, source):
         """Run source code for a tenant, return results or error."""
@@ -1527,9 +1521,8 @@ class SandboxRunner:
                 max_dict_size=5_000,
                 max_set_size=5_000,
                 max_tuple_size=10_000,
-                max_statements=self.max_statements,
-                max_iterations=self.max_statements * 10,
-                max_allocations=self.max_allocations,
+                max_operations=self.max_operations,
+                max_iterations=self.max_operations * 10,
                 allow_dunder_access=False,
             )
 
@@ -1540,7 +1533,8 @@ class SandboxRunner:
             namespace = {"__builtins__": __builtins__}
             sys.sandbox.set_mutable(namespace)
 
-            code = compile(source, filename, "exec")
+            # Compile with operation counting flag
+            code = compile(source, filename, "exec", flags=PyCF_SANDBOX_COUNT)
             exec(code, namespace)
 
             counts = sys.sandbox.get_counts()
@@ -1548,8 +1542,8 @@ class SandboxRunner:
                 "success": True,
                 "namespace": {k: v for k, v in namespace.items()
                              if not k.startswith("_")},
-                "statements": counts["statement_count"],
-                "allocations": counts["allocation_count"],
+                "operations": counts["operation_count"],
+                "iterations": counts["iteration_count"],
             }
 
         except SandboxError as e:
@@ -1557,8 +1551,8 @@ class SandboxRunner:
             return {
                 "success": False,
                 "error": f"{type(e).__name__}: {e}",
-                "statements": counts["statement_count"],
-                "allocations": counts["allocation_count"],
+                "operations": counts["operation_count"],
+                "iterations": counts["iteration_count"],
             }
 
         finally:
@@ -1574,7 +1568,7 @@ runner = SandboxRunner()
 result = runner.run("alice", "x = [i**2 for i in range(10)]")
 print(result)
 # {'success': True, 'namespace': {'x': [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]},
-#  'statements': ..., 'allocations': ...}
+#  'operations': ..., 'iterations': ...}
 
 result = runner.run("bob", "while True: pass")
 print(result)
@@ -1628,13 +1622,12 @@ finally:
 
 ### 4. Use Multiple Execution Limits
 
-Statement limits catch Python-level loops, but C builtins like `sum()`, `list()`, `sorted()` bypass the statement counter. Use iteration limits to catch these. Operation limits provide precise AST-level counting with zero tracing overhead:
+C builtins like `sum()`, `list()`, `sorted()` iterate internally in C code. Use iteration limits to catch these. Operation limits provide precise AST-level counting with zero tracing overhead:
 
 ```python
 sys.sandbox.set_limits(
-    max_statements=100_000,   # Catches: while True: pass
+    max_operations=100_000,   # AST-level counting (requires PyCF_SANDBOX_COUNT)
     max_iterations=1_000_000, # Catches: sum(range(10**9))
-    max_operations=50_000,    # AST-level counting (requires PyCF_SANDBOX_COUNT)
 )
 ```
 
@@ -1649,12 +1642,9 @@ sys.sandbox.set_limits(
     max_str_length=100_000,
 
     # Execution limits
-    max_statements=100_000,
+    max_operations=100_000,  # Requires PyCF_SANDBOX_COUNT at compile time
     max_iterations=1_000_000,
-    max_operations=50_000,   # Requires PyCF_SANDBOX_COUNT at compile time
-
-    # Memory limits
-    max_allocations=10_000,
+    max_recursion_depth=100,
 
     # Access control
     allow_dunder_access=False,
@@ -1763,13 +1753,13 @@ The sandbox limits are designed for resource protection, not as a complete secur
 
 ```python
 # MISTAKE 1: Forgetting to register filename
-sys.sandbox.set_limits(max_statements=100)
-code = compile(source, "<sandbox>", "exec")
+sys.sandbox.set_limits(max_operations=100)
+code = compile(source, "<sandbox>", "exec", flags=0x8000)
 exec(code)  # Limits NOT enforced - filename not registered!
 
 # FIX: Register the filename
 sys.sandbox.add_filename("<sandbox>")
-code = compile(source, "<sandbox>", "exec")
+code = compile(source, "<sandbox>", "exec", flags=0x8000)
 exec(code)  # Now limits are enforced
 ```
 
@@ -1837,9 +1827,9 @@ sys.sandbox.set_limits(
     max_int_digits=100,
     max_str_length=100_000,
     max_list_size=100_000,
-    max_statements=100_000,
+    max_operations=100_000,
     max_iterations=1_000_000,
-    max_allocations=10_000,
+    max_recursion_depth=100,
 )
 
 # Layer 2: Type and access restrictions
@@ -1966,9 +1956,9 @@ def create_sandbox():
         max_dict_size=5_000,
         max_set_size=5_000,
         max_tuple_size=10_000,
-        max_statements=50_000,
+        max_operations=50_000,
         max_iterations=500_000,
-        max_allocations=5_000,
+        max_recursion_depth=100,
         allow_float=True,
         allow_complex=False,
         allow_dunder_access=False,
@@ -1999,6 +1989,8 @@ def create_sandbox():
     return SAFE_BUILTINS
 
 
+PyCF_SANDBOX_COUNT = 0x8000
+
 def run_sandboxed(source, safe_builtins):
     """Run code in the sandbox."""
     sys.sandbox.add_filename("<sandbox>")
@@ -2014,7 +2006,8 @@ def run_sandboxed(source, safe_builtins):
     sys.sandbox.set_mutable(namespace)
 
     try:
-        code = compile(source, "<sandbox>", "exec")
+        # Compile with operation counting flag
+        code = compile(source, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
         exec(code, namespace)
         return {"success": True, "output": dict(output)}
     except SandboxError as e:
@@ -2053,7 +2046,6 @@ import sys
 import json
 
 sys.sandbox.set_limits(
-    max_statements=10000,
     max_iterations=100000,
     allow_dunder_access=False,
 )
@@ -2188,10 +2180,9 @@ except SandboxError as e:
 | `max_dict_size` | int | 0 | Max dict entries |
 | `max_set_size` | int | 0 | Max set members |
 | `max_tuple_size` | int | 0 | Max tuple items |
-| `max_statements` | int | 0 | Max statements in scope |
-| `max_allocations` | int | 0 | Max allocations in scope |
 | `max_iterations` | int | 0 | Max iterator steps in scope |
 | `max_operations` | int | 0 | Max AST operations in scope (requires `PyCF_SANDBOX_COUNT`) |
+| `max_recursion_depth` | int | 0 | Max sandbox-scoped recursion depth |
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | True | Allow `__dunder__` attributes |

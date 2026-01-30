@@ -1,6 +1,8 @@
 """Tests for the sandbox functionality in sys module.
 
 This package contains tests split by feature domain:
+
+Core Functionality:
 - test_limits: API basics, type/size limits, suspend/resume
 - test_hooks: Object creation hooks
 - test_allocations: Scoped allocation counting
@@ -8,11 +10,24 @@ This package contains tests split by feature domain:
 - test_iterations: Iteration counting and iterator wrapper protection
 - test_dunder_access: Dunder attribute blocking
 - test_frozen_mode: Frozen mode and auto-mutable mode
-- test_integration: Integration tests
 - test_opcodes: Opcode restrictions
 - test_operations: Opcode-based operation counting (SANDBOX_COUNT)
 - test_bytecode: Bytecode-level verification of SANDBOX_COUNT placement
-- test_security: Security tests for preventing config modification from scope
+
+Security Tests:
+- test_security: Prevention of config modification from scope
+- test_container_copy_limits: dict/set copy/update bypass prevention
+- test_scope_security: Scope escape vector prevention
+- test_dos_prevention: Resource exhaustion prevention
+- test_module_access_security: sys.modules access control
+- test_frame_access: Generator/coroutine frame blocking
+- test_metaclass_security: Custom metaclass blocking
+- test_compile_time_limits: Constant folding bypass prevention
+
+Integration Tests:
+- test_integration: Basic integration tests
+- test_harness_integration: Full harness pattern validation
+- test_attack_scenarios: Documented attack vector tests
 """
 
 import os
@@ -24,6 +39,9 @@ import unittest
 # Default timeout for subprocess tests (seconds)
 SUBPROCESS_TIMEOUT = 10
 
+# Compile flag for operation counting (must match Include/cpython/compile.h)
+PyCF_SANDBOX_COUNT = 0x8000
+
 # Test limit values - chosen to be large enough for normal test operations
 # but small enough to trigger limit checks quickly
 TEST_LIST_LIMIT = 500
@@ -32,6 +50,47 @@ TEST_SET_LIMIT = 500
 TEST_TUPLE_LIMIT = 500
 TEST_STR_LIMIT = 100
 TEST_INT_DIGITS_LIMIT = 5  # ~45 decimal digits (each internal digit ~9 decimals)
+
+
+class TestLimits:
+    """Standard limit values for tests.
+
+    Use these constants instead of magic numbers in tests for consistency
+    and easier maintenance.
+    """
+    TINY = 5
+    SMALL = 10
+    MEDIUM = 100
+    LARGE = 500
+    XLARGE = 1000
+
+    # Specific limit names for clarity
+    LIST = MEDIUM
+    DICT = MEDIUM
+    SET = MEDIUM
+    TUPLE = MEDIUM
+    STRING = 100
+    INT_DIGITS = 5
+
+
+# Standard exception tuples for consistent ordering in assertRaises
+# Note: These sandbox exceptions are built-in to this modified CPython
+# They are not available in standard Python
+try:
+    SECURITY_EXCEPTIONS = (SandboxSecurityError, AttributeError, TypeError)
+    OVERFLOW_EXCEPTIONS = (SandboxOverflowError, SandboxMemoryError)
+    RUNTIME_EXCEPTIONS = (SandboxRuntimeError,)
+    ALL_SANDBOX_EXCEPTIONS = (
+        SandboxSecurityError, SandboxOverflowError,
+        SandboxRuntimeError, SandboxMemoryError,
+        SandboxTypeError, SandboxImportError
+    )
+except NameError:
+    # Running on standard Python without sandbox support
+    SECURITY_EXCEPTIONS = (AttributeError, TypeError)
+    OVERFLOW_EXCEPTIONS = (OverflowError, MemoryError)
+    RUNTIME_EXCEPTIONS = (RuntimeError,)
+    ALL_SANDBOX_EXCEPTIONS = ()
 
 
 def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
@@ -52,6 +111,74 @@ def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
         text=True,
         timeout=timeout
     )
+
+
+def run_sandboxed_subprocess(code, timeout=SUBPROCESS_TIMEOUT,
+                              disable_import_restrict=True,
+                              disable_module_restrict=True,
+                              limits=None):
+    """Run code in isolated subprocess with sandbox.
+
+    This is an enhanced version of _run_sandboxed_code with more options.
+
+    Args:
+        code: Python code to execute
+        timeout: Max execution time in seconds
+        disable_import_restrict: Whether to disable import restrictions
+        disable_module_restrict: Whether to disable module access restrictions
+        limits: Optional dict of limit settings (e.g., {'max_list_size': 100})
+
+    Returns:
+        subprocess.CompletedProcess result
+    """
+    preamble_parts = ["import sys"]
+
+    if disable_import_restrict:
+        preamble_parts.append("sys.sandbox.import_restrict_mode = False")
+    if disable_module_restrict:
+        preamble_parts.append("sys.sandbox.module_access_restrict_mode = False")
+    if limits:
+        limit_str = ", ".join(f"{k}={v}" for k, v in limits.items())
+        preamble_parts.append(f"sys.sandbox.set_limits({limit_str})")
+
+    preamble = "\n".join(preamble_parts) + "\n"
+
+    return subprocess.run(
+        [sys.executable, "-c", preamble + code],
+        capture_output=True,
+        text=True,
+        timeout=timeout
+    )
+
+
+def run_scoped_test(code_str, scoped_filename, extra_globals=None, sys_module=None,
+                    count_operations=True):
+    """Consolidated helper for running code in sandbox scope.
+
+    This function compiles and executes code with a specific filename,
+    allowing the code to be subject to sandbox scope restrictions when
+    that filename has been registered with sys.sandbox.add_filename().
+
+    Args:
+        code_str: Python code to execute
+        scoped_filename: Unique filename for scope isolation
+        extra_globals: Additional globals to inject
+        sys_module: sys module to use (defaults to sys)
+        count_operations: If True, compile with PyCF_SANDBOX_COUNT for
+                          operation counting (required for max_operations limit)
+
+    Returns:
+        dict: The globals after execution
+    """
+    import sys as default_sys
+    sys_mod = sys_module or default_sys
+    globs = {"sys": sys_mod}
+    if extra_globals:
+        globs.update(extra_globals)
+    flags = PyCF_SANDBOX_COUNT if count_operations else 0
+    code = compile(code_str, scoped_filename, "exec", flags=flags)
+    exec(code, globs)
+    return globs
 
 
 def _run_scoped_test(limit_name, limit_value, test_code, extra_setup=""):
@@ -181,12 +308,14 @@ class SandboxScopedTestCase(SandboxTestCase):
             pass
         super().tearDown()
 
-    def run_scoped_code(self, code_str, extra_globals=None):
+    def run_scoped_code(self, code_str, extra_globals=None, count_operations=True):
         """Execute code within sandbox scope.
 
         Args:
             code_str: Python code to execute
             extra_globals: Additional globals dict to pass to exec
+            count_operations: If True, compile with PyCF_SANDBOX_COUNT for
+                              operation counting (required for max_operations limit)
 
         Returns:
             The globals dict after execution (useful for checking results)
@@ -194,9 +323,14 @@ class SandboxScopedTestCase(SandboxTestCase):
         globs = {"sys": sys}
         if extra_globals:
             globs.update(extra_globals)
-        code = compile(code_str, self.SCOPED_FILENAME, "exec")
+        flags = PyCF_SANDBOX_COUNT if count_operations else 0
+        code = compile(code_str, self.SCOPED_FILENAME, "exec", flags=flags)
         exec(code, globs)
         return globs
+
+
+# Alias for backward compatibility and clearer naming
+ScopedFilenameTestCase = SandboxScopedTestCase
 
 
 def load_tests(loader, tests, pattern):

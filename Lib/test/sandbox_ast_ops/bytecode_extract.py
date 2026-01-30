@@ -280,35 +280,67 @@ def extract_bytecode(source_code, filename="<test>", all_opcodes=False, include_
         flags = PyCF_SANDBOX_COUNT
         code = compile(source_code, filename, 'exec', flags=flags, optimize=-1)
         
-        # Extract all instructions
-        instructions = list(dis.get_instructions(code))
-        
+        # Extract instructions from top-level and all nested code objects
         result = []
-        for instr in instructions:
-            # Get position info if available (Python 3.11+)
-            if instr.positions:
-                line = instr.positions.lineno
-                col = instr.positions.col_offset
-                end_col = instr.positions.end_col_offset
-            else:
-                line = instr.starts_line
-                col = None
-                end_col = None
-            
-            if all_opcodes or instr.opname == 'SANDBOX_COUNT':
-                # Find AST node type if requested
-                ast_node_type = "-"
-                is_folded = False
-                if include_ast_types and line is not None:
-                    ast_node_type, is_folded = find_ast_node_type(
-                        position_map, line, col, end_col, instr.opname, instr.arg
-                    )
-                
-                result.append(OpcodeInfo(
-                    instr.offset, instr.opname, instr.arg, line, col, end_col,
-                    ast_node_type, is_folded
-                ))
+        seen_codes = set()  # Track processed code objects to avoid duplicates
         
+        def extract_from_code(code_obj, code_name="<module>"):
+            """Recursively extract instructions from a code object and its nested code objects."""
+            if id(code_obj) in seen_codes:
+                return
+            seen_codes.add(id(code_obj))
+            
+            # Add a header for nested code objects
+            if code_name != "<module>":
+                result.append(OpcodeInfo(
+                    0, '---', f"Code: {code_name}", None, None, None, "-", False
+                ))
+            
+            # Extract all instructions from this code object
+            instructions = list(dis.get_instructions(code_obj))
+            
+            for instr in instructions:
+                # Get position info if available (Python 3.11+)
+                if instr.positions:
+                    line = instr.positions.lineno
+                    col = instr.positions.col_offset
+                    end_col = instr.positions.end_col_offset
+                else:
+                    line = instr.starts_line
+                    col = None
+                    end_col = None
+                
+                if all_opcodes or instr.opname == 'SANDBOX_COUNT':
+                    # Find AST node type if requested
+                    ast_node_type = "-"
+                    is_folded = False
+                    if include_ast_types and line is not None:
+                        ast_node_type, is_folded = find_ast_node_type(
+                            position_map, line, col, end_col, instr.opname, instr.arg
+                        )
+                    
+                    result.append(OpcodeInfo(
+                        instr.offset, instr.opname, instr.arg, line, col, end_col,
+                        ast_node_type, is_folded
+                    ))
+                
+                # Check if this instruction references a code object (for nested functions/classes)
+                if instr.opname in ('LOAD_CONST', 'MAKE_FUNCTION', 'MAKE_CELL'):
+                    # The arg might reference a constant which could be a code object
+                    if hasattr(code_obj, 'co_consts') and instr.arg is not None:
+                        if 0 <= instr.arg < len(code_obj.co_consts):
+                            const = code_obj.co_consts[instr.arg]
+                            if isinstance(const, type(code_obj)):
+                                # Found a nested code object, extract it recursively
+                                extract_from_code(const, const.co_name)
+            
+            # Also check all constants for code objects (some might not be directly referenced)
+            if hasattr(code_obj, 'co_consts'):
+                for const in code_obj.co_consts:
+                    if isinstance(const, type(code_obj)):
+                        extract_from_code(const, const.co_name)
+        
+        extract_from_code(code, "<module>")
         return result
     except SyntaxError as e:
         return [OpcodeInfo(0, 'SYNTAX_ERROR', str(e), e.lineno if hasattr(e, 'lineno') else None, 

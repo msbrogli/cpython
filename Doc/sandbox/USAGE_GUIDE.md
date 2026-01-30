@@ -12,14 +12,20 @@ A practical guide for using the CPython sandbox to safely execute untrusted Pyth
 6. [Operation Counting](#operation-counting)
 7. [Frozen Mode](#frozen-mode)
 8. [Dunder Access Control](#dunder-access-control)
-9. [I/O Restrictions](#io-restrictions)
-10. [Opcode Restrictions](#opcode-restrictions)
-11. [Object Creation Hooks](#object-creation-hooks)
-12. [Suspend/Resume for Trusted Code](#suspendresume-for-trusted-code)
-13. [Exception Handling](#exception-handling)
-14. [Complete Examples](#complete-examples)
-15. [Best Practices](#best-practices)
-16. [API Quick Reference](#api-quick-reference)
+9. [Unsafe Operations](#unsafe-operations)
+10. [I/O Restrictions](#io-restrictions)
+11. [Import Restrictions](#import-restrictions)
+12. [Module Access Restrictions](#module-access-restrictions)
+13. [Opcode Restrictions](#opcode-restrictions)
+14. [Object Creation Hooks](#object-creation-hooks)
+15. [Suspend/Resume for Trusted Code](#suspendresume-for-trusted-code)
+16. [Context Managers](#context-managers)
+17. [Exception Handling](#exception-handling)
+18. [Complete Examples](#complete-examples)
+19. [Best Practices](#best-practices)
+20. [Do's and Don'ts](#dos-and-donts)
+21. [Security Considerations](#security-considerations)
+22. [API Quick Reference](#api-quick-reference)
 
 ---
 
@@ -627,6 +633,13 @@ Any attribute name containing `__` (double underscore) anywhere in the name is b
 
 Single underscore attributes (`_private`) are not affected.
 
+### Implicit Dunder Blocking
+
+When `allow_dunder_access=False`, certain implicit dunder operations are also restricted:
+
+- `__iter__` access is blocked when `allow_unsafe=False` (default), preventing custom iterator protocol abuse
+- This helps prevent sandbox escapes through iterator manipulation
+
 ### Scope-Aware
 
 Dunder blocking only applies within sandbox scope. Your harness code can freely use dunder attributes:
@@ -645,6 +658,63 @@ try:
 except SandboxAttributeError:
     print("Blocked dunder access in sandbox")
 ```
+
+---
+
+## Unsafe Operations
+
+The `allow_unsafe` setting controls access to operations that could be used to escape the sandbox or inspect internal state.
+
+### Default Behavior
+
+By default, `allow_unsafe=False`, blocking dangerous operations:
+
+```python
+import sys
+
+sys.sandbox.add_filename("<sandbox>")
+
+# compile() is blocked by default
+code = compile("""
+eval(compile('import os', '<x>', 'exec'))
+""", "<sandbox>", "exec")
+
+try:
+    exec(code)
+except SandboxSecurityError as e:
+    print(e)  # "compile() is not allowed in sandbox scope"
+```
+
+### Blocked Operations
+
+When `allow_unsafe=False` (default), these operations are blocked in sandbox scope:
+
+| Operation | Risk | Description |
+|-----------|------|-------------|
+| `compile()` | Code injection | Sandboxed code cannot compile new code objects |
+| `__iter__` access | Iterator abuse | Blocks direct `__iter__` attribute access |
+| `gc` module introspection | Object discovery | Blocks `gc.get_objects()`, `gc.get_referrers()`, etc. |
+| `frame.f_code` | Code inspection | Blocks access to frame code objects |
+
+### Enabling Unsafe Operations
+
+Only enable if you trust the code or have other mitigations:
+
+```python
+sys.sandbox.set_limits(allow_unsafe=True)
+sys.sandbox.add_filename("<sandbox>")
+
+# Now compile() works
+code = compile("result = compile('1+1', '<x>', 'eval')", "<sandbox>", "exec")
+exec(code)  # Works
+```
+
+### Why Block These?
+
+- **`compile()`**: Allows generating code that bypasses sandbox restrictions or constructs escape payloads dynamically
+- **`gc` introspection**: `gc.get_objects()` can find references to sensitive objects (modules, frames, etc.)
+- **`frame.f_code`**: Allows inspecting local variables and code structure of calling frames
+- **`__iter__`**: Can be used in complex sandbox escape chains
 
 ---
 
@@ -727,6 +797,186 @@ The I/O check uses the sandbox's scope mechanism. Operations called from code wh
 import socket
 sys.sandbox.add_filename(socket.__file__)
 sys.sandbox.add_filename("<sandbox>")
+```
+
+---
+
+## Import Restrictions
+
+Control which modules can be imported within sandbox scope using an import allowlist.
+
+### Default Behavior
+
+By default, `import_restrict_mode=True` with an empty allowlist, meaning **all imports are blocked** in sandbox scope:
+
+```python
+import sys
+
+sys.sandbox.add_filename("<sandbox>")
+
+code = compile("import json", "<sandbox>", "exec")
+try:
+    exec(code)
+except SandboxImportError as e:
+    print(e)  # "Import of 'json' is not allowed in sandbox"
+```
+
+### Setting Up an Import Allowlist
+
+Use the `allowed_imports` property to specify which imports are permitted:
+
+```python
+# Allow specific imports
+sys.sandbox.allowed_imports = {
+    ("json", ""),           # Allow: import json, from json import *
+    ("json", "loads"),      # Allow: from json import loads
+    ("json", "dumps"),      # Allow: from json import dumps
+    ("math", ""),           # Allow: import math, from math import *
+    ("datetime", "date"),   # Allow: from datetime import date
+}
+
+sys.sandbox.add_filename("<sandbox>")
+
+code = compile("""
+import json           # OK - ("json", "") allows it
+from json import loads  # OK - ("json", "loads") allows it
+from math import sqrt   # OK - ("math", "") allows all from math
+import os              # SandboxImportError - not in allowlist
+""", "<sandbox>", "exec")
+```
+
+### Allowlist Format
+
+The allowlist is a set of `(module_name, import_name)` tuples:
+
+| Entry | What It Allows |
+|-------|----------------|
+| `("json", "")` | `import json` and `from json import *` (any name) |
+| `("json", "loads")` | Only `from json import loads` |
+| `("json", "*")` | `from json import *` |
+| `("os.path", "")` | `import os.path` and `from os.path import *` |
+
+### Submodule Access
+
+Control whether importing a parent allows access to submodules:
+
+```python
+# Allow submodule access (parent import grants child access)
+sys.sandbox.import_allow_submodules = True
+sys.sandbox.allowed_imports = {("os", "")}
+
+# Now "import os.path" works because "os" is allowed
+# and submodules are permitted
+```
+
+By default, `import_allow_submodules=False`, requiring explicit allowlist entries for each submodule.
+
+### Using Default Safe Modules
+
+For convenience, load a curated set of safe modules:
+
+```python
+sys.sandbox.use_default_allowed_modules()
+
+# This enables module_access_restrict_mode and sets allowed_modules to:
+# - Data: json, collections, enum, dataclasses, typing, types, copy, pprint, reprlib
+# - Math: math, decimal, fractions, statistics
+# - Strings: string, re, textwrap, unicodedata
+# - Date/Time: datetime, calendar, zoneinfo
+# - Binary: struct, base64, binascii, quopri, uu
+# - Crypto: hashlib, hmac
+# - Functional: functools, itertools, operator
+# - Context: contextlib
+# - ABC: abc
+# - File formats: csv, html, html.parser, html.entities
+# - Utilities: bisect, heapq, array, weakref, graphlib
+# - Constants: errno, stat
+# - Compression: zlib
+```
+
+### Disabling Import Restrictions
+
+To allow all imports (less secure):
+
+```python
+sys.sandbox.import_restrict_mode = False
+```
+
+### Reading Current Settings
+
+```python
+print(sys.sandbox.import_restrict_mode)       # True/False
+print(sys.sandbox.import_allow_submodules)    # True/False
+print(sys.sandbox.allowed_imports)            # Set of (module, name) tuples
+```
+
+---
+
+## Module Access Restrictions
+
+Even if sandboxed code has a reference to a module (e.g., passed in via the namespace), module access restrictions can block its use.
+
+### Purpose
+
+Import restrictions prevent `import` statements, but code might receive module references through the namespace:
+
+```python
+import os
+namespace = {"os": os, "__builtins__": __builtins__}
+exec(sandboxed_code, namespace)  # Code has access to os module!
+```
+
+Module access restrictions add a second layer of defense by restricting which modules can be used, even if already imported.
+
+### Enabling Module Access Restrictions
+
+```python
+sys.sandbox.module_access_restrict_mode = True
+sys.sandbox.allowed_modules = frozenset({"json", "math"})
+sys.sandbox.add_filename("<sandbox>")
+
+import os
+code = compile("os.getcwd()", "<sandbox>", "exec")
+
+try:
+    exec(code, {"os": os})
+except SandboxSecurityError as e:
+    print(e)  # "Access to module 'os' is not allowed in sandbox"
+```
+
+### Submodule Access
+
+Control whether allowing a parent module grants access to its submodules:
+
+```python
+sys.sandbox.module_access_restrict_mode = True
+sys.sandbox.allow_submodules = True  # Default
+sys.sandbox.allowed_modules = frozenset({"os"})
+
+# With allow_submodules=True, os.path is accessible because os is allowed
+```
+
+### Combined with Import Restrictions
+
+For maximum security, use both:
+
+```python
+# Block imports
+sys.sandbox.import_restrict_mode = True
+sys.sandbox.allowed_imports = {("json", "")}
+
+# Block module usage even if passed in
+sys.sandbox.module_access_restrict_mode = True
+sys.sandbox.allowed_modules = frozenset({"json"})
+```
+
+### Using Default Safe Modules
+
+```python
+sys.sandbox.use_default_allowed_modules()
+# Sets both allowed_imports for import statements
+# AND allowed_modules for module access
+# with the same curated safe module list
 ```
 
 ---
@@ -931,6 +1181,105 @@ Suspend bypasses **all** sandbox restrictions:
 - Frozen mode (including auto-mutable marking)
 - Dunder access blocking
 - Opcode restrictions
+- Import restrictions
+- Module access restrictions
+
+---
+
+## Context Managers
+
+The sandbox provides built-in context managers for cleaner scope and suspend/resume handling.
+
+### Scope Context Manager
+
+Use `sys.sandbox.scope()` for automatic scope entry/exit:
+
+```python
+import sys
+
+sys.sandbox.set_limits(max_statements=1000)
+
+# Using the context manager
+with sys.sandbox.scope():
+    # Automatically calls enter_scope() on entry
+    # Automatically calls exit_scope() on exit
+    code = compile("x = sum(range(10))", "<sandbox>", "exec")
+    exec(code)
+# Scope automatically cleared here
+
+# Equivalent manual code:
+sys.sandbox.enter_scope()
+try:
+    code = compile("x = sum(range(10))", "<sandbox>", "exec")
+    exec(code)
+finally:
+    sys.sandbox.exit_scope()
+```
+
+### Suspended Limits Context Manager
+
+Use `sys.sandbox.suspended_limits()` for automatic suspend/resume:
+
+```python
+import sys
+
+sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.add_filename("<sandbox>")
+
+# Need to create large data structure in trusted code
+with sys.sandbox.suspended_limits():
+    # Automatically calls suspend() on entry
+    # Automatically calls resume() on exit
+    large_list = list(range(10000))  # Works - limits suspended
+# Limits automatically restored here
+
+# Equivalent manual code:
+sys.sandbox.suspend()
+try:
+    large_list = list(range(10000))
+finally:
+    sys.sandbox.resume()
+```
+
+### Combining Context Managers
+
+Context managers can be nested:
+
+```python
+import sys
+
+sys.sandbox.set_limits(
+    max_statements=1000,
+    max_list_size=100,
+)
+
+with sys.sandbox.scope():
+    # In sandbox scope
+    code = compile("x = [1, 2, 3]", "<sandbox>", "exec")
+    exec(code)
+
+    with sys.sandbox.suspended_limits():
+        # Temporarily bypass all limits
+        big_data = prepare_large_dataset()
+
+    # Back in scope with limits
+    code2 = compile("y = x + [4, 5]", "<sandbox>", "exec")
+    exec(code2)
+```
+
+### Exception Safety
+
+Both context managers are exception-safe. Cleanup happens even if exceptions occur:
+
+```python
+try:
+    with sys.sandbox.scope():
+        exec(malicious_code)  # Raises SandboxError
+except SandboxError:
+    pass
+# Scope is still properly cleared
+assert not sys.sandbox.in_scope()
+```
 
 ---
 
@@ -948,7 +1297,8 @@ Exception
       +-- SandboxRuntimeError        # Statement/iteration/operation limit, banned opcode
       +-- SandboxTypeError           # Forbidden type creation
       +-- SandboxAttributeError      # Frozen mode or dunder access blocked
-      +-- SandboxSecurityError       # Security violation (I/O, config, frame access)
+      +-- SandboxSecurityError       # Security violation (I/O, unsafe ops, frame access, module access)
+      +-- SandboxImportError         # Import not in allowlist
 ```
 
 ### Catching All Sandbox Errors
@@ -977,7 +1327,9 @@ except SandboxTypeError:
 except SandboxAttributeError:
     print("Attribute access blocked (frozen mode or dunder)")
 except SandboxSecurityError:
-    print("Security violation (I/O blocked, config modification, frame access)")
+    print("Security violation (I/O blocked, unsafe operation, frame access, module access)")
+except SandboxImportError:
+    print("Import not in allowlist")
 except SandboxError:
     print("Other sandbox violation")
 ```
@@ -1351,7 +1703,17 @@ Blocked attributes:
 
 Note: These attributes work normally outside sandbox scope.
 
-### 8. Security Warning
+### 8. Allocation Limit Grace Headroom
+
+The allocation limit includes a 1000-unit "grace headroom" for error handling. When the limit is exceeded:
+
+1. First violation: `SandboxMemoryError` raised at `count == max + 1`
+2. Grace period: Additional 1000 allocations allowed for exception handling
+3. Hard limit: Error raised again at `count > max + 1000`
+
+This prevents cascading failures during exception handling.
+
+### 9. Security Warning
 
 The sandbox limits are designed for resource protection, not as a complete security boundary. Code with access to C extensions, `ctypes`, or other low-level APIs can bypass these limits. For maximum restriction:
 
@@ -1360,6 +1722,361 @@ The sandbox limits are designed for resource protection, not as a complete secur
 - Block dunder access
 - Use frozen mode
 - Consider running in a subprocess with OS-level sandboxing
+
+---
+
+## Do's and Don'ts
+
+### Do's
+
+| Do | Why |
+|----|-----|
+| **Always register filenames** | Scoped limits only apply to registered filenames |
+| **Always reset counters** | `reset_counts()` before each execution prevents limit carry-over |
+| **Always clean up in finally** | Ensures sandbox state is restored on exceptions |
+| **Use multiple limit types** | Statements, iterations, operations, and allocations each catch different attacks |
+| **Set `allow_dunder_access=False`** | Prevents `__class__.__subclasses__()` escape chains |
+| **Set `allow_unsafe=False`** (default) | Blocks `compile()`, gc introspection |
+| **Use frozen mode + auto_mutable** | Protects shared state while allowing sandboxed code to create its own objects |
+| **Use context managers** | `scope()` and `suspended_limits()` are cleaner and exception-safe |
+| **Mark output objects as mutable** | `set_mutable(output)` allows writing results in frozen mode |
+| **Use import restrictions** | Explicitly allow only safe modules |
+| **Save and restore limits** | `original = get_limits()` ... `set_limits(**original)` |
+
+### Don'ts
+
+| Don't | Why |
+|-------|-----|
+| **Don't forget scope registration** | Without it, no scoped limits are enforced |
+| **Don't use `allow_io=True`** | Enables file/socket access - major security hole |
+| **Don't use `allow_unsafe=True`** | Enables `compile()` and gc introspection |
+| **Don't pass dangerous modules** | Even with import restrictions, passed modules can be used if `module_access_restrict_mode` is off |
+| **Don't trust `__builtins__` as-is** | Contains `eval`, `exec`, `compile`, `open`, etc. |
+| **Don't rely on a single limit** | Attackers find ways around individual limits |
+| **Don't share mutable state** | Either freeze it or create copies for the sandbox |
+| **Don't forget to resume after suspend** | Leaves limits bypassed for all subsequent code |
+| **Don't set limits too low** | Legitimate code may fail; test with real workloads |
+| **Don't set limits too high** | Defeats the purpose of resource protection |
+| **Don't use sandbox in multi-threaded code without care** | State is per-interpreter, shared across threads |
+
+### Common Mistakes
+
+```python
+# MISTAKE 1: Forgetting to register filename
+sys.sandbox.set_limits(max_statements=100)
+code = compile(source, "<sandbox>", "exec")
+exec(code)  # Limits NOT enforced - filename not registered!
+
+# FIX: Register the filename
+sys.sandbox.add_filename("<sandbox>")
+code = compile(source, "<sandbox>", "exec")
+exec(code)  # Now limits are enforced
+```
+
+```python
+# MISTAKE 2: Mismatched filename
+sys.sandbox.add_filename("<sandbox>")
+code = compile(source, "<user>", "exec")  # Different filename!
+exec(code)  # Limits NOT enforced
+
+# FIX: Match the filename
+sys.sandbox.add_filename("<user>")
+code = compile(source, "<user>", "exec")
+exec(code)  # Now limits are enforced
+```
+
+```python
+# MISTAKE 3: Not resetting counters between runs
+sys.sandbox.add_filename("<sandbox>")
+exec(code1)  # Uses 500 statements
+exec(code2)  # Starts at 500, not 0!
+
+# FIX: Reset before each execution
+sys.sandbox.reset_counts()
+exec(code1)
+sys.sandbox.reset_counts()
+exec(code2)
+```
+
+```python
+# MISTAKE 4: Passing dangerous builtins
+namespace = {"__builtins__": __builtins__}  # Includes eval, exec, open!
+exec(sandboxed_code, namespace)
+
+# FIX: Create a safe builtins subset
+SAFE_BUILTINS = {
+    'abs': abs, 'all': all, 'any': any, 'bool': bool,
+    'dict': dict, 'enumerate': enumerate, 'filter': filter,
+    'float': float, 'int': int, 'len': len, 'list': list,
+    'map': map, 'max': max, 'min': min, 'print': print,
+    'range': range, 'round': round, 'set': set, 'sorted': sorted,
+    'str': str, 'sum': sum, 'tuple': tuple, 'zip': zip,
+    # Sandbox exceptions
+    'SandboxError': SandboxError,
+    'SandboxOverflowError': SandboxOverflowError,
+    # ... etc
+}
+namespace = {"__builtins__": SAFE_BUILTINS}
+exec(sandboxed_code, namespace)
+```
+
+---
+
+## Security Considerations
+
+### Defense in Depth
+
+The sandbox provides multiple layers of protection. Use them together:
+
+```python
+import sys
+import dis
+
+# Layer 1: Resource limits
+sys.sandbox.set_limits(
+    max_int_digits=100,
+    max_str_length=100_000,
+    max_list_size=100_000,
+    max_statements=100_000,
+    max_iterations=1_000_000,
+    max_allocations=10_000,
+)
+
+# Layer 2: Type and access restrictions
+sys.sandbox.set_limits(
+    allow_float=True,
+    allow_complex=False,
+    allow_dunder_access=False,
+    allow_unsafe=False,  # Blocks compile(), gc introspection
+    allow_io=False,      # Blocks file, socket, fd operations
+)
+
+# Layer 3: Import and module restrictions
+sys.sandbox.import_restrict_mode = True
+sys.sandbox.allowed_imports = {("math", ""), ("json", "")}
+sys.sandbox.module_access_restrict_mode = True
+sys.sandbox.allowed_modules = frozenset({"math", "json"})
+
+# Layer 4: Opcode restrictions (extra defense against imports)
+sys.sandbox.banned_opcodes = {
+    dis.opmap['IMPORT_NAME'],
+    dis.opmap['IMPORT_FROM'],
+    dis.opmap['IMPORT_STAR'],
+}
+sys.sandbox.opcode_restrict_mode = True
+
+# Layer 5: Frozen mode
+sys.sandbox.frozen_mode = True
+sys.sandbox.auto_mutable = True
+
+# Layer 6: Safe builtins
+SAFE_BUILTINS = {...}  # Curated safe builtins only
+```
+
+### Known Limitations
+
+| Limitation | Mitigation |
+|------------|------------|
+| C extensions can bypass limits | Use import restrictions, block `ctypes`, `cffi` |
+| `__subclasses__()` can find types | Block dunder access |
+| `gc.get_objects()` can find objects | Block unsafe operations (default) |
+| `compile()` can create escape code | Block unsafe operations (default) |
+| File descriptors inherited from parent | Block I/O operations (default) |
+| Memory exhaustion before allocation limit | Use OS-level memory limits (ulimit, cgroups) |
+| CPU exhaustion before statement limit | Use OS-level CPU limits (timeout, cgroups) |
+| Thread spawning | Remove `threading` from allowed modules |
+| Signal handlers | Remove `signal` from allowed modules |
+| Subprocess spawning | Remove `subprocess`, `os` from allowed modules |
+
+### Escape Vectors to Block
+
+Common sandbox escape techniques and how to block them:
+
+| Escape Vector | How It Works | Blocking Method |
+|---------------|--------------|-----------------|
+| `().__class__.__bases__[0].__subclasses__()` | Type introspection | `allow_dunder_access=False` |
+| `eval(compile(...))` | Dynamic code generation | `allow_unsafe=False` |
+| `gc.get_objects()` | Find sensitive objects | `allow_unsafe=False` |
+| `import os; os.system()` | Import dangerous module | Import restrictions |
+| `open('/etc/passwd')` | File access | `allow_io=False` |
+| `socket.socket()` | Network access | `allow_io=False` |
+| `ctypes.CDLL()` | Call arbitrary C code | Import restrictions |
+| `frame.f_back.f_locals` | Access parent frame | Frame access is blocked in scope |
+| `gen.gi_frame.f_locals` | Access generator frame | Frame access blocked |
+
+### Recommended Minimal Configuration
+
+For maximum security with minimal trusted builtins:
+
+```python
+import sys
+import dis
+
+def create_sandbox():
+    """Create a maximally restricted sandbox."""
+
+    # Minimal safe builtins
+    SAFE_BUILTINS = {
+        # Types
+        'bool': bool, 'int': int, 'float': float, 'str': str,
+        'list': list, 'dict': dict, 'set': set, 'tuple': tuple,
+        'frozenset': frozenset, 'bytes': bytes, 'bytearray': bytearray,
+
+        # Functions
+        'abs': abs, 'all': all, 'any': any, 'bin': bin,
+        'chr': chr, 'divmod': divmod, 'enumerate': enumerate,
+        'filter': filter, 'format': format, 'hash': hash, 'hex': hex,
+        'isinstance': isinstance, 'issubclass': issubclass,
+        'iter': iter, 'len': len, 'map': map, 'max': max, 'min': min,
+        'next': next, 'oct': oct, 'ord': ord, 'pow': pow,
+        'print': print, 'range': range, 'repr': repr, 'reversed': reversed,
+        'round': round, 'slice': slice, 'sorted': sorted, 'sum': sum,
+        'zip': zip,
+
+        # Constants
+        'True': True, 'False': False, 'None': None,
+
+        # Sandbox exceptions (for error handling)
+        'SandboxError': SandboxError,
+        'SandboxOverflowError': SandboxOverflowError,
+        'SandboxMemoryError': SandboxMemoryError,
+        'SandboxRuntimeError': SandboxRuntimeError,
+        'SandboxTypeError': SandboxTypeError,
+        'SandboxAttributeError': SandboxAttributeError,
+        'SandboxSecurityError': SandboxSecurityError,
+        'SandboxImportError': SandboxImportError,
+
+        # Standard exceptions (for except clauses)
+        'Exception': Exception,
+        'ValueError': ValueError,
+        'TypeError': TypeError,
+        'KeyError': KeyError,
+        'IndexError': IndexError,
+        'AttributeError': AttributeError,
+        'ZeroDivisionError': ZeroDivisionError,
+        'StopIteration': StopIteration,
+    }
+
+    # Configure all limits
+    sys.sandbox.set_limits(
+        max_int_digits=50,
+        max_str_length=50_000,
+        max_bytes_length=50_000,
+        max_list_size=10_000,
+        max_dict_size=5_000,
+        max_set_size=5_000,
+        max_tuple_size=10_000,
+        max_statements=50_000,
+        max_iterations=500_000,
+        max_allocations=5_000,
+        allow_float=True,
+        allow_complex=False,
+        allow_dunder_access=False,
+        allow_unsafe=False,
+        allow_io=False,
+    )
+
+    # Block imports
+    sys.sandbox.import_restrict_mode = True
+    sys.sandbox.allowed_imports = set()  # No imports allowed
+
+    # Block module access
+    sys.sandbox.module_access_restrict_mode = True
+    sys.sandbox.allowed_modules = frozenset()  # No modules allowed
+
+    # Block import opcodes as extra defense
+    sys.sandbox.banned_opcodes = {
+        dis.opmap['IMPORT_NAME'],
+        dis.opmap['IMPORT_FROM'],
+        dis.opmap['IMPORT_STAR'],
+    }
+    sys.sandbox.opcode_restrict_mode = True
+
+    # Enable frozen mode
+    sys.sandbox.frozen_mode = True
+    sys.sandbox.auto_mutable = True
+
+    return SAFE_BUILTINS
+
+
+def run_sandboxed(source, safe_builtins):
+    """Run code in the sandbox."""
+    sys.sandbox.add_filename("<sandbox>")
+    sys.sandbox.reset_counts()
+
+    output = {}
+    sys.sandbox.set_mutable(output)
+
+    namespace = {
+        "__builtins__": safe_builtins,
+        "output": output,
+    }
+    sys.sandbox.set_mutable(namespace)
+
+    try:
+        code = compile(source, "<sandbox>", "exec")
+        exec(code, namespace)
+        return {"success": True, "output": dict(output)}
+    except SandboxError as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        sys.sandbox.clear_filenames()
+
+
+# Usage
+safe_builtins = create_sandbox()
+result = run_sandboxed("output['result'] = sum(range(100))", safe_builtins)
+print(result)  # {'success': True, 'output': {'result': 4950}}
+```
+
+### When the Sandbox Is Not Enough
+
+The CPython sandbox provides resource limits and access control within the Python interpreter. For truly untrusted code, combine with OS-level isolation:
+
+1. **Process isolation**: Run sandboxed code in a subprocess with restricted privileges
+2. **Container isolation**: Use Docker/Podman with security profiles
+3. **seccomp/landlock**: Restrict system calls at the kernel level
+4. **cgroups**: Limit memory, CPU, and other resources at the OS level
+5. **Network namespaces**: Isolate network access
+6. **Read-only filesystems**: Prevent file modifications
+
+Example subprocess pattern:
+
+```python
+import subprocess
+import json
+
+def run_in_subprocess(source, timeout=5.0):
+    """Run sandboxed code in an isolated subprocess."""
+    wrapper = f'''
+import sys
+import json
+
+sys.sandbox.set_limits(
+    max_statements=10000,
+    max_iterations=100000,
+    allow_dunder_access=False,
+)
+sys.sandbox.add_filename("<sandbox>")
+sys.sandbox.reset_counts()
+
+try:
+    code = compile({source!r}, "<sandbox>", "exec")
+    ns = {{"__builtins__": {{}}}  # Empty builtins
+    exec(code, ns)
+    print(json.dumps({{"success": True}}))
+except SandboxError as e:
+    print(json.dumps({{"success": False, "error": str(e)}}))
+'''
+
+    result = subprocess.run(
+        ["python", "-c", wrapper],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    return json.loads(result.stdout)
+```
 
 ---
 
@@ -1385,6 +2102,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `sys.sandbox.add_filename(name)` | Register a filename |
 | `sys.sandbox.remove_filename(name)` | Remove a filename |
 | `sys.sandbox.clear_filenames()` | Clear all filenames |
+| `sys.sandbox.scope()` | Context manager for enter/exit scope |
 
 ### Frozen Mode
 
@@ -1421,6 +2139,30 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `sys.sandbox.suspend() -> int` | Suspend limits |
 | `sys.sandbox.resume() -> int` | Resume limits |
 | `sys.sandbox.suspended -> bool` | Check suspend status |
+| `sys.sandbox.suspended_limits()` | Context manager for suspend/resume |
+
+### Import Restrictions
+
+| Function | Description |
+|----------|-------------|
+| `sys.sandbox.import_restrict_mode = bool` | Enable/disable import allowlist |
+| `sys.sandbox.import_restrict_mode -> bool` | Check import restriction status |
+| `sys.sandbox.import_allow_submodules = bool` | Allow submodule imports |
+| `sys.sandbox.import_allow_submodules -> bool` | Check submodule setting |
+| `sys.sandbox.allowed_imports = set` | Set allowed (module, name) tuples |
+| `sys.sandbox.allowed_imports -> set` | Get allowed imports |
+
+### Module Access Restrictions
+
+| Function | Description |
+|----------|-------------|
+| `sys.sandbox.module_access_restrict_mode = bool` | Enable/disable module access allowlist |
+| `sys.sandbox.module_access_restrict_mode -> bool` | Check module restriction status |
+| `sys.sandbox.allow_submodules = bool` | Allow submodule access |
+| `sys.sandbox.allow_submodules -> bool` | Check submodule access setting |
+| `sys.sandbox.allowed_modules = frozenset` | Set allowed module names |
+| `sys.sandbox.allowed_modules -> frozenset` | Get allowed modules |
+| `sys.sandbox.use_default_allowed_modules()` | Set safe module defaults |
 
 ### Exceptions
 
@@ -1432,7 +2174,8 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `SandboxRuntimeError` | Statement/iteration/operation limit or banned opcode |
 | `SandboxTypeError` | Forbidden type creation |
 | `SandboxAttributeError` | Frozen mode or dunder access blocked |
-| `SandboxSecurityError` | Security violation (I/O blocked, config modification, frame access, etc.) |
+| `SandboxSecurityError` | Security violation (I/O, unsafe ops, frame access, module access) |
+| `SandboxImportError` | Import not in allowlist |
 
 ### `set_limits()` Parameters
 
@@ -1455,3 +2198,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | `allow_unsafe` | bool | False | Allow unsafe operations (compile, gc introspection) |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterator yields toward `operation_count` |
+| `import_restrict_mode` | bool | True | Enforce import allowlist |
+| `import_allow_submodules` | bool | False | Allow submodule imports when parent allowed |
+| `module_access_restrict_mode` | bool | False | Enforce module access allowlist |
+| `allow_submodules` | bool | True | Allow submodule access when parent allowed |

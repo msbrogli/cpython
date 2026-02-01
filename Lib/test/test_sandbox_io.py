@@ -71,29 +71,29 @@ else:
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
 
-class AllowIOGetSetLimitsTest(unittest.TestCase):
-    """Test allow_io in get_limits/set_limits methods."""
+class AllowIOGetSetConfigTest(unittest.TestCase):
+    """Test allow_io in get_config/set_config methods."""
 
-    def test_get_limits_includes_allow_io(self):
-        """get_limits() should include allow_io."""
+    def test_get_config_includes_allow_io(self):
+        """get_config() should include allow_io."""
         code = '''
 import sys
 sys.sandbox.reset()
-limits = sys.sandbox.get_limits()
-if 'allow_io' in limits and limits['allow_io'] == False:
+config = sys.sandbox.get_config()
+if 'allow_io' in config and config['allow_io'] == False:
     print("PASS")
 else:
-    print(f"FAIL: limits={limits}")
+    print(f"FAIL: config={config}")
 '''
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
-    def test_set_limits_allow_io_true(self):
-        """set_limits(allow_io=True) should work."""
+    def test_set_config_allow_io_true(self):
+        """set_config(allow_io=True) should work."""
         code = '''
 import sys
 sys.sandbox.reset()
-sys.sandbox.set_limits(allow_io=True)
+sys.sandbox.set_config(allow_io=True)
 if sys.sandbox.allow_io == True:
     print("PASS")
 else:
@@ -102,13 +102,13 @@ else:
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
-    def test_set_limits_allow_io_false(self):
-        """set_limits(allow_io=False) should work."""
+    def test_set_config_allow_io_false(self):
+        """set_config(allow_io=False) should work."""
         code = '''
 import sys
 sys.sandbox.reset()
 sys.sandbox.allow_io = True
-sys.sandbox.set_limits(allow_io=False)
+sys.sandbox.set_config(allow_io=False)
 if sys.sandbox.allow_io == False:
     print("PASS")
 else:
@@ -127,6 +127,7 @@ class OpenBlockedTest(unittest.TestCase):
 import sys
 sys.sandbox.reset()
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     f = open('/tmp/test_sandbox_io.txt', 'w')
@@ -149,6 +150,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
 sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = True
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     f = open('/tmp/test_sandbox_io_allowed.txt', 'w')
@@ -195,6 +197,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
 sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     fd = os.open('/tmp/test.txt', os.O_CREAT | os.O_WRONLY)
@@ -221,6 +224,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
 sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     os.read(0, 1)
@@ -242,6 +246,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
 sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     os.write(1, b'test')
@@ -267,6 +272,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
 sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     os.close(999)  # Invalid fd but check happens first
@@ -288,6 +294,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
 sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     os.closerange(999, 1000)
@@ -313,6 +320,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
 sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     fd = os.dup(1)
@@ -335,6 +343,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
 sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     os.dup2(1, 999)
@@ -360,6 +369,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('os', '')}
 sys.sandbox.allowed_modules = {'os'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     r, w = os.pipe()
@@ -387,6 +397,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('_socket', '')}
 sys.sandbox.allowed_modules = {'_socket'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM, 0)
@@ -409,6 +420,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('_socket', '')}
 sys.sandbox.allowed_modules = {'_socket'}
 sys.sandbox.allow_io = True
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM, 0)
@@ -429,6 +441,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('_socket', ''), ('socket', '')}
 sys.sandbox.allowed_modules = {'_socket', 'socket'}
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename(socket.__file__)  # Add socket.py to scope
 sys.sandbox.add_filename('<string>')
 try:
@@ -454,6 +467,7 @@ import sys
 from _io import FileIO
 sys.sandbox.reset()
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     f = FileIO('/tmp/test.txt', 'w')
@@ -478,6 +492,7 @@ import sys
 from io import StringIO
 sys.sandbox.reset()
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     s = StringIO()
@@ -499,6 +514,7 @@ import sys
 from io import BytesIO
 sys.sandbox.reset()
 sys.sandbox.allow_io = False
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     b = BytesIO()

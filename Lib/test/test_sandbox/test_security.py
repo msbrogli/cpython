@@ -154,8 +154,8 @@ class SandboxMethodsBlockedTests(SandboxTestCase):
         finally:
             sys.sandbox.remove_filename(filename)
 
-    def test_set_limits_blocked_from_scope(self):
-        """Calling set_limits() from scope should raise SandboxSecurityError."""
+    def test_set_config_blocked_from_scope(self):
+        """Calling set_config() from scope should raise SandboxSecurityError."""
         with self.assertRaises(SandboxSecurityError):
             self._run_in_scope("sys.sandbox.set_config(max_iterations=99999)")
 
@@ -264,8 +264,8 @@ class SandboxReadAllowedFromScopeTests(SandboxTestCase):
         finally:
             sys.sandbox.remove_filename(filename)
 
-    def test_get_limits_allowed_from_scope(self):
-        """Reading limits via get_limits() should work from scope."""
+    def test_get_config_allowed_from_scope(self):
+        """Reading config via get_config() should work from scope."""
         result = self._run_in_scope("result = sys.sandbox.get_config()")
         self.assertIsInstance(result, dict)
 
@@ -372,8 +372,8 @@ class SandboxModificationOutsideScopeAllowedTests(SandboxTestCase):
         sys.sandbox.max_iterations = 5000
         self.assertEqual(sys.sandbox.max_iterations, 5000)
 
-    def test_set_limits_allowed_outside_scope(self):
-        """Calling set_limits() outside scope should work."""
+    def test_set_config_allowed_outside_scope(self):
+        """Calling set_config() outside scope should work."""
         sys.sandbox.set_config(max_iterations=3000)
         self.assertEqual(sys.sandbox.max_iterations, 3000)
 

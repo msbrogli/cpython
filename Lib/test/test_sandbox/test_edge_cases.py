@@ -75,7 +75,7 @@ class NegativeLimitTests(SandboxTestCase):
     """Test behavior with negative limits.
 
     Note: The current implementation allows negative values for Py_ssize_t
-    limits (max_int_digits, etc.) via set_limits(), but property setters
+    limits (max_int_digits, etc.) via set_config(), but property setters
     reject them with ValueError. Negative values effectively act as no-limit
     since size comparisons will always be less than a negative limit.
     """
@@ -109,8 +109,8 @@ class OverflowProtectionTests(SandboxTestCase):
         with self.assertRaises(OverflowError):
             sys.sandbox.max_operations = (2**64 - 1)
 
-    def test_set_limits_overflow_rejected(self):
-        """set_limits() should reject overflow values."""
+    def test_set_config_overflow_rejected(self):
+        """set_config() should reject overflow values."""
         with self.assertRaises(OverflowError):
             sys.sandbox.set_config(max_iterations=(2**64 - 1))
 

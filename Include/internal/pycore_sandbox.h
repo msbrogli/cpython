@@ -203,10 +203,34 @@ typedef struct {
     .in_hook = 0,                    \
 }
 
-/* Combined sandbox state */
+/* Combined sandbox state
+ *
+ * Field ordering is optimized for cache locality:
+ * - Hot fields (checked on every enforcement) are placed first
+ * - enabled, suppress_checks, suspend_depth are checked by _PySandbox_IsEnforced()
+ * - config and counters are frequently accessed during limit checks
+ */
 typedef struct {
+    /* === Hot fields first for cache locality === */
+
+    /* Master enable flag. 0=disabled (default), 1=active.
+       When disabled, sandbox limits are not enforced even if configured. */
+    int enabled;
+
+    /* Recursion prevention - nonzero during limit check (to avoid recursive
+       checks when error handling creates strings/integers) */
+    int suppress_checks;
+
+    /* Suspend depth counter - when > 0, all limits are bypassed.
+       Use PySandbox_Suspend/Resume for nested suspend/resume. */
+    int suspend_depth;
+
+    /* Configuration and counters - frequently accessed */
     _PySandboxConfig config;
     _PySandboxCounters counters;
+
+    /* === Less frequently accessed fields === */
+
     _PyObjectCreationHook creation_hook;
     int frozen_mode;  /* 1 = global freeze active (block all attr mutations), 0 = normal */
     int auto_mutable;  /* 1 = auto-mark created objects as mutable within scope, 0 = off */
@@ -241,26 +265,19 @@ typedef struct {
      * NULL when not in use (lazy-initialized). */
     PyObject *mutable_objects;
     PyObject *frozen_objects;
-
-    /* Recursion prevention - nonzero during limit check (to avoid recursive
-       checks when error handling creates strings/integers) */
-    int suppress_checks;
-
-    /* Suspend depth counter - when > 0, all limits are bypassed.
-       Use PySandbox_Suspend/Resume for nested suspend/resume. */
-    int suspend_depth;
-
-    /* Master enable flag. 0=disabled (default), 1=active.
-       When disabled, sandbox limits are not enforced even if configured. */
-    int enabled;
 } _PySandboxState;
 
 #define _PySandboxState_INIT {              \
+    /* Hot fields first */                  \
+    .enabled = 0,                           \
+    .suppress_checks = 0,                   \
+    .suspend_depth = 0,                     \
     .config = _PySandboxConfig_INIT,        \
     .counters = _PySandboxCounters_INIT,    \
+    /* Less frequently accessed */          \
     .creation_hook = _PyObjectCreationHook_INIT, \
     .frozen_mode = 0,                       \
-    .auto_mutable = 0,                 \
+    .auto_mutable = 0,                      \
     .opcode_restrict_mode = 0,              \
     .banned_opcodes = {{0}},                \
     .registered_filenames = NULL,           \
@@ -268,9 +285,6 @@ typedef struct {
     .allowed_modules = NULL,                \
     .mutable_objects = NULL,                \
     .frozen_objects = NULL,                 \
-    .suppress_checks = 0,                          \
-    .suspend_depth = 0,                     \
-    .enabled = 0,                           \
 }
 
 /* ============ Internal API ============ */

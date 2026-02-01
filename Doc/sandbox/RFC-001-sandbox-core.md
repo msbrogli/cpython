@@ -114,9 +114,18 @@ sys.sandbox.reset()         # Reset everything to defaults
 Located in `Include/internal/pycore_sandbox.h`:
 
 ```c
+/* Field ordering optimized for cache locality:
+ * - Hot fields (checked on every enforcement) are placed first
+ * - enabled, suppress_checks, suspend_depth are checked by _PySandbox_IsEnforced()
+ */
 typedef struct {
+    /* Hot fields first for cache locality */
+    int enabled;                        /* Master enable flag (0=disabled, 1=active) */
+    int suppress_checks;                /* Recursion prevention */
+    int suspend_depth;                  /* Suspend depth counter (nested) */
     _PySandboxConfig config;            /* Configuration values */
     _PySandboxCounters counters;        /* Runtime counters */
+    /* Less frequently accessed fields */
     _PyObjectCreationHook creation_hook;
     int frozen_mode;                    /* Global attribute freeze */
     int auto_mutable;                   /* Auto-mark new objects as mutable */
@@ -124,9 +133,9 @@ typedef struct {
     _PySandboxOpcodeSet banned_opcodes; /* 256-bit opcode bitmap */
     PyObject *registered_filenames;     /* Python set of filenames */
     PyObject *allowed_imports;          /* Python set of (module, name) tuples */
-    int suppress_checks;                /* Recursion prevention */
-    int suspend_depth;                  /* Suspend depth counter (nested) */
-    int enabled;                        /* Master enable flag (0=disabled, 1=active) */
+    PyObject *allowed_modules;          /* Python frozenset of allowed module names */
+    PyObject *mutable_objects;          /* Objects allowed mutation in frozen mode */
+    PyObject *frozen_objects;           /* Individually frozen objects */
 } _PySandboxState;
 ```
 

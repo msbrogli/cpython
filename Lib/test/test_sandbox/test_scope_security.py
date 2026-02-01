@@ -59,8 +59,8 @@ class ScopeEscapeTests(ScopedFilenameTestCase):
             self.run_scoped_code("sys.sandbox.exit_scope()")
         self.assertIn("scope", str(cm.exception).lower())
 
-    def test_set_limits_blocked_from_within_scope(self):
-        """set_limits() should be blocked when called from within scope."""
+    def test_set_config_blocked_from_within_scope(self):
+        """set_config() should be blocked when called from within scope."""
         sys.sandbox.set_config(max_list_size=100)
 
         with self.assertRaises(SandboxSecurityError) as cm:

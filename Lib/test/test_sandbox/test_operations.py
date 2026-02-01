@@ -481,8 +481,8 @@ class CountIterationsAsOperationsTests(unittest.TestCase):
             exec(code, {"__builtins__": __builtins__})
         self.assertIn("operation limit", str(ctx.exception).lower())
 
-    def test_count_iterations_as_operations_in_limits(self):
-        """Flag appears in get_limits() dict."""
+    def test_count_iterations_as_operations_in_config(self):
+        """Flag appears in get_config() dict."""
         sys.sandbox.set_config(count_iterations_as_operations=True)
         limits = sys.sandbox.get_config()
         self.assertTrue(limits["count_iterations_as_operations"])

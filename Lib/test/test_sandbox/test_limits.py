@@ -727,6 +727,52 @@ class ResetLimitsTests(unittest.TestCase):
         self.assertFalse(sys.sandbox.frozen_mode)
         self.assertFalse(sys.sandbox.auto_mutable)
 
+    def test_reset_clears_registered_filenames(self):
+        """reset() should clear registered_filenames to NULL, not just empty."""
+        # Compile code that checks in_scope() from within the scoped filename.
+        # We pass sandbox object to avoid module access restrictions.
+        sandbox = sys.sandbox
+        globs = {"sandbox": sandbox, "in_scope_result": None}
+        code = compile("in_scope_result = sandbox.in_scope()", SCOPED_FILENAME, "exec")
+
+        # Disable module access restrictions for this test
+        sys.sandbox.module_access_restrict_mode = False
+
+        # Add a filename and verify scoped code runs in scope
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        exec(code, globs)
+        self.assertTrue(globs["in_scope_result"])
+
+        # Reset (this clears registered_filenames to NULL)
+        sys.sandbox.reset()
+
+        # After reset, scoped code with same filename should NOT be in scope
+        # (registered_filenames should be NULL, not an empty set)
+        globs["in_scope_result"] = None
+        exec(code, globs)
+        self.assertFalse(globs["in_scope_result"])
+
+        # Verify we can add the filename again (internal state is clean)
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+        globs["in_scope_result"] = None
+        exec(code, globs)
+        self.assertTrue(globs["in_scope_result"])
+
+        # Cleanup
+        sys.sandbox.remove_filename(SCOPED_FILENAME)
+
+    def test_reset_clears_allowed_modules(self):
+        """reset() should clear allowed_modules to NULL."""
+        # Set allowed modules
+        sys.sandbox.allowed_modules = frozenset(["os", "sys"])
+        self.assertEqual(sys.sandbox.allowed_modules, frozenset(["os", "sys"]))
+
+        # Reset
+        sys.sandbox.reset()
+
+        # Verify allowed_modules is cleared (None)
+        self.assertIsNone(sys.sandbox.allowed_modules)
+
 
 class OutOfScopeLimitsTests(unittest.TestCase):
     """Test that limits do NOT apply outside sandbox scope."""

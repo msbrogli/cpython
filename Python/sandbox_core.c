@@ -430,8 +430,9 @@ _PySandbox_Reset(PyInterpreterState *interp)
 
     _PySandboxState *sandbox = &interp->sandbox;
 
-    /* Clear Python objects before resetting (need proper cleanup) */
-    clear_filenames(sandbox->registered_filenames);
+    /* Clear Python objects before resetting - use Py_CLEAR to set to NULL,
+       matching initial state defined by _PySandboxState_INIT */
+    Py_CLEAR(sandbox->registered_filenames);
     Py_CLEAR(sandbox->creation_hook.hook_callback);
     Py_CLEAR(sandbox->allowed_imports);
     Py_CLEAR(sandbox->allowed_modules);
@@ -460,9 +461,10 @@ _PySandbox_Reset(PyInterpreterState *interp)
     sandbox->opcode_restrict_mode = 0;
     _PySandbox_OpcodeSet_ZERO(&sandbox->banned_opcodes);
 
-    /* Update tracing state */
+    /* Reset per-thread state and update tracing */
     PyThreadState *tstate = _PyThreadState_GET();
     if (tstate != NULL) {
+        tstate->sandbox_recursion_depth = 0;
         _PyThreadState_UpdateTracingState(tstate);
     }
 }

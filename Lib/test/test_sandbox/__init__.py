@@ -30,7 +30,9 @@ Integration Tests:
 - test_attack_scenarios: Documented attack vector tests
 """
 
+import functools
 import os
+import signal
 import subprocess
 import sys
 import unittest
@@ -91,6 +93,50 @@ except NameError:
     OVERFLOW_EXCEPTIONS = (OverflowError, MemoryError)
     RUNTIME_EXCEPTIONS = (RuntimeError,)
     ALL_SANDBOX_EXCEPTIONS = ()
+
+
+# Timeout for individual test methods (seconds)
+TEST_TIMEOUT = 3
+
+
+class TestTimeoutError(Exception):
+    """Raised when a test exceeds its timeout."""
+    pass
+
+
+def timeout_test(seconds=TEST_TIMEOUT):
+    """Decorator to add timeout to a test method using signal.alarm."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if not hasattr(signal, 'SIGALRM'):
+                # SIGALRM not available (e.g., Windows), skip timeout
+                return func(*args, **kwargs)
+            def handler(signum, frame):
+                raise TestTimeoutError(
+                    f"Test {func.__name__} timed out after {seconds} seconds"
+                )
+            old_handler = signal.signal(signal.SIGALRM, handler)
+            signal.alarm(seconds)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
+        return wrapper
+    return decorator
+
+
+class TimeoutTestCase(unittest.TestCase):
+    """Base class that wraps each test method with a timeout."""
+
+    def run(self, result=None):
+        test_method = getattr(self, self._testMethodName)
+        if not getattr(test_method, '_has_timeout', False):
+            wrapped = timeout_test(TEST_TIMEOUT)(test_method)
+            wrapped._has_timeout = True
+            setattr(self, self._testMethodName, wrapped)
+        return super().run(result)
 
 
 def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
@@ -215,7 +261,7 @@ def _get_settable_limits():
     return sys.sandbox.get_limits()
 
 
-class SandboxTestCase(unittest.TestCase):
+class SandboxTestCase(TimeoutTestCase):
     """Base class for sandbox tests with common setUp/tearDown patterns.
 
     This base class handles:

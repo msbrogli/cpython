@@ -249,6 +249,10 @@ typedef struct {
     /* Suspend counter - when > 0, all limits are bypassed.
        Use PySandbox_Suspend/Resume for nested suspend/resume. */
     int suspended;
+
+    /* Master enable flag. 0=disabled (default), 1=active.
+       When disabled, sandbox limits are not enforced even if configured. */
+    int enabled;
 } _PySandboxState;
 
 #define _PySandboxState_INIT {              \
@@ -266,6 +270,7 @@ typedef struct {
     .frozen_objects = NULL,                 \
     .suppress_checks = 0,                          \
     .suspended = 0,                         \
+    .enabled = 0,                           \
 }
 
 /* ============ Internal API ============ */
@@ -423,6 +428,13 @@ PyAPI_FUNC(int) PySandbox_SetCreationHook(
 
 /* Get current object creation hook */
 PyAPI_FUNC(Py_ObjectCreationHookFunc) PySandbox_GetCreationHook(void **userdata);
+
+/* Enable/disable the sandbox (primary control).
+ * When disabled (default), sandbox limits are not enforced even if configured.
+ * Enable must be called to activate sandbox enforcement. */
+PyAPI_FUNC(void) PySandbox_Enable(void);
+PyAPI_FUNC(void) PySandbox_Disable(void);
+PyAPI_FUNC(int) PySandbox_IsEnabled(void);
 
 /* Suspend/resume sandbox limits.
  * Use these in trusted code (e.g., syscalls) to temporarily bypass limits.

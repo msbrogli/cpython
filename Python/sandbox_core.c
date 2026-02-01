@@ -332,6 +332,36 @@ _PySandbox_ResetCounters(void)
     }
 }
 
+/* ============ Enable/Disable ============ */
+
+void
+PySandbox_Enable(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp != NULL) {
+        interp->sandbox.enabled = 1;
+    }
+}
+
+void
+PySandbox_Disable(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp != NULL) {
+        interp->sandbox.enabled = 0;
+    }
+}
+
+int
+PySandbox_IsEnabled(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return 0;  /* No interpreter means not enabled */
+    }
+    return interp->sandbox.enabled;
+}
+
 /* ============ Suspend/Resume ============ */
 
 int
@@ -422,6 +452,7 @@ _PySandbox_Reset(PyInterpreterState *interp)
     /* Reset state flags */
     sandbox->suppress_checks = 0;
     sandbox->suspended = 0;
+    sandbox->enabled = 0;
 
     /* Reset modes */
     sandbox->frozen_mode = 0;

@@ -528,9 +528,21 @@ sandbox_get_suspended(_PySandboxObject *self, void *closure)
     return PyBool_FromLong(interp->sandbox.suspended > 0);
 }
 
+/* enabled: read-only bool (use enable()/disable() methods to modify) */
+static PyObject *
+sandbox_get_enabled(_PySandboxObject *self, void *closure)
+{
+    PyInterpreterState *interp = sandbox_get_interp();
+    if (interp == NULL) return NULL;
+    return PyBool_FromLong(interp->sandbox.enabled);
+}
+
 /* ============ PyGetSetDef array ============ */
 
 static PyGetSetDef sandbox_getsetters[] = {
+    /* Master enable flag (read-only, use enable()/disable() methods) */
+    {"enabled", (getter)sandbox_get_enabled,
+     NULL, "Master enable flag (read-only). Use enable()/disable() methods.", NULL},
     /* R/W Py_ssize_t */
     {"max_int_digits", (getter)sandbox_get_max_int_digits,
      (setter)sandbox_set_max_int_digits, "Max internal digit count for integers (0=no limit)", NULL},
@@ -893,6 +905,22 @@ sandbox_clear_filenames(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 }
 
 static PyObject *
+sandbox_enable_method(_PySandboxObject *self, PyObject *Py_UNUSED(args))
+{
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
+    PySandbox_Enable();
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+sandbox_disable_method(_PySandboxObject *self, PyObject *Py_UNUSED(args))
+{
+    if (_PySandbox_CheckConfigModification() < 0) return NULL;
+    PySandbox_Disable();
+    Py_RETURN_NONE;
+}
+
+static PyObject *
 sandbox_suspend_method(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
     if (_PySandbox_CheckConfigModification() < 0) return NULL;
@@ -984,6 +1012,10 @@ static PyMethodDef sandbox_methods[] = {
      "add_frame() -- Register current frame's filename for scope tracking."},
     {"clear_filenames", (PyCFunction)sandbox_clear_filenames, METH_NOARGS,
      "clear_filenames() -- Clear all registered filenames."},
+    {"enable", (PyCFunction)sandbox_enable_method, METH_NOARGS,
+     "enable() -- Enable sandbox enforcement."},
+    {"disable", (PyCFunction)sandbox_disable_method, METH_NOARGS,
+     "disable() -- Disable sandbox enforcement."},
     {"suspend", (PyCFunction)sandbox_suspend_method, METH_NOARGS,
      "suspend() -> int -- Suspend sandbox limits. Returns new suspend count."},
     {"resume", (PyCFunction)sandbox_resume_method, METH_NOARGS,

@@ -26,13 +26,16 @@ Without scope tracking, limits would apply globally, breaking legitimate operati
 
 ## Basic Usage
 
-The sandbox uses filename-based scope tracking. Code is considered "in scope" when its `co_filename` is registered:
+The sandbox uses filename-based scope tracking. Code is considered "in scope" when its `co_filename` is registered. **Important:** The sandbox must be explicitly enabled for limits to be enforced.
 
 ```python
 import sys
 
 # Register a filename for sandbox tracking
 sys.sandbox.add_filename("<sandbox>")
+
+# Enable the sandbox (disabled by default)
+sys.sandbox.enable()
 
 # Compile code with that filename
 code = compile("x = 1 + 2", "<sandbox>", "exec")
@@ -43,6 +46,8 @@ exec(code)
 # Clear scope when done
 sys.sandbox.clear_filenames()
 ```
+
+Note: `sys.sandbox.enable()` must be called before sandbox limits are enforced. By default, the sandbox is disabled even if limits are configured.
 
 ## Context Manager (Recommended)
 
@@ -121,6 +126,7 @@ typedef struct {
     PyObject *allowed_imports;          /* Python set of (module, name) tuples */
     int suppress_checks;                /* Recursion prevention */
     int suspended;                      /* Suspend count (nested) */
+    int enabled;                        /* Master enable flag (0=disabled, 1=active) */
 } _PySandboxState;
 ```
 
@@ -175,6 +181,19 @@ void _PySandbox_ClearFilenames(void);
 int _PySandbox_CheckConfigModification(void);
 ```
 
+### Enable/Disable
+
+```c
+/* Enable sandbox (set enabled=1) */
+void PySandbox_Enable(void);
+
+/* Disable sandbox (set enabled=0) */
+void PySandbox_Disable(void);
+
+/* Check if sandbox is enabled */
+int PySandbox_IsEnabled(void);
+```
+
 ### Suspend/Resume
 
 ```c
@@ -204,12 +223,15 @@ void _PySandbox_Reset(PyInterpreterState *interp);
 
 | Property | Type | Description |
 |----------|------|-------------|
+| `enabled` | bool (read-only) | Master enable flag. False=disabled (default), True=active. Use `enable()`/`disable()` methods to modify. |
 | `suspended` | bool (read-only) | True if sandbox is suspended |
 
 ### Methods
 
 | Method | Description |
 |--------|-------------|
+| `enable()` | Enable sandbox enforcement |
+| `disable()` | Disable sandbox enforcement |
 | `enter_scope()` | Add current frame's filename, reset counters |
 | `exit_scope()` | Clear all registered filenames |
 | `in_scope()` | Check if current code is in scope |

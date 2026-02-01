@@ -52,15 +52,16 @@ class SandboxLimitsTests(unittest.TestCase):
 
     def test_getsandboxlimits_returns_dict(self):
         """getsandboxlimits should return a dictionary with all limit keys."""
-        limits = sys.sandbox.get_limits()
+        limits = sys.sandbox.get_config()
         self.assertIsInstance(limits, dict)
         expected_keys = {
             'max_int_digits', 'max_str_length', 'max_bytes_length',
             'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
-            'max_iterations', 'max_operations',
+            'max_iterations', 'max_operations', 'max_recursion_depth',
             'allow_float', 'allow_complex', 'allow_dunder_access',
-            'allow_io',
-            'count_iterations_as_operations',
+            'count_iterations_as_operations', 'allow_unsafe', 'allow_io',
+            'import_restrict_mode', 'import_allow_submodules',
+            'module_access_restrict_mode', 'allow_submodules',
         }
         self.assertEqual(set(limits.keys()), expected_keys)
 
@@ -73,7 +74,7 @@ class SandboxLimitsTests(unittest.TestCase):
 
     def test_default_limits_are_zero(self):
         """Default limits should be 0 (no limit) and types allowed."""
-        limits = sys.sandbox.get_limits()
+        limits = sys.sandbox.get_config()
         self.assertEqual(limits['max_int_digits'], 0)
         self.assertEqual(limits['max_str_length'], 0)
         self.assertEqual(limits['max_bytes_length'], 0)
@@ -87,8 +88,8 @@ class SandboxLimitsTests(unittest.TestCase):
 
     def test_setsandboxlimits_updates_limits(self):
         """setsandboxlimits should update the limits."""
-        sys.sandbox.set_limits(max_int_digits=100, max_str_length=1000)
-        limits = sys.sandbox.get_limits()
+        sys.sandbox.set_config(max_int_digits=100, max_str_length=1000)
+        limits = sys.sandbox.get_config()
         self.assertEqual(limits['max_int_digits'], 100)
         self.assertEqual(limits['max_str_length'], 1000)
 
@@ -108,18 +109,18 @@ class IntegerLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_small_integers_allowed(self):
         """Small integers should always be allowed."""
-        sys.sandbox.set_limits(max_int_digits=TEST_INT_DIGITS_LIMIT)
+        sys.sandbox.set_config(max_int_digits=TEST_INT_DIGITS_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped("x = 12345")
         self.assertEqual(globs['x'], 12345)
 
     def test_large_integers_blocked(self):
         """Large integers exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_int_digits=TEST_INT_DIGITS_LIMIT)
+        sys.sandbox.set_config(max_int_digits=TEST_INT_DIGITS_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         # 10^50 requires about 6 internal digits
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -128,7 +129,7 @@ class IntegerLimitsTests(unittest.TestCase):
 
     def test_no_limit_allows_large_integers(self):
         """With no limit (0), large integers should be allowed."""
-        sys.sandbox.set_limits(max_int_digits=0)
+        sys.sandbox.set_config(max_int_digits=0)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped("x = 10 ** 100")  # Should work
         self.assertIsInstance(globs['x'], int)
@@ -145,18 +146,18 @@ class StringLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_small_strings_allowed(self):
         """Small strings should always be allowed."""
-        sys.sandbox.set_limits(max_str_length=TEST_STR_LIMIT)
+        sys.sandbox.set_config(max_str_length=TEST_STR_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped('s = "hello world"')
         self.assertEqual(globs['s'], "hello world")
 
     def test_large_strings_blocked(self):
         """Large strings exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_str_length=TEST_STR_LIMIT)
+        sys.sandbox.set_config(max_str_length=TEST_STR_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             # Use join to trigger PyUnicode_New
@@ -175,18 +176,18 @@ class ListLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_small_lists_allowed(self):
         """Small lists should always be allowed."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped("lst = [1, 2, 3, 4, 5]")
         self.assertEqual(len(globs['lst']), 5)
 
     def test_large_lists_blocked(self):
         """Large lists exceeding limit via append should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("""
@@ -208,18 +209,18 @@ class DictLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_small_dicts_allowed(self):
         """Small dicts should always be allowed."""
-        sys.sandbox.set_limits(max_dict_size=TEST_DICT_LIMIT)
+        sys.sandbox.set_config(max_dict_size=TEST_DICT_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped("d = {'a': 1, 'b': 2}")
         self.assertEqual(len(globs['d']), 2)
 
     def test_large_dicts_blocked(self):
         """Large dicts exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_dict_size=TEST_DICT_LIMIT)
+        sys.sandbox.set_config(max_dict_size=TEST_DICT_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("""
@@ -241,18 +242,18 @@ class SetLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_small_sets_allowed(self):
         """Small sets should always be allowed."""
-        sys.sandbox.set_limits(max_set_size=TEST_SET_LIMIT)
+        sys.sandbox.set_config(max_set_size=TEST_SET_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped("s = {1, 2, 3}")
         self.assertEqual(len(globs['s']), 3)
 
     def test_large_sets_blocked(self):
         """Large sets exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_set_size=TEST_SET_LIMIT)
+        sys.sandbox.set_config(max_set_size=TEST_SET_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("""
@@ -274,18 +275,18 @@ class TupleLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_small_tuples_allowed(self):
         """Small tuples should always be allowed."""
-        sys.sandbox.set_limits(max_tuple_size=TEST_TUPLE_LIMIT)
+        sys.sandbox.set_config(max_tuple_size=TEST_TUPLE_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped("t = (1, 2, 3, 4, 5)")
         self.assertEqual(len(globs['t']), 5)
 
     def test_large_tuples_blocked(self):
         """Large tuples exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_tuple_size=TEST_TUPLE_LIMIT)
+        sys.sandbox.set_config(max_tuple_size=TEST_TUPLE_LIMIT)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("t = tuple(range(600))")
@@ -303,18 +304,18 @@ class BytesLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_small_bytes_allowed(self):
         """Small bytes should always be allowed."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped("b = bytes(50)")
         self.assertEqual(len(globs['b']), 50)
 
     def test_large_bytes_blocked(self):
         """Large bytes exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("b = bytes(200)")
@@ -325,7 +326,7 @@ class BytesLimitsTests(unittest.TestCase):
 
         Note: Uses runtime variable to avoid compile-time constant folding.
         """
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("n = 200; b = b'a' * n")
@@ -343,18 +344,18 @@ class BytearrayLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_small_bytearray_allowed(self):
         """Small bytearray should always be allowed."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped("ba = bytearray(50)")
         self.assertEqual(len(globs['ba']), 50)
 
     def test_large_bytearray_creation_blocked(self):
         """Large bytearray(n) exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("ba = bytearray(200)")
@@ -362,7 +363,7 @@ class BytearrayLimitsTests(unittest.TestCase):
 
     def test_bytearray_append_blocked_at_limit(self):
         """bytearray.append() exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("""
@@ -374,7 +375,7 @@ for i in range(200):
 
     def test_bytearray_extend_blocked(self):
         """bytearray.extend() exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("ba = bytearray(); ba.extend(b'x' * 200)")
@@ -382,7 +383,7 @@ for i in range(200):
 
     def test_bytearray_multiplication_blocked(self):
         """bytearray multiplication exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("ba = bytearray(b'a') * 200")
@@ -390,7 +391,7 @@ for i in range(200):
 
     def test_bytearray_inplace_multiplication_blocked(self):
         """bytearray in-place multiplication (ba *= n) exceeding limit should raise."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("ba = bytearray(b'abc'); ba *= 50")
@@ -398,7 +399,7 @@ for i in range(200):
 
     def test_bytearray_concat_blocked(self):
         """bytearray concatenation exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("ba = bytearray(b'a' * 60) + bytearray(b'b' * 60)")
@@ -406,7 +407,7 @@ for i in range(200):
 
     def test_bytearray_inplace_concat_blocked(self):
         """bytearray in-place concatenation (ba += x) exceeding limit should raise."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("ba = bytearray(b'a' * 60); ba += b'b' * 60")
@@ -414,7 +415,7 @@ for i in range(200):
 
     def test_bytearray_from_iterable_blocked(self):
         """bytearray from iterable exceeding limit should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_bytes_length=100)
+        sys.sandbox.set_config(max_bytes_length=100)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxOverflowError) as cm:
             _run_scoped("ba = bytearray(range(200))")
@@ -422,7 +423,7 @@ for i in range(200):
 
     def test_no_limit_allows_large_bytearray(self):
         """With no limit (0), large bytearray should be allowed."""
-        sys.sandbox.set_limits(max_bytes_length=0)
+        sys.sandbox.set_config(max_bytes_length=0)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs = _run_scoped("ba = bytearray(1000)")
         self.assertEqual(len(globs['ba']), 1000)
@@ -439,7 +440,7 @@ class TypeRestrictionTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_float_allowed_by_default(self):
         """Float creation should be allowed by default."""
@@ -449,7 +450,7 @@ class TypeRestrictionTests(unittest.TestCase):
 
     def test_float_blocked_when_disabled(self):
         """Float creation should raise SandboxTypeError when disabled."""
-        sys.sandbox.set_limits(allow_float=False)
+        sys.sandbox.set_config(allow_float=False)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxTypeError) as cm:
             _run_scoped("f = float(1)")
@@ -463,7 +464,7 @@ class TypeRestrictionTests(unittest.TestCase):
 
     def test_complex_blocked_when_disabled(self):
         """Complex creation should raise SandboxTypeError when disabled."""
-        sys.sandbox.set_limits(allow_complex=False)
+        sys.sandbox.set_config(allow_complex=False)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         with self.assertRaises(SandboxTypeError) as cm:
             _run_scoped("c = complex(1, 2)")
@@ -499,7 +500,7 @@ class MinimalSafeLimitsTests(unittest.TestCase):
 
     def test_minimal_limits_allow_imports(self):
         """Minimal limits should allow standard library imports."""
-        sys.sandbox.set_limits(**self.MINIMAL_LIMITS)
+        sys.sandbox.set_config(**self.MINIMAL_LIMITS)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # These imports use internal strings, dicts, lists
@@ -513,7 +514,7 @@ import urllib.parse
 
     def test_minimal_limits_allow_basic_operations(self):
         """Minimal limits should allow basic Python operations."""
-        sys.sandbox.set_limits(**self.MINIMAL_LIMITS)
+        sys.sandbox.set_config(**self.MINIMAL_LIMITS)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Create containers within limits
@@ -530,7 +531,7 @@ t = tuple(range(1000))
 
     def test_minimal_limits_block_excessive_resources(self):
         """Minimal limits should block excessive resource usage."""
-        sys.sandbox.set_limits(**self.MINIMAL_LIMITS)
+        sys.sandbox.set_config(**self.MINIMAL_LIMITS)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Should block very large integers
@@ -556,11 +557,11 @@ class SuspendResumeLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_suspend_bypasses_limits(self):
         """Suspended limits should allow exceeding normal limits."""
-        sys.sandbox.set_limits(max_list_size=10)
+        sys.sandbox.set_config(max_list_size=10)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Should fail with limits active
@@ -577,7 +578,7 @@ class SuspendResumeLimitsTests(unittest.TestCase):
 
     def test_resume_reactivates_limits(self):
         """Resumed limits should block operations again."""
-        sys.sandbox.set_limits(max_list_size=10)
+        sys.sandbox.set_config(max_list_size=10)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         sys.sandbox.suspend()
 
@@ -595,7 +596,7 @@ class SuspendResumeLimitsTests(unittest.TestCase):
 
     def test_nested_suspend_resume(self):
         """Nested suspend/resume should work correctly."""
-        sys.sandbox.set_limits(max_list_size=10)
+        sys.sandbox.set_config(max_list_size=10)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # First suspend
@@ -651,7 +652,7 @@ class SuspendResumeLimitsTests(unittest.TestCase):
 
     def test_suspended_limits_context_manager(self):
         """suspended_limits() context manager should bypass limits."""
-        sys.sandbox.set_limits(max_list_size=5)
+        sys.sandbox.set_config(max_list_size=5)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Should fail without suspension
@@ -671,7 +672,7 @@ class SuspendResumeLimitsTests(unittest.TestCase):
 
     def test_suspended_limits_context_manager_with_exception(self):
         """suspended_limits() should restore state even on exception."""
-        sys.sandbox.set_limits(max_list_size=5)
+        sys.sandbox.set_config(max_list_size=5)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         try:
@@ -697,12 +698,12 @@ class ResetLimitsTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_reset_clears_all_state(self):
         """reset() should clear all limits, counters, and modes."""
         # Set some limits
-        sys.sandbox.set_limits(max_list_size=100, max_iterations=1000)
+        sys.sandbox.set_config(max_list_size=100, max_iterations=1000)
         sys.sandbox.frozen_mode = True
         sys.sandbox.auto_mutable = True
 
@@ -715,7 +716,7 @@ class ResetLimitsTests(unittest.TestCase):
         sys.sandbox.reset()
 
         # Verify limits cleared
-        limits = sys.sandbox.get_limits()
+        limits = sys.sandbox.get_config()
         self.assertEqual(limits['max_list_size'], 0)
         self.assertEqual(limits['max_iterations'], 0)
 
@@ -793,42 +794,166 @@ class OutOfScopeLimitsTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_int_limit_not_enforced_outside_scope(self):
         """Integer limits should not apply outside sandbox scope."""
-        sys.sandbox.set_limits(max_int_digits=TEST_INT_DIGITS_LIMIT)
+        sys.sandbox.set_config(max_int_digits=TEST_INT_DIGITS_LIMIT)
         # Should succeed - not in scope
         x = 10 ** 50
         self.assertIsInstance(x, int)
 
     def test_str_limit_not_enforced_outside_scope(self):
         """String limits should not apply outside sandbox scope."""
-        sys.sandbox.set_limits(max_str_length=TEST_STR_LIMIT)
+        sys.sandbox.set_config(max_str_length=TEST_STR_LIMIT)
         # Should succeed - not in scope
         s = ''.join(['x' for _ in range(200)])
         self.assertEqual(len(s), 200)
 
     def test_list_limit_not_enforced_outside_scope(self):
         """List limits should not apply outside sandbox scope."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
         # Should succeed - not in scope
         lst = list(range(200))
         self.assertEqual(len(lst), 200)
 
     def test_float_restriction_not_enforced_outside_scope(self):
         """Float restriction should not apply outside sandbox scope."""
-        sys.sandbox.set_limits(allow_float=False)
+        sys.sandbox.set_config(allow_float=False)
         # Should succeed - not in scope
         f = float(1)
         self.assertEqual(f, 1.0)
 
     def test_complex_restriction_not_enforced_outside_scope(self):
         """Complex restriction should not apply outside sandbox scope."""
-        sys.sandbox.set_limits(allow_complex=False)
+        sys.sandbox.set_config(allow_complex=False)
         # Should succeed - not in scope
         c = complex(1, 2)
         self.assertEqual(c, 1+2j)
+
+
+class ConfigFieldsTests(unittest.TestCase):
+    """Test that all config fields are properly exposed in get_config/set_config."""
+
+    def setUp(self):
+        sys.sandbox.enable()
+        self.original_config = sys.sandbox.get_config()
+
+    def tearDown(self):
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+        sys.sandbox.set_config(**self.original_config)
+
+    def test_max_recursion_depth_in_config(self):
+        """max_recursion_depth should be in get_config and settable via set_config."""
+        # Set via set_config
+        sys.sandbox.set_config(max_recursion_depth=50)
+        config = sys.sandbox.get_config()
+        self.assertEqual(config['max_recursion_depth'], 50)
+
+        # Reset to 0
+        sys.sandbox.set_config(max_recursion_depth=0)
+        config = sys.sandbox.get_config()
+        self.assertEqual(config['max_recursion_depth'], 0)
+
+    def test_allow_unsafe_in_config(self):
+        """allow_unsafe should be in get_config and settable via set_config."""
+        # Default should be False
+        config = sys.sandbox.get_config()
+        self.assertFalse(config['allow_unsafe'])
+
+        # Set to True
+        sys.sandbox.set_config(allow_unsafe=True)
+        config = sys.sandbox.get_config()
+        self.assertTrue(config['allow_unsafe'])
+
+    def test_import_restrict_mode_in_config(self):
+        """import_restrict_mode should be in get_config and settable via set_config."""
+        # Set to False
+        sys.sandbox.set_config(import_restrict_mode=False)
+        config = sys.sandbox.get_config()
+        self.assertFalse(config['import_restrict_mode'])
+
+        # Set to True
+        sys.sandbox.set_config(import_restrict_mode=True)
+        config = sys.sandbox.get_config()
+        self.assertTrue(config['import_restrict_mode'])
+
+    def test_import_allow_submodules_in_config(self):
+        """import_allow_submodules should be in get_config and settable via set_config."""
+        # Set to True
+        sys.sandbox.set_config(import_allow_submodules=True)
+        config = sys.sandbox.get_config()
+        self.assertTrue(config['import_allow_submodules'])
+
+        # Set to False
+        sys.sandbox.set_config(import_allow_submodules=False)
+        config = sys.sandbox.get_config()
+        self.assertFalse(config['import_allow_submodules'])
+
+    def test_module_access_restrict_mode_in_config(self):
+        """module_access_restrict_mode should be in get_config and settable via set_config."""
+        # Set to False
+        sys.sandbox.set_config(module_access_restrict_mode=False)
+        config = sys.sandbox.get_config()
+        self.assertFalse(config['module_access_restrict_mode'])
+
+        # Set to True
+        sys.sandbox.set_config(module_access_restrict_mode=True)
+        config = sys.sandbox.get_config()
+        self.assertTrue(config['module_access_restrict_mode'])
+
+    def test_allow_submodules_in_config(self):
+        """allow_submodules should be in get_config and settable via set_config."""
+        # Set to False
+        sys.sandbox.set_config(allow_submodules=False)
+        config = sys.sandbox.get_config()
+        self.assertFalse(config['allow_submodules'])
+
+        # Set to True
+        sys.sandbox.set_config(allow_submodules=True)
+        config = sys.sandbox.get_config()
+        self.assertTrue(config['allow_submodules'])
+
+    def test_set_config_bulk_update(self):
+        """set_config should support setting multiple config values at once."""
+        sys.sandbox.set_config(
+            max_int_digits=100,
+            max_str_length=1000,
+            max_recursion_depth=25,
+            allow_float=False,
+            allow_unsafe=True,
+            import_restrict_mode=False,
+            module_access_restrict_mode=False,
+        )
+        config = sys.sandbox.get_config()
+        self.assertEqual(config['max_int_digits'], 100)
+        self.assertEqual(config['max_str_length'], 1000)
+        self.assertEqual(config['max_recursion_depth'], 25)
+        self.assertFalse(config['allow_float'])
+        self.assertTrue(config['allow_unsafe'])
+        self.assertFalse(config['import_restrict_mode'])
+        self.assertFalse(config['module_access_restrict_mode'])
+
+    def test_get_config_returns_all_fields(self):
+        """get_config should return all 20 config fields."""
+        config = sys.sandbox.get_config()
+        expected_keys = {
+            # Size limits
+            'max_int_digits', 'max_str_length', 'max_bytes_length',
+            'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
+            # Scoped limits
+            'max_iterations', 'max_operations', 'max_recursion_depth',
+            # Type/access restrictions
+            'allow_float', 'allow_complex', 'allow_dunder_access',
+            'count_iterations_as_operations', 'allow_unsafe', 'allow_io',
+            # Import restrictions
+            'import_restrict_mode', 'import_allow_submodules',
+            'module_access_restrict_mode', 'allow_submodules',
+        }
+        self.assertEqual(set(config.keys()), expected_keys)
 
 
 if __name__ == '__main__':

@@ -35,8 +35,8 @@ sys.sandbox.max_int_digits = 100      # ~10^900 max
 sys.sandbox.max_str_length = 100_000  # 100KB strings
 sys.sandbox.max_list_size = 1_000_000 # 1M items
 
-# Or use set_limits() for bulk configuration
-sys.sandbox.set_limits(
+# Or use set_config() for bulk configuration
+sys.sandbox.set_config(
     max_int_digits=100,
     max_str_length=100_000,
     max_bytes_length=100_000,
@@ -81,7 +81,7 @@ import sys
 PyCF_SANDBOX_COUNT = 0x8000
 
 # Configure limits
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_iterations=100000,  # Limit iterator steps
     max_operations=50000,   # Limit AST operations (requires PyCF_SANDBOX_COUNT)
     max_recursion_depth=100, # Limit sandbox frame recursion
@@ -176,7 +176,7 @@ In-memory I/O (`StringIO`, `BytesIO`) remains allowed as it doesn't access exter
 
 ## Data Structures
 
-### `_PySandboxLimits`
+### `_PySandboxConfig`
 
 ```c
 typedef struct {
@@ -201,7 +201,7 @@ typedef struct {
     int allow_unsafe;               /* 1 = allowed, 0 = blocked */
     int allow_io;                   /* 1 = allowed, 0 = blocked (default) */
     int count_iterations_as_operations;  /* 1 = count iterations as ops */
-} _PySandboxLimits;
+} _PySandboxConfig;
 ```
 
 ### `_PySandboxCounters`
@@ -223,11 +223,11 @@ _PySandbox_CheckIntSize(Py_ssize_t ndigits)
 {
     _PYSANDBOX_CHECK_PROLOGUE(max_int_digits)
 
-    if (ndigits > limits->max_int_digits) {
+    if (ndigits > config->max_int_digits) {
         sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Integer size (%zd digits) exceeds sandbox limit (%zd digits)",
-                     ndigits, limits->max_int_digits);
+                     ndigits, config->max_int_digits);
         sandbox->suppress_checks = 0;
         return -1;
     }
@@ -238,13 +238,13 @@ _PySandbox_CheckIntSize(Py_ssize_t ndigits)
 The `_PYSANDBOX_CHECK_PROLOGUE` macro provides fast exits:
 
 ```c
-#define _PYSANDBOX_CHECK_PROLOGUE(limit_field) \
+#define _PYSANDBOX_CHECK_PROLOGUE(config_field) \
     _PySandboxState *sandbox = get_sandbox_state(); \
-    if (sandbox == NULL || sandbox->limits.limit_field == 0 || \
+    if (sandbox == NULL || sandbox->config.config_field == 0 || \
         sandbox->suppress_checks || sandbox->suspend_depth) { \
         return 0; \
     } \
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
 ```
 
 ### Size Check Functions
@@ -269,15 +269,15 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
     if (sandbox == NULL || sandbox->suspend_depth) {
         return 0;
     }
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
 
-    if (!limits->allow_float && type == &PyFloat_Type) {
+    if (!config->allow_float && type == &PyFloat_Type) {
         PyErr_SetString(PyExc_SandboxTypeError,
                         "float type is forbidden in sandbox");
         return -1;
     }
 
-    if (!limits->allow_complex && type == &PyComplex_Type) {
+    if (!config->allow_complex && type == &PyComplex_Type) {
         PyErr_SetString(PyExc_SandboxTypeError,
                         "complex type is forbidden in sandbox");
         return -1;
@@ -298,7 +298,7 @@ int
 _PySandbox_CheckScopeOperation(void)
 {
     /* ... get sandbox state ... */
-    if (limits->max_operations == 0 ||
+    if (config->max_operations == 0 ||
         sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
@@ -310,7 +310,7 @@ _PySandbox_CheckScopeOperation(void)
     counters->operation_count++;
 
     /* Single-raise: only at exactly max+1 */
-    if (counters->operation_count == limits->max_operations + 1) {
+    if (counters->operation_count == config->max_operations + 1) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox operation limit exceeded");
@@ -332,21 +332,21 @@ _PySandbox_CheckIteration(void)
     counters->iteration_count++;
 
     /* Optionally count as operations too */
-    if (limits->count_iterations_as_operations && limits->max_operations > 0) {
+    if (config->count_iterations_as_operations && config->max_operations > 0) {
         counters->operation_count++;
-        if (counters->operation_count == limits->max_operations + 1) {
+        if (counters->operation_count == config->max_operations + 1) {
             /* ... raise SandboxRuntimeError ... */
         }
     }
 
-    if (counters->iteration_count == limits->max_iterations + 1) {
+    if (counters->iteration_count == config->max_iterations + 1) {
         /* ... raise SandboxRuntimeError ... */
     }
 
     return 0;
 }
 
-    if (counters->operation_count == limits->max_operations + 1) {
+    if (counters->operation_count == config->max_operations + 1) {
         /* ... raise SandboxRuntimeError ... */
     }
 
@@ -361,7 +361,7 @@ int
 _PySandbox_CheckDunderAccess(PyObject *name)
 {
     /* ... get sandbox state ... */
-    if (sandbox->limits.allow_dunder_access ||
+    if (sandbox->config.allow_dunder_access ||
         sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
@@ -394,7 +394,7 @@ int
 _PySandbox_CheckUnsafeBlocked(const char *operation)
 {
     /* ... get sandbox state ... */
-    if (sandbox->limits.allow_unsafe ||
+    if (sandbox->config.allow_unsafe ||
         sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
@@ -416,7 +416,7 @@ int
 _PySandbox_CheckIOAllowed(const char *operation)
 {
     /* ... get sandbox state ... */
-    if (sandbox->limits.allow_io ||
+    if (sandbox->config.allow_io ||
         sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
@@ -472,8 +472,8 @@ Called from:
 
 | Method | Description |
 |--------|-------------|
-| `set_limits(**kwargs)` | Bulk update limits |
-| `get_limits()` | Return dict of all limits |
+| `set_config(**kwargs)` | Bulk update config |
+| `get_config()` | Return dict of all limits |
 | `get_counts()` | Return dict of all counters |
 | `reset_counts()` | Reset counters to 0 |
 

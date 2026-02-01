@@ -44,7 +44,7 @@ while True:
         code = '''
 import sys
 sys.sandbox.enable()
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 for _ in iter(int, 1):  # Infinite iterator
     x = 1

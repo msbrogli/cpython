@@ -84,7 +84,7 @@ print(sys.sandbox.iteration_count)  # Shows total yields
 You can unify iteration and operation counting:
 
 ```python
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_operations=100_000,
     count_iterations_as_operations=True,
 )
@@ -201,7 +201,7 @@ _PySandbox_CheckIteration(void)
     }
 
     _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
     _PySandboxCounters *counters = &sandbox->counters;
 
     if (sandbox->suppress_checks || sandbox->suspend_depth) {

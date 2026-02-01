@@ -23,7 +23,7 @@ def _run_and_count(source, max_ops=100000):
     # Disable import and module access restrictions for legacy tests
     sys.sandbox.import_restrict_mode = False
     sys.sandbox.module_access_restrict_mode = False
-    sys.sandbox.set_limits(max_operations=max_ops)
+    sys.sandbox.set_config(max_operations=max_ops)
     sys.sandbox.add_filename(SANDBOX_FILENAME)
     sys.sandbox.reset_counts()
     code = _compile_sandboxed(source)
@@ -54,7 +54,7 @@ class OperationCountingAPITests(unittest.TestCase):
 
     def test_scope_max_operations_in_limits(self):
         """scope_max_operations should appear in getsandboxlimits."""
-        limits = sys.sandbox.get_limits()
+        limits = sys.sandbox.get_config()
         self.assertIn("max_operations", limits)
         self.assertEqual(limits["max_operations"], 0)
 
@@ -65,13 +65,13 @@ class OperationCountingAPITests(unittest.TestCase):
 
     def test_set_scope_max_operations(self):
         """setsandboxlimits should accept scope_max_operations."""
-        sys.sandbox.set_limits(max_operations=500)
-        limits = sys.sandbox.get_limits()
+        sys.sandbox.set_config(max_operations=500)
+        limits = sys.sandbox.get_config()
         self.assertEqual(limits["max_operations"], 500)
 
     def test_no_counting_without_flag(self):
         """Code compiled without PyCF_SANDBOX_COUNT should not be counted."""
-        sys.sandbox.set_limits(max_operations=100000)
+        sys.sandbox.set_config(max_operations=100000)
         sys.sandbox.add_filename(SANDBOX_FILENAME)
         sys.sandbox.reset_counts()
         code = compile("a = 1\nb = 2\nc = 3", SANDBOX_FILENAME, "exec")
@@ -81,7 +81,7 @@ class OperationCountingAPITests(unittest.TestCase):
 
     def test_no_counting_without_registered_filename(self):
         """Code with unregistered filename should not be counted."""
-        sys.sandbox.set_limits(max_operations=100000)
+        sys.sandbox.set_config(max_operations=100000)
         sys.sandbox.clear_filenames()
         sys.sandbox.reset_counts()
         code = _compile_sandboxed("a = 1", "<unregistered>")
@@ -349,7 +349,7 @@ class OperationLimitTests(unittest.TestCase):
 
     def test_operation_limit_exceeded(self):
         """Exceeding scope_max_operations should raise SandboxRuntimeError."""
-        sys.sandbox.set_limits(max_operations=3)
+        sys.sandbox.set_config(max_operations=3)
         sys.sandbox.add_filename(SANDBOX_FILENAME)
         sys.sandbox.reset_counts()
 
@@ -362,7 +362,7 @@ class OperationLimitTests(unittest.TestCase):
 
     def test_operation_limit_not_exceeded(self):
         """Code within the operation limit should run normally."""
-        sys.sandbox.set_limits(max_operations=10)
+        sys.sandbox.set_config(max_operations=10)
         sys.sandbox.add_filename(SANDBOX_FILENAME)
         sys.sandbox.reset_counts()
 
@@ -375,7 +375,7 @@ class OperationLimitTests(unittest.TestCase):
     def test_operations_counting_works(self):
         """Operation counting works correctly."""
         # Set operation limit
-        sys.sandbox.set_limits(max_operations=100000)
+        sys.sandbox.set_config(max_operations=100000)
         sys.sandbox.add_filename(SANDBOX_FILENAME)
         sys.sandbox.reset_counts()
 
@@ -388,7 +388,7 @@ class OperationLimitTests(unittest.TestCase):
 
     def test_reset_clears_operation_count(self):
         """resetsandboxcounters should reset operation_count."""
-        sys.sandbox.set_limits(max_operations=100000)
+        sys.sandbox.set_config(max_operations=100000)
         sys.sandbox.add_filename(SANDBOX_FILENAME)
 
         # First exec
@@ -427,12 +427,12 @@ class CountIterationsAsOperationsTests(unittest.TestCase):
 
     def test_count_iterations_as_operations_default_off(self):
         """Flag defaults to 0; iterations don't increment operation_count."""
-        limits = sys.sandbox.get_limits()
+        limits = sys.sandbox.get_config()
         self.assertIn("count_iterations_as_operations", limits)
         self.assertFalse(limits["count_iterations_as_operations"])
 
         # With flag off, iterating should not bump operation_count
-        sys.sandbox.set_limits(max_iterations=1000, max_operations=1000)
+        sys.sandbox.set_config(max_iterations=1000, max_operations=1000)
         sys.sandbox.add_filename(self.ITER_FILENAME)
         sys.sandbox.reset_counts()
 
@@ -447,7 +447,7 @@ class CountIterationsAsOperationsTests(unittest.TestCase):
 
     def test_count_iterations_as_operations_enabled(self):
         """With flag on, each iteration yield also increments operation_count."""
-        sys.sandbox.set_limits(
+        sys.sandbox.set_config(
             max_iterations=1000,
             max_operations=1000,
             count_iterations_as_operations=True,
@@ -467,7 +467,7 @@ class CountIterationsAsOperationsTests(unittest.TestCase):
 
     def test_count_iterations_as_operations_exceeds_limit(self):
         """Low max_operations + flag on -> SandboxRuntimeError from iterations."""
-        sys.sandbox.set_limits(
+        sys.sandbox.set_config(
             max_iterations=1000,
             max_operations=3,
             count_iterations_as_operations=True,
@@ -483,12 +483,12 @@ class CountIterationsAsOperationsTests(unittest.TestCase):
 
     def test_count_iterations_as_operations_in_limits(self):
         """Flag appears in get_limits() dict."""
-        sys.sandbox.set_limits(count_iterations_as_operations=True)
-        limits = sys.sandbox.get_limits()
+        sys.sandbox.set_config(count_iterations_as_operations=True)
+        limits = sys.sandbox.get_config()
         self.assertTrue(limits["count_iterations_as_operations"])
 
-        sys.sandbox.set_limits(count_iterations_as_operations=False)
-        limits = sys.sandbox.get_limits()
+        sys.sandbox.set_config(count_iterations_as_operations=False)
+        limits = sys.sandbox.get_config()
         self.assertFalse(limits["count_iterations_as_operations"])
 
 

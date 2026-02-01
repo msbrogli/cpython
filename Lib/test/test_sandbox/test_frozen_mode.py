@@ -50,7 +50,7 @@ class FrozenModeTests(unittest.TestCase):
             sys.sandbox.remove_filename(SCOPED_FILENAME)
         except (RuntimeError, KeyError):
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     # --- Global frozen mode: get/set ---
 

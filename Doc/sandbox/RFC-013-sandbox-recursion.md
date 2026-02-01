@@ -169,15 +169,15 @@ struct _ts {
 
 ### Limit Configuration
 
-A `uint64_t max_recursion_depth` field is added to `_PySandboxLimits` (`Include/internal/pycore_sandbox.h`):
+A `uint64_t max_recursion_depth` field is added to `_PySandboxConfig` (`Include/internal/pycore_sandbox.h`):
 
 ```c
 typedef struct {
-    // ... existing limits ...
+    // ... existing config ...
     uint64_t max_operations;
     uint64_t max_recursion_depth;  /* 0 = no limit */
     // ... rest of struct ...
-} _PySandboxLimits;
+} _PySandboxConfig;
 ```
 
 ## Core Functions
@@ -253,7 +253,7 @@ Exception
 | File | Changes |
 |------|---------|
 | `Include/cpython/pystate.h` | Add `sandbox_recursion_depth` to `struct _ts` |
-| `Include/internal/pycore_sandbox.h` | Add `max_recursion_depth` to `_PySandboxLimits`, declare functions |
+| `Include/internal/pycore_sandbox.h` | Add `max_recursion_depth` to `_PySandboxConfig`, declare functions |
 | `Include/pyerrors.h` | Add `PyExc_SandboxRecursionError` |
 | `Objects/exceptions.c` | Define `SandboxRecursionError` |
 | `Python/sandbox_recursion.c` | New file with `_PySandbox_EnterFrame`, `_PySandbox_ExitFrame` |

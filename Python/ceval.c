@@ -3025,8 +3025,8 @@ handle_eval_breaker:
             PyObject *v = SECOND();
             int err;
             /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
-            if (!tstate->interp->sandbox.limits.allow_dunder_access ||
-                !tstate->interp->sandbox.limits.allow_unsafe) {
+            if (!tstate->interp->sandbox.config.allow_dunder_access ||
+                !tstate->interp->sandbox.config.allow_unsafe) {
                 if (_PySandbox_CheckDunderAccess(name) < 0) {
                     goto error;
                 }
@@ -3047,8 +3047,8 @@ handle_eval_breaker:
             PyObject *owner = POP();
             int err;
             /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
-            if (!tstate->interp->sandbox.limits.allow_dunder_access ||
-                !tstate->interp->sandbox.limits.allow_unsafe) {
+            if (!tstate->interp->sandbox.config.allow_dunder_access ||
+                !tstate->interp->sandbox.config.allow_unsafe) {
                 if (_PySandbox_CheckDunderAccess(name) < 0) {
                     Py_DECREF(owner);
                     goto error;
@@ -3632,8 +3632,8 @@ handle_eval_breaker:
             PyObject *name = GETITEM(names, oparg);
             PyObject *owner = TOP();
             /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
-            if (!tstate->interp->sandbox.limits.allow_dunder_access ||
-                !tstate->interp->sandbox.limits.allow_unsafe) {
+            if (!tstate->interp->sandbox.config.allow_dunder_access ||
+                !tstate->interp->sandbox.config.allow_unsafe) {
                 if (_PySandbox_CheckDunderAccess(name) < 0) {
                     goto error;
                 }
@@ -4665,8 +4665,8 @@ handle_eval_breaker:
             PyObject *meth = NULL;
 
             /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
-            if (!tstate->interp->sandbox.limits.allow_dunder_access ||
-                !tstate->interp->sandbox.limits.allow_unsafe) {
+            if (!tstate->interp->sandbox.config.allow_dunder_access ||
+                !tstate->interp->sandbox.config.allow_unsafe) {
                 if (_PySandbox_CheckDunderAccess(name) < 0) {
                     goto error;
                 }

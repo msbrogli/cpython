@@ -467,8 +467,8 @@ _PySandbox_Reset(PyInterpreterState *interp)
     Py_CLEAR(sandbox->mutable_objects);
     Py_CLEAR(sandbox->frozen_objects);
 
-    /* Reset limits and counters using default macros */
-    sandbox->limits = (_PySandboxLimits)_PySandboxLimits_INIT;
+    /* Reset config and counters using default macros */
+    sandbox->config = (_PySandboxConfig)_PySandboxConfig_INIT;
     sandbox->counters = (_PySandboxCounters)_PySandboxCounters_INIT;
 
     /* Reset creation hook (callback already cleared above) */

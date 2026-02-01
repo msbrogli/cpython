@@ -43,7 +43,7 @@ PyCF_SANDBOX_COUNT = 0x8000
 code = compile(source, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
 
 # Set deterministic limits only
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     # Deterministic execution limits
     max_operations=100_000,      # AST-based counting
     max_iterations=1_000_000,    # Iterator-based counting

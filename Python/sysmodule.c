@@ -29,7 +29,7 @@ Data members:
 #include "pycore_pymath.h"        // _PY_SHORT_FLOAT_REPR
 #include "pycore_pymem.h"         // _PyMem_SetDefaultAllocator()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
-#include "pycore_sandbox.h"       // PySandbox_SetLimits(), etc.
+#include "pycore_sandbox.h"       // PySandbox_SetConfig(), etc.
 #include "pycore_structseq.h"     // _PyStructSequence_InitType()
 #include "pycore_tuple.h"         // _PyTuple_FromArray()
 

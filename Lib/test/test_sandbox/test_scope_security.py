@@ -29,7 +29,7 @@ class ScopeEscapeTests(ScopedFilenameTestCase):
         This is a design characteristic: scope is filename-based.
         Code with unregistered filename runs without limits.
         """
-        sys.sandbox.set_limits(max_list_size=10)
+        sys.sandbox.set_config(max_list_size=10)
 
         # Code with registered filename is in scope
         with self.assertRaises(SandboxOverflowError):
@@ -43,7 +43,7 @@ class ScopeEscapeTests(ScopedFilenameTestCase):
 
     def test_code_object_exec_in_scope(self):
         """exec(code_obj) where code_obj filename is in scope should work."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
 
         # Create code object with scoped filename
         scoped_code = compile("lst = list(range(50))", self.SCOPED_FILENAME, "exec")
@@ -53,7 +53,7 @@ class ScopeEscapeTests(ScopedFilenameTestCase):
 
     def test_exit_scope_blocked_from_within(self):
         """exit_scope() should be blocked when called from within scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises(SandboxSecurityError) as cm:
             self.run_scoped_code("sys.sandbox.exit_scope()")
@@ -61,15 +61,15 @@ class ScopeEscapeTests(ScopedFilenameTestCase):
 
     def test_set_limits_blocked_from_within_scope(self):
         """set_limits() should be blocked when called from within scope."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
 
         with self.assertRaises(SandboxSecurityError) as cm:
-            self.run_scoped_code("sys.sandbox.set_limits(max_list_size=999999)")
+            self.run_scoped_code("sys.sandbox.set_config(max_list_size=999999)")
         self.assertIn("scope", str(cm.exception).lower())
 
     def test_remove_filename_blocked_from_within_scope(self):
         """remove_filename() should be blocked from within scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises(SandboxSecurityError) as cm:
             self.run_scoped_code(f"sys.sandbox.remove_filename('{self.SCOPED_FILENAME}')")
@@ -80,7 +80,7 @@ class ScopeEscapeTests(ScopedFilenameTestCase):
         This is a security feature - compile() and exec() could be used
         to generate code that bypasses sandbox restrictions.
         """
-        sys.sandbox.set_limits(max_list_size=10)
+        sys.sandbox.set_config(max_list_size=10)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("""
@@ -93,7 +93,7 @@ nested_code = compile("lst = list(range(50))", "<test>", "exec")
         This is a security feature - eval() could be used to bypass
         sandbox restrictions.
         """
-        sys.sandbox.set_limits(max_list_size=10)
+        sys.sandbox.set_config(max_list_size=10)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("""
@@ -108,28 +108,28 @@ class ScopeModificationTests(ScopedFilenameTestCase):
 
     def test_add_filename_blocked_from_scope(self):
         """add_filename() should be blocked from within scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("sys.sandbox.add_filename('<attacker_file>')")
 
     def test_reset_blocked_from_scope(self):
         """reset() should be blocked from within scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("sys.sandbox.reset()")
 
     def test_reset_counts_blocked_from_scope(self):
         """reset_counts() should be blocked from within scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("sys.sandbox.reset_counts()")
 
     def test_suspend_blocked_from_scope(self):
         """suspend() should be blocked from within scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("sys.sandbox.suspend()")
@@ -153,7 +153,7 @@ class FilenameScopeTests(SandboxTestCase):
 
     def test_multiple_filenames_in_scope(self):
         """Multiple filenames can be in scope simultaneously."""
-        sys.sandbox.set_limits(max_list_size=10)
+        sys.sandbox.set_config(max_list_size=10)
         sys.sandbox.add_filename(self.SCOPED_FILENAME)
         sys.sandbox.add_filename("<other_scope>")
 
@@ -168,7 +168,7 @@ class FilenameScopeTests(SandboxTestCase):
 
     def test_remove_filename_allows_bypass(self):
         """Removing filename from scope disables restrictions for that file."""
-        sys.sandbox.set_limits(max_list_size=10)
+        sys.sandbox.set_config(max_list_size=10)
         sys.sandbox.add_filename(self.SCOPED_FILENAME)
 
         # In scope - should fail
@@ -193,7 +193,7 @@ class SubprocessScopeTests(unittest.TestCase):
         """enter_scope() should add the current file to scope."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
 try:
     lst = list(range(50))
@@ -224,7 +224,7 @@ except SandboxSecurityError:
         """Scope restrictions should persist across function calls."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
 
 def create_large_list():
@@ -248,7 +248,7 @@ except SandboxOverflowError:
         """
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
 
 # json module operations should NOT be in scope (different filename)
@@ -272,7 +272,7 @@ class FrameBasedScopeTests(unittest.TestCase):
         """add_frame() should add current frame's filename to scope."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.add_frame()  # Adds <string> to scope
 try:
     lst = list(range(50))

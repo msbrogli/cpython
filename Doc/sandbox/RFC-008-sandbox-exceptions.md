@@ -52,7 +52,7 @@ import sys
 
 PyCF_SANDBOX_COUNT = 0x8000
 
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_int_digits=100,
     max_list_size=1000,
     max_operations=10000,

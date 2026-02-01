@@ -111,7 +111,7 @@ import sys
 import opcode
 
 # Multi-layered protection
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_operations=10000,
     allow_dunder_access=False,
 )

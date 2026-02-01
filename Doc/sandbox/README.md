@@ -23,7 +23,7 @@ This directory contains RFC-style documentation for each module of the CPython s
 import sys
 
 # Configure limits (allow_io=False and allow_unsafe=False are defaults)
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_int_digits=100,
     max_str_length=100_000,
     max_list_size=1_000_000,

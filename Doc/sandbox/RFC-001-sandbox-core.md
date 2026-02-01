@@ -115,7 +115,7 @@ Located in `Include/internal/pycore_sandbox.h`:
 
 ```c
 typedef struct {
-    _PySandboxLimits limits;            /* Configuration values */
+    _PySandboxConfig config;            /* Configuration values */
     _PySandboxCounters counters;        /* Runtime counters */
     _PyObjectCreationHook creation_hook;
     int frozen_mode;                    /* Global attribute freeze */

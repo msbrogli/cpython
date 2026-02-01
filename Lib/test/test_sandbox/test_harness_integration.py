@@ -55,7 +55,7 @@ result = y + 1
         """
         code = '''
 import sys
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 for _ in iter(int, 1):  # Infinite iterator
     x = 1
@@ -68,7 +68,7 @@ for _ in iter(int, 1):  # Infinite iterator
         """Large list creation should be blocked."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=100)
+sys.sandbox.set_config(max_list_size=100)
 sys.sandbox.enter_scope()
 huge = list(range(10000))
 '''
@@ -97,7 +97,7 @@ class MultiLimitInteractionTests(unittest.TestCase):
         """All size/execution limits active simultaneously."""
         code = '''
 import sys
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_iterations=1000,
     max_list_size=100,
     max_dict_size=100,
@@ -123,7 +123,7 @@ x = 10 ** 50  # Within int digit limit
         """One limit triggered shouldn't affect other operations."""
         code = '''
 import sys
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_list_size=10,
 )
 sys.sandbox.enter_scope()
@@ -182,7 +182,7 @@ code_obj = compile('x = 1', '<test>', 'exec')
         """open() should be blocked when allow_io=False."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_io=False)
+sys.sandbox.set_config(allow_io=False)
 sys.sandbox.enter_scope()
 f = open('/etc/passwd', 'r')
 '''

@@ -25,7 +25,7 @@ class IntegrationTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_sandbox_exec_with_all_limits(self):
         """Test running sandboxed code with all limit types."""
@@ -34,7 +34,7 @@ import sys
 sys.sandbox.enable()  # Required before entering scope
 # Disable module access restrictions for this test
 sys.sandbox.module_access_restrict_mode = False
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_int_digits=100,
     max_str_length=10000,
     max_list_size=1000,

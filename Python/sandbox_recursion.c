@@ -36,7 +36,7 @@ _PySandbox_EnterFrame(_PyInterpreterFrame *frame)
     if (!_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
-    if (sandbox->limits.max_recursion_depth == 0) {
+    if (sandbox->config.max_recursion_depth == 0) {
         return 0;
     }
     if (sandbox->registered_filenames == NULL) {
@@ -64,7 +64,7 @@ _PySandbox_EnterFrame(_PyInterpreterFrame *frame)
     tstate->sandbox_recursion_depth++;
 
     /* Check limit (use >= max+1 pattern consistent with other sandbox limits) */
-    if (tstate->sandbox_recursion_depth >= sandbox->limits.max_recursion_depth + 1) {
+    if (tstate->sandbox_recursion_depth >= sandbox->config.max_recursion_depth + 1) {
         /* Suppress checks during error handling to avoid recursion */
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRecursionError,
@@ -95,7 +95,7 @@ _PySandbox_ExitFrame(_PyInterpreterFrame *frame)
     if (!_PySandbox_IsEnforced(sandbox)) {
         return;
     }
-    if (sandbox->limits.max_recursion_depth == 0) {
+    if (sandbox->config.max_recursion_depth == 0) {
         return;
     }
     if (sandbox->registered_filenames == NULL) {

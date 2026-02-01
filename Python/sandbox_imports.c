@@ -77,7 +77,7 @@ check_has_any_submodule_entry(_PySandboxState *sandbox, PyObject *module_name)
         return 0;
     }
 
-    if (!sandbox->limits.import_allow_submodules) {
+    if (!sandbox->config.import_allow_submodules) {
         return 0;
     }
 
@@ -154,7 +154,7 @@ check_has_any_submodule_entry(_PySandboxState *sandbox, PyObject *module_name)
 static int
 check_submodule_allowed(_PySandboxState *sandbox, PyObject *abs_name)
 {
-    if (!sandbox->limits.import_allow_submodules) {
+    if (!sandbox->config.import_allow_submodules) {
         return 0;
     }
 
@@ -241,7 +241,7 @@ _PySandbox_CheckImport(PyObject *abs_name, PyObject *fromlist)
     _PySandboxState *sandbox = &tstate->interp->sandbox;
 
     /* Fast exit: mode off */
-    if (!sandbox->limits.import_restrict_mode) {
+    if (!sandbox->config.import_restrict_mode) {
         return 0;
     }
 

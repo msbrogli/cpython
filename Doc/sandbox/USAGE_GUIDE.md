@@ -37,7 +37,7 @@ The sandbox is accessed through the `sys` module. Here is a minimal example that
 import sys
 
 # 1. Set resource limits
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_list_size=10_000,
     max_str_length=10_000,
     max_iterations=100_000,
@@ -105,7 +105,7 @@ All numeric limit values default to `0`, which means no limit. You must explicit
 Control the maximum size of built-in data types:
 
 ```python
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_int_digits=100,       # Max internal digits (~9 decimal digits each)
     max_str_length=100_000,   # Max string characters
     max_bytes_length=100_000, # Max bytes length
@@ -119,7 +119,7 @@ sys.sandbox.set_limits(
 When a limit is exceeded, a `SandboxOverflowError` is raised:
 
 ```python
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 try:
     big_list = list(range(100))
 except SandboxOverflowError as e:
@@ -131,7 +131,7 @@ except SandboxOverflowError as e:
 Forbid creation of specific types:
 
 ```python
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     allow_float=False,    # Forbid float creation
     allow_complex=False,  # Forbid complex creation
 )
@@ -140,7 +140,7 @@ sys.sandbox.set_limits(
 Attempting to create a forbidden type raises `SandboxTypeError`:
 
 ```python
-sys.sandbox.set_limits(allow_float=False)
+sys.sandbox.set_config(allow_float=False)
 try:
     x = 1.0  # SandboxTypeError: float type is forbidden in sandbox
 except SandboxTypeError:
@@ -150,7 +150,7 @@ except SandboxTypeError:
 ### Reading Current Limits
 
 ```python
-limits = sys.sandbox.get_limits()
+limits = sys.sandbox.get_config()
 # Returns dict with all current limit values:
 # {'max_int_digits': 100, 'max_str_length': 100000, ...,
 #  'allow_float': True, 'allow_complex': True, 'allow_dunder_access': True}
@@ -175,7 +175,7 @@ All sandbox limits require registering filenames to determine which code is "in 
 For executing code in the current frame's context:
 
 ```python
-sys.sandbox.set_limits(max_iterations=10_000)
+sys.sandbox.set_config(max_iterations=10_000)
 
 sys.sandbox.enter_scope()  # Registers current frame's filename + resets counters
 try:
@@ -192,7 +192,7 @@ For explicit control over what code is tracked:
 ```python
 PyCF_SANDBOX_COUNT = 0x8000
 
-sys.sandbox.set_limits(max_operations=10_000)
+sys.sandbox.set_config(max_operations=10_000)
 
 # Register a virtual filename
 sys.sandbox.add_filename("<user-code>")
@@ -248,7 +248,7 @@ Prevents infinite loops and long-running code by counting AST-level operations w
 ```python
 PyCF_SANDBOX_COUNT = 0x8000
 
-sys.sandbox.set_limits(max_operations=1000)
+sys.sandbox.set_config(max_operations=1000)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -269,7 +269,7 @@ except SandboxRuntimeError as e:
 Prevents excessive iteration even through C builtins like `sum()`, `list()`, `sorted()`:
 
 ```python
-sys.sandbox.set_limits(max_iterations=10_000)
+sys.sandbox.set_config(max_iterations=10_000)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -290,7 +290,7 @@ except SandboxRuntimeError as e:
 Limits the depth of sandbox-scoped frames in the call stack to prevent stack exhaustion:
 
 ```python
-sys.sandbox.set_limits(max_recursion_depth=100)
+sys.sandbox.set_config(max_recursion_depth=100)
 sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
@@ -342,7 +342,7 @@ import sys
 
 PyCF_SANDBOX_COUNT = 0x8000
 
-sys.sandbox.set_limits(max_operations=1000)
+sys.sandbox.set_config(max_operations=1000)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -408,7 +408,7 @@ Code compiled **without** `PyCF_SANDBOX_COUNT` has zero operation counting overh
 By default, iterator steps only increment `iteration_count`. When `count_iterations_as_operations` is enabled, each iterator yield also increments `operation_count`, allowing you to enforce a single unified limit via `max_operations` for both AST-level operations and iterator steps:
 
 ```python
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_operations=10_000,
     count_iterations_as_operations=True,
 )
@@ -592,7 +592,7 @@ Block access to double-underscore (`__dunder__`) attributes from sandboxed code.
 ### Enabling Dunder Blocking
 
 ```python
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
@@ -636,7 +636,7 @@ When `allow_dunder_access=False`, certain implicit dunder operations are also re
 Dunder blocking only applies within sandbox scope. Your harness code can freely use dunder attributes:
 
 ```python
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.add_filename("<sandbox>")
 
 # Your code (not in scope) - works fine
@@ -692,7 +692,7 @@ When `allow_unsafe=False` (default), these operations are blocked in sandbox sco
 Only enable if you trust the code or have other mitigations:
 
 ```python
-sys.sandbox.set_limits(allow_unsafe=True)
+sys.sandbox.set_config(allow_unsafe=True)
 sys.sandbox.add_filename("<sandbox>")
 
 # Now compile() works
@@ -1107,7 +1107,7 @@ Temporarily bypass all sandbox limits when executing trusted code.
 ### Basic Usage
 
 ```python
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 
 # Create a large list in trusted code
 count = sys.sandbox.suspend()  # Returns 1
@@ -1188,7 +1188,7 @@ Use `sys.sandbox.scope()` for automatic scope entry/exit:
 ```python
 import sys
 
-sys.sandbox.set_limits(max_iterations=1000)
+sys.sandbox.set_config(max_iterations=1000)
 
 # Using the context manager
 with sys.sandbox.scope():
@@ -1214,7 +1214,7 @@ Use `sys.sandbox.suspended_limits()` for automatic suspend/resume:
 ```python
 import sys
 
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.add_filename("<sandbox>")
 
 # Need to create large data structure in trusted code
@@ -1239,7 +1239,7 @@ Context managers can be nested:
 ```python
 import sys
 
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_iterations=1000,
     max_list_size=100,
 )
@@ -1345,7 +1345,7 @@ Iteration and operation limits raise their exception **exactly once** on first v
 
 ```python
 PyCF_SANDBOX_COUNT = 0x8000
-sys.sandbox.set_limits(max_operations=100)
+sys.sandbox.set_config(max_operations=100)
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -1377,11 +1377,11 @@ PyCF_SANDBOX_COUNT = 0x8000
 def safe_eval(source, allowed_globals=None, max_ops=100_000):
     """Safely evaluate Python code with sandbox limits."""
     # Save original limits
-    original = sys.sandbox.get_limits()
+    original = sys.sandbox.get_config()
 
     try:
         # Configure sandbox
-        sys.sandbox.set_limits(
+        sys.sandbox.set_config(
             max_int_digits=50,
             max_str_length=50_000,
             max_bytes_length=50_000,
@@ -1426,7 +1426,7 @@ def safe_eval(source, allowed_globals=None, max_ops=100_000):
         sys.sandbox.auto_mutable = False
         sys.sandbox.frozen_mode = False
         sys.sandbox.clear_filenames()
-        sys.sandbox.set_limits(**original)
+        sys.sandbox.set_config(**original)
         sys.sandbox.reset_counts()
 
 
@@ -1446,11 +1446,11 @@ import dis
 
 def eval_expression(expr):
     """Evaluate a mathematical expression with strong restrictions."""
-    original = sys.sandbox.get_limits()
+    original = sys.sandbox.get_config()
 
     try:
         # Strict limits for expressions
-        sys.sandbox.set_limits(
+        sys.sandbox.set_config(
             max_int_digits=20,
             max_str_length=1000,
             allow_float=True,
@@ -1485,7 +1485,7 @@ def eval_expression(expr):
         sys.sandbox.opcode_restrict_mode = False
         sys.sandbox.banned_opcodes = None
         sys.sandbox.clear_filenames()
-        sys.sandbox.set_limits(**original)
+        sys.sandbox.set_config(**original)
         sys.sandbox.reset_counts()
 
 
@@ -1510,10 +1510,10 @@ class SandboxRunner:
     def run(self, tenant_id, source):
         """Run source code for a tenant, return results or error."""
         filename = f"<tenant-{tenant_id}>"
-        original = sys.sandbox.get_limits()
+        original = sys.sandbox.get_config()
 
         try:
-            sys.sandbox.set_limits(
+            sys.sandbox.set_config(
                 max_int_digits=50,
                 max_str_length=10_000,
                 max_bytes_length=10_000,
@@ -1558,7 +1558,7 @@ class SandboxRunner:
         finally:
             sys.sandbox.frozen_mode = False
             sys.sandbox.clear_filenames()
-            sys.sandbox.set_limits(**original)
+            sys.sandbox.set_config(**original)
             sys.sandbox.reset_counts()
 
 
@@ -1605,9 +1605,9 @@ exec(code)
 Always restore sandbox state, even if execution fails:
 
 ```python
-original = sys.sandbox.get_limits()
+original = sys.sandbox.get_config()
 try:
-    sys.sandbox.set_limits(...)
+    sys.sandbox.set_config(...)
     sys.sandbox.add_filename("<sandbox>")
     exec(code)
 finally:
@@ -1616,7 +1616,7 @@ finally:
     sys.sandbox.opcode_restrict_mode = False
     sys.sandbox.banned_opcodes = None
     sys.sandbox.clear_filenames()
-    sys.sandbox.set_limits(**original)
+    sys.sandbox.set_config(**original)
     sys.sandbox.reset_counts()
 ```
 
@@ -1625,7 +1625,7 @@ finally:
 C builtins like `sum()`, `list()`, `sorted()` iterate internally in C code. Use iteration limits to catch these. Operation limits provide precise AST-level counting with zero tracing overhead:
 
 ```python
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_operations=100_000,   # AST-level counting (requires PyCF_SANDBOX_COUNT)
     max_iterations=1_000_000, # Catches: sum(range(10**9))
 )
@@ -1636,7 +1636,7 @@ sys.sandbox.set_limits(
 No single limit is sufficient. Use multiple layers:
 
 ```python
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     # Data size limits
     max_list_size=100_000,
     max_str_length=100_000,
@@ -1731,7 +1731,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | **Use context managers** | `scope()` and `suspended_limits()` are cleaner and exception-safe |
 | **Mark output objects as mutable** | `set_mutable(output)` allows writing results in frozen mode |
 | **Use import restrictions** | Explicitly allow only safe modules |
-| **Save and restore limits** | `original = get_limits()` ... `set_limits(**original)` |
+| **Save and restore config** | `original = get_config()` ... `set_config(**original)` |
 
 ### Don'ts
 
@@ -1753,7 +1753,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 
 ```python
 # MISTAKE 1: Forgetting to register filename
-sys.sandbox.set_limits(max_operations=100)
+sys.sandbox.set_config(max_operations=100)
 code = compile(source, "<sandbox>", "exec", flags=0x8000)
 exec(code)  # Limits NOT enforced - filename not registered!
 
@@ -1823,7 +1823,7 @@ import sys
 import dis
 
 # Layer 1: Resource limits
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_int_digits=100,
     max_str_length=100_000,
     max_list_size=100_000,
@@ -1833,7 +1833,7 @@ sys.sandbox.set_limits(
 )
 
 # Layer 2: Type and access restrictions
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     allow_float=True,
     allow_complex=False,
     allow_dunder_access=False,
@@ -1948,7 +1948,7 @@ def create_sandbox():
     }
 
     # Configure all limits
-    sys.sandbox.set_limits(
+    sys.sandbox.set_config(
         max_int_digits=50,
         max_str_length=50_000,
         max_bytes_length=50_000,
@@ -2045,7 +2045,7 @@ def run_in_subprocess(source, timeout=5.0):
 import sys
 import json
 
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_iterations=100000,
     allow_dunder_access=False,
 )
@@ -2078,8 +2078,8 @@ except SandboxError as e:
 
 | Function | Description |
 |----------|-------------|
-| `sys.sandbox.set_limits(**kwargs)` | Set resource limits |
-| `sys.sandbox.get_limits() -> dict` | Get current limits |
+| `sys.sandbox.set_config(**kwargs)` | Set resource limits |
+| `sys.sandbox.get_config() -> dict` | Get current limits |
 | `sys.sandbox.get_counts() -> dict` | Get current counters |
 | `sys.sandbox.reset_counts()` | Reset all counters to 0 |
 
@@ -2169,7 +2169,7 @@ except SandboxError as e:
 | `SandboxSecurityError` | Security violation (I/O, unsafe ops, frame access, module access) |
 | `SandboxImportError` | Import not in allowlist |
 
-### `set_limits()` Parameters
+### `set_config()` Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|

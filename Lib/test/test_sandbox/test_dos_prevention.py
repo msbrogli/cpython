@@ -31,7 +31,7 @@ class InputBlockingTests(ScopedFilenameTestCase):
 
     def test_input_blocked_in_scope(self):
         """input() should be blocked in sandbox scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises((SandboxSecurityError, OSError)):
             self.run_scoped_code("user_input = input('Enter: ')")
@@ -57,7 +57,7 @@ class SubprocessDoSTests(unittest.TestCase):
         """
         code = '''
 import sys
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_iterations=100,
     max_list_size=100,
     max_str_length=1000,
@@ -80,7 +80,7 @@ for _ in iter(int, 1):
         """Exception handling should still work under tight limits."""
         code = '''
 import sys
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_iterations=1000,
     max_list_size=100,
 )
@@ -107,7 +107,7 @@ except ValueError as e:
         """
         code = '''
 import sys
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_iterations=100,
 )
 sys.sandbox.enter_scope()

@@ -28,7 +28,7 @@ class SandboxEscapeAttacks(unittest.TestCase):
         """Attack: Access __class__.__bases__ to escape restrictions."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.enter_scope()
 x = 1
 bases = x.__class__.__bases__  # Should raise SandboxAttributeError
@@ -41,7 +41,7 @@ bases = x.__class__.__bases__  # Should raise SandboxAttributeError
         """Attack: Use __subclasses__() to find dangerous classes."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.enter_scope()
 subs = object.__subclasses__()  # Should raise SandboxAttributeError
 '''
@@ -53,7 +53,7 @@ subs = object.__subclasses__()  # Should raise SandboxAttributeError
         """Attack: Access function.__code__ to manipulate bytecode."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.enter_scope()
 def innocent():
     pass
@@ -86,9 +86,9 @@ class ConfigManipulationAttacks(unittest.TestCase):
         """Attack: Try to disable limits from within scope."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
-sys.sandbox.set_limits(max_list_size=0)  # Should raise SandboxSecurityError
+sys.sandbox.set_config(max_list_size=0)  # Should raise SandboxSecurityError
 '''
         result = _run_sandboxed_code(code)
         self.assertNotEqual(result.returncode, 0)
@@ -98,7 +98,7 @@ sys.sandbox.set_limits(max_list_size=0)  # Should raise SandboxSecurityError
         """Attack: Try to exit scope from within scope."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
 sys.sandbox.exit_scope()  # Should raise SandboxSecurityError
 '''
@@ -110,7 +110,7 @@ sys.sandbox.exit_scope()  # Should raise SandboxSecurityError
         """Attack: Try to suspend limits from within scope."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
 sys.sandbox.suspend()  # Should raise SandboxSecurityError
 '''
@@ -126,7 +126,7 @@ class FileSystemAttacks(unittest.TestCase):
         """Attack: Try to open and read sensitive files."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_io=False)
+sys.sandbox.set_config(allow_io=False)
 sys.sandbox.enter_scope()
 f = open('/etc/passwd', 'r')  # Should raise SandboxSecurityError
 '''
@@ -138,7 +138,7 @@ f = open('/etc/passwd', 'r')  # Should raise SandboxSecurityError
         """Attack: Try to write to file system."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_io=False)
+sys.sandbox.set_config(allow_io=False)
 sys.sandbox.enter_scope()
 f = open('/tmp/sandbox_test', 'w')  # Should raise SandboxSecurityError
 '''
@@ -220,7 +220,7 @@ class MetaclassAttacks(unittest.TestCase):
         """Attack: Use metaclass __new__ to execute code at class creation."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
 
 class EvilMeta(type):
@@ -245,7 +245,7 @@ class ContainerBypassAttacks(unittest.TestCase):
         code = '''
 import sys
 large_dict = {i: i for i in range(1000)}
-sys.sandbox.set_limits(max_dict_size=10)
+sys.sandbox.set_config(max_dict_size=10)
 sys.sandbox.enter_scope()
 copied = large_dict.copy()  # Should raise SandboxOverflowError
 '''
@@ -258,7 +258,7 @@ copied = large_dict.copy()  # Should raise SandboxOverflowError
         code = '''
 import sys
 large_dict = {i: i for i in range(1000)}
-sys.sandbox.set_limits(max_dict_size=10)
+sys.sandbox.set_config(max_dict_size=10)
 sys.sandbox.enter_scope()
 d = {}
 d.update(large_dict)  # Should raise SandboxOverflowError
@@ -272,7 +272,7 @@ d.update(large_dict)  # Should raise SandboxOverflowError
         code = '''
 import sys
 large_set = set(range(1000))
-sys.sandbox.set_limits(max_set_size=10)
+sys.sandbox.set_config(max_set_size=10)
 sys.sandbox.enter_scope()
 copied = large_set.copy()  # Should raise SandboxOverflowError
 '''

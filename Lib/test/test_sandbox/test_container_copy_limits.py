@@ -34,7 +34,7 @@ class DictCopyLimitTests(ScopedFilenameTestCase):
 
     def test_dict_copy_blocks_large_source(self):
         """dict.copy() on large external dict should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         # Create large dict outside scope
         large_dict = {i: i for i in range(200)}
 
@@ -44,7 +44,7 @@ class DictCopyLimitTests(ScopedFilenameTestCase):
 
     def test_dict_copy_allows_small_source(self):
         """dict.copy() on small dict should work within limits."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         small_dict = {i: i for i in range(50)}
 
         globs = self.run_scoped_code("d = external_dict.copy()", {"external_dict": small_dict})
@@ -52,7 +52,7 @@ class DictCopyLimitTests(ScopedFilenameTestCase):
 
     def test_dict_constructor_from_large_dict(self):
         """dict(large_dict) should respect size limits."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         large_dict = {i: i for i in range(200)}
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -61,7 +61,7 @@ class DictCopyLimitTests(ScopedFilenameTestCase):
 
     def test_dict_copy_via_unpacking(self):
         """{**large_dict} should respect size limits."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         large_dict = {i: i for i in range(200)}
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -70,7 +70,7 @@ class DictCopyLimitTests(ScopedFilenameTestCase):
 
     def test_dict_comprehension_respects_limits(self):
         """Dict comprehension from external source should respect limits."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         large_items = list(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -89,7 +89,7 @@ class DictUpdateLimitTests(ScopedFilenameTestCase):
 
     def test_dict_update_from_large_dict(self):
         """d.update(large_dict) should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         large_dict = {i: i for i in range(200)}
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -101,7 +101,7 @@ d.update(external_dict)
 
     def test_dict_update_from_kwargs(self):
         """d.update(**large_dict) should respect size limits."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         # Create dict with string keys for **kwargs
         large_dict = {f"key{i}": i for i in range(200)}
 
@@ -114,7 +114,7 @@ d.update(**external_dict)
 
     def test_dict_merge_operator(self):
         """d | large_dict should respect size limits."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         large_dict = {i: i for i in range(200)}
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -126,7 +126,7 @@ result = d | external_dict
 
     def test_dict_inplace_merge(self):
         """d |= large_dict should respect size limits."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         large_dict = {i: i for i in range(200)}
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -143,7 +143,7 @@ d |= external_dict
         the same check as d[key] = value. This should be blocked when
         the dict exceeds max_dict_size.
         """
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
 
         # Test that adding items one at a time eventually hits the limit
         try:
@@ -158,7 +158,7 @@ for i in range(200):
 
     def test_dict_update_allows_within_limit(self):
         """dict.update() with small dict should work within limits."""
-        sys.sandbox.set_limits(max_dict_size=100)
+        sys.sandbox.set_config(max_dict_size=100)
         small_dict = {i: i for i in range(50)}
 
         globs = self.run_scoped_code("""
@@ -179,7 +179,7 @@ class SetCopyLimitTests(ScopedFilenameTestCase):
 
     def test_set_copy_blocks_large_source(self):
         """set.copy() on large external set should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         large_set = set(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -188,7 +188,7 @@ class SetCopyLimitTests(ScopedFilenameTestCase):
 
     def test_set_copy_allows_small_source(self):
         """set.copy() on small set should work within limits."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         small_set = set(range(50))
 
         globs = self.run_scoped_code("s = external_set.copy()", {"external_set": small_set})
@@ -196,7 +196,7 @@ class SetCopyLimitTests(ScopedFilenameTestCase):
 
     def test_frozenset_from_large_set(self):
         """frozenset(large_set) should respect size limits."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         large_set = set(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -205,7 +205,7 @@ class SetCopyLimitTests(ScopedFilenameTestCase):
 
     def test_set_constructor_from_large_iterable(self):
         """set(large_iterable) should respect size limits."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         large_list = list(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -220,7 +220,7 @@ class SetUpdateLimitTests(ScopedFilenameTestCase):
 
     def test_set_update_from_large_set(self):
         """s.update(large_set) should respect size limits."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         large_set = set(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -232,7 +232,7 @@ s.update(external_set)
 
     def test_set_union_large(self):
         """s.union(large_set) should respect size limits."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         large_set = set(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -242,7 +242,7 @@ s.update(external_set)
 
     def test_set_or_operator_large(self):
         """s | large_set should respect size limits."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         large_set = set(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -252,7 +252,7 @@ s.update(external_set)
 
     def test_set_inplace_or_large(self):
         """s |= large_set should respect size limits."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         large_set = set(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -264,7 +264,7 @@ s |= external_set
 
     def test_set_symmetric_difference_update(self):
         """s.symmetric_difference_update(large) should respect limits."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         large_set = set(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -276,7 +276,7 @@ s.symmetric_difference_update(external_set)
 
     def test_set_comprehension_respects_limits(self):
         """Set comprehension from external source should respect limits."""
-        sys.sandbox.set_limits(max_set_size=100)
+        sys.sandbox.set_config(max_set_size=100)
         large_items = list(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -291,7 +291,7 @@ class ListCopyLimitTests(ScopedFilenameTestCase):
 
     def test_list_copy_blocks_large_source(self):
         """list.copy() on large external list should raise SandboxOverflowError."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
         large_list = list(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -300,7 +300,7 @@ class ListCopyLimitTests(ScopedFilenameTestCase):
 
     def test_list_constructor_from_large_iterable(self):
         """list(large_iterable) should respect size limits."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
         large_tuple = tuple(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -309,7 +309,7 @@ class ListCopyLimitTests(ScopedFilenameTestCase):
 
     def test_list_extend_from_large_iterable(self):
         """list.extend(large_iterable) should respect size limits."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
         large_tuple = tuple(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -321,7 +321,7 @@ l.extend(external_tuple)
 
     def test_list_inplace_add_large(self):
         """l += large_list should respect size limits."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
         large_list = list(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -333,7 +333,7 @@ l += external_list
 
     def test_list_multiply_large(self):
         """list * n should respect size limits."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
 
         with self.assertRaises(SandboxOverflowError) as cm:
             self.run_scoped_code("l = [1, 2, 3] * 50")
@@ -341,7 +341,7 @@ l += external_list
 
     def test_list_inplace_multiply_large(self):
         """l *= n should respect size limits."""
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
 
         with self.assertRaises(SandboxOverflowError) as cm:
             self.run_scoped_code("""
@@ -358,7 +358,7 @@ class TupleCopyLimitTests(ScopedFilenameTestCase):
 
     def test_tuple_from_large_list(self):
         """tuple(large_list) should respect size limits."""
-        sys.sandbox.set_limits(max_tuple_size=100)
+        sys.sandbox.set_config(max_tuple_size=100)
         large_list = list(range(200))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -367,7 +367,7 @@ class TupleCopyLimitTests(ScopedFilenameTestCase):
 
     def test_tuple_multiply_large(self):
         """tuple * n should respect size limits."""
-        sys.sandbox.set_limits(max_tuple_size=100)
+        sys.sandbox.set_config(max_tuple_size=100)
 
         with self.assertRaises(SandboxOverflowError) as cm:
             self.run_scoped_code("t = (1, 2, 3) * 50")
@@ -375,7 +375,7 @@ class TupleCopyLimitTests(ScopedFilenameTestCase):
 
     def test_tuple_concat_large(self):
         """tuple + tuple should respect size limits."""
-        sys.sandbox.set_limits(max_tuple_size=100)
+        sys.sandbox.set_config(max_tuple_size=100)
         large_tuple = tuple(range(100))
 
         with self.assertRaises(SandboxOverflowError) as cm:
@@ -390,7 +390,7 @@ class SubprocessContainerTests(unittest.TestCase):
         """Test dict.copy() bypass prevention in subprocess."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_dict_size=100)
+sys.sandbox.set_config(max_dict_size=100)
 sys.sandbox.enter_scope()
 try:
     # This tests that even dicts created before scope are checked on copy
@@ -410,7 +410,7 @@ except Exception as e:
         """Test set.copy() bypass prevention in subprocess."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_set_size=100)
+sys.sandbox.set_config(max_set_size=100)
 sys.sandbox.enter_scope()
 try:
     large = set(range(200))  # Created in scope, should fail

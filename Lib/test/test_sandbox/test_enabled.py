@@ -68,7 +68,7 @@ class EnabledPropertyInteractionTests(SandboxTestCase):
         self.assertFalse(sys.sandbox.enabled)
 
         # Set some limits - this should NOT enable sandbox
-        sys.sandbox.set_limits(max_list_size=100)
+        sys.sandbox.set_config(max_list_size=100)
         self.assertFalse(sys.sandbox.enabled)  # Still disabled
 
         # Enable
@@ -76,7 +76,7 @@ class EnabledPropertyInteractionTests(SandboxTestCase):
         self.assertTrue(sys.sandbox.enabled)
 
         # Limits should still be set
-        limits = sys.sandbox.get_limits()
+        limits = sys.sandbox.get_config()
         self.assertEqual(limits['max_list_size'], 100)
 
     def test_enabled_independent_of_suspended(self):

@@ -28,7 +28,7 @@ class OperationLimitLoopTests(ScopedFilenameTestCase):
 
     def test_infinite_loop_stopped_by_operation_limit(self):
         """Infinite while loop should be stopped by operation limit."""
-        sys.sandbox.set_limits(max_operations=100)
+        sys.sandbox.set_config(max_operations=100)
 
         with self.assertRaises(SandboxRuntimeError) as cm:
             self.run_scoped_code("""
@@ -40,7 +40,7 @@ while True:
 
     def test_infinite_for_loop_stopped(self):
         """Infinite for loop (via generator) should be stopped."""
-        sys.sandbox.set_limits(max_operations=100, max_iterations=1000)
+        sys.sandbox.set_config(max_operations=100, max_iterations=1000)
 
         with self.assertRaises(SandboxRuntimeError):
             self.run_scoped_code("""
@@ -53,7 +53,7 @@ for x in infinite_gen():
 
     def test_deeply_nested_calls_stopped(self):
         """Deep recursion should be stopped by operation limit."""
-        sys.sandbox.set_limits(max_operations=100)
+        sys.sandbox.set_config(max_operations=100)
 
         with self.assertRaises((SandboxRuntimeError, RecursionError)):
             self.run_scoped_code("""
@@ -70,21 +70,21 @@ class MemoryLimitTests(ScopedFilenameTestCase):
 
     def test_large_list_blocked(self):
         """Large list creation should be blocked by size limits."""
-        sys.sandbox.set_limits(max_list_size=1000)
+        sys.sandbox.set_config(max_list_size=1000)
 
         with self.assertRaises(SandboxOverflowError):
             self.run_scoped_code("bomb = list(range(1000000))")
 
     def test_large_dict_blocked(self):
         """Large dict creation should be blocked by size limits."""
-        sys.sandbox.set_limits(max_dict_size=1000)
+        sys.sandbox.set_config(max_dict_size=1000)
 
         with self.assertRaises(SandboxOverflowError):
             self.run_scoped_code("bomb = {i: i for i in range(1000000)}")
 
     def test_large_set_blocked(self):
         """Large set creation should be blocked by size limits."""
-        sys.sandbox.set_limits(max_set_size=1000)
+        sys.sandbox.set_config(max_set_size=1000)
 
         with self.assertRaises(SandboxOverflowError):
             self.run_scoped_code("bomb = set(range(1000000))")
@@ -101,7 +101,7 @@ class CombinedOperationLimitTests(ScopedFilenameTestCase):
         Note: Operations are counted via SANDBOX_COUNT opcodes in compiled code.
         When count_iterations_as_operations=True, iterations also count.
         """
-        sys.sandbox.set_limits(
+        sys.sandbox.set_config(
             max_operations=1000,
             count_iterations_as_operations=True
         )
@@ -122,7 +122,7 @@ class IterationLimitTests(ScopedFilenameTestCase):
 
     def test_iteration_bomb_stopped(self):
         """Excessive iterations should be stopped by iteration limit."""
-        sys.sandbox.set_limits(max_iterations=1000)
+        sys.sandbox.set_config(max_iterations=1000)
 
         with self.assertRaises(SandboxRuntimeError) as cm:
             self.run_scoped_code("""
@@ -139,14 +139,14 @@ class IntegerSizeLimitTests(ScopedFilenameTestCase):
 
     def test_huge_integer_blocked(self):
         """Creating huge integers should be blocked."""
-        sys.sandbox.set_limits(max_int_digits=10)
+        sys.sandbox.set_config(max_int_digits=10)
 
         with self.assertRaises(SandboxOverflowError):
             self.run_scoped_code("huge = 10 ** 1000")
 
     def test_integer_multiplication_bomb_blocked(self):
         """Integer multiplication bomb should be blocked."""
-        sys.sandbox.set_limits(max_int_digits=10)
+        sys.sandbox.set_config(max_int_digits=10)
 
         with self.assertRaises(SandboxOverflowError):
             self.run_scoped_code("""
@@ -163,14 +163,14 @@ class StringSizeLimitTests(ScopedFilenameTestCase):
 
     def test_huge_string_blocked(self):
         """Creating huge strings should be blocked."""
-        sys.sandbox.set_limits(max_str_length=1000)
+        sys.sandbox.set_config(max_str_length=1000)
 
         with self.assertRaises(SandboxOverflowError):
             self.run_scoped_code("n = 10000; huge = 'x' * n")
 
     def test_string_multiplication_bomb_blocked(self):
         """String multiplication bomb should be blocked."""
-        sys.sandbox.set_limits(max_str_length=1000)
+        sys.sandbox.set_config(max_str_length=1000)
 
         with self.assertRaises(SandboxOverflowError):
             self.run_scoped_code("""

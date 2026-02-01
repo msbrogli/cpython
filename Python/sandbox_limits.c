@@ -16,12 +16,12 @@ _PySandbox_CheckIntSize(Py_ssize_t ndigits)
 {
     _PYSANDBOX_CHECK_PROLOGUE(max_int_digits)
 
-    if (ndigits > limits->max_int_digits) {
+    if (ndigits > config->max_int_digits) {
         /* Prevent recursive checks during error handling */
         sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Integer size (%zd digits) exceeds sandbox limit (%zd digits)",
-                     ndigits, limits->max_int_digits);
+                     ndigits, config->max_int_digits);
         sandbox->suppress_checks = 0;
         return -1;
     }
@@ -33,12 +33,12 @@ _PySandbox_CheckStrLength(Py_ssize_t length)
 {
     _PYSANDBOX_CHECK_PROLOGUE(max_str_length)
 
-    if (length > limits->max_str_length) {
+    if (length > config->max_str_length) {
         /* Prevent recursive checks during error handling */
         sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "String length (%zd) exceeds sandbox limit (%zd)",
-                     length, limits->max_str_length);
+                     length, config->max_str_length);
         sandbox->suppress_checks = 0;
         return -1;
     }
@@ -50,12 +50,12 @@ _PySandbox_CheckBytesLength(Py_ssize_t length)
 {
     _PYSANDBOX_CHECK_PROLOGUE(max_bytes_length)
 
-    if (length > limits->max_bytes_length) {
+    if (length > config->max_bytes_length) {
         /* Prevent recursive checks during error handling */
         sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Bytes length (%zd) exceeds sandbox limit (%zd)",
-                     length, limits->max_bytes_length);
+                     length, config->max_bytes_length);
         sandbox->suppress_checks = 0;
         return -1;
     }
@@ -67,11 +67,11 @@ _PySandbox_CheckListSize(Py_ssize_t size)
 {
     _PYSANDBOX_CHECK_PROLOGUE(max_list_size)
 
-    if (size > limits->max_list_size) {
+    if (size > config->max_list_size) {
         sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "List size (%zd) exceeds sandbox limit (%zd)",
-                     size, limits->max_list_size);
+                     size, config->max_list_size);
         sandbox->suppress_checks = 0;
         return -1;
     }
@@ -83,11 +83,11 @@ _PySandbox_CheckDictSize(Py_ssize_t size)
 {
     _PYSANDBOX_CHECK_PROLOGUE(max_dict_size)
 
-    if (size > limits->max_dict_size) {
+    if (size > config->max_dict_size) {
         sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Dict size (%zd) exceeds sandbox limit (%zd)",
-                     size, limits->max_dict_size);
+                     size, config->max_dict_size);
         sandbox->suppress_checks = 0;
         return -1;
     }
@@ -99,11 +99,11 @@ _PySandbox_CheckSetSize(Py_ssize_t size)
 {
     _PYSANDBOX_CHECK_PROLOGUE(max_set_size)
 
-    if (size > limits->max_set_size) {
+    if (size > config->max_set_size) {
         sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Set size (%zd) exceeds sandbox limit (%zd)",
-                     size, limits->max_set_size);
+                     size, config->max_set_size);
         sandbox->suppress_checks = 0;
         return -1;
     }
@@ -115,11 +115,11 @@ _PySandbox_CheckTupleSize(Py_ssize_t size)
 {
     _PYSANDBOX_CHECK_PROLOGUE(max_tuple_size)
 
-    if (size > limits->max_tuple_size) {
+    if (size > config->max_tuple_size) {
         sandbox->suppress_checks = 1;
         PyErr_Format(PyExc_SandboxOverflowError,
                      "Tuple size (%zd) exceeds sandbox limit (%zd)",
-                     size, limits->max_tuple_size);
+                     size, config->max_tuple_size);
         sandbox->suppress_checks = 0;
         return -1;
     }
@@ -133,10 +133,10 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
     if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
         return 0;  /* No sandbox state or not enforced */
     }
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
 
     /* Fast path: if both types are allowed, nothing to check */
-    if (limits->allow_float && limits->allow_complex) {
+    if (config->allow_float && config->allow_complex) {
         return 0;
     }
 
@@ -153,7 +153,7 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
         return 0;
     }
 
-    if (!limits->allow_float && PyType_IsSubtype(type, &PyFloat_Type)) {
+    if (!config->allow_float && PyType_IsSubtype(type, &PyFloat_Type)) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxTypeError,
                         "float type is forbidden in sandbox");
@@ -161,7 +161,7 @@ _PySandbox_CheckTypeAllowed(PyTypeObject *type)
         return -1;
     }
 
-    if (!limits->allow_complex && PyType_IsSubtype(type, &PyComplex_Type)) {
+    if (!config->allow_complex && PyType_IsSubtype(type, &PyComplex_Type)) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxTypeError,
                         "complex type is forbidden in sandbox");
@@ -192,7 +192,7 @@ int
 _PySandbox_CheckScopeOperation(void)
 {
     _PySandboxState *sandbox;
-    _PySandboxLimits *limits;
+    _PySandboxConfig *config;
 
     PyThreadState *tstate = _PyThreadState_GET();
     if (tstate == NULL || tstate->interp == NULL) {
@@ -200,8 +200,8 @@ _PySandbox_CheckScopeOperation(void)
     }
 
     int result = sandbox_scope_check_prologue(
-        tstate, tstate->interp->sandbox.limits.max_operations,
-        &sandbox, &limits);
+        tstate, tstate->interp->sandbox.config.max_operations,
+        &sandbox, &config);
     if (result <= 0) {
         return result;
     }
@@ -210,7 +210,7 @@ _PySandbox_CheckScopeOperation(void)
     _PySandbox_CounterIncrement(sandbox->counters.operation_count);
 
     /* Check limit - only raise error ONCE at exactly max+1 to allow error handling */
-    if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= limits->max_operations + 1) {
+    if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= config->max_operations + 1) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox operation limit exceeded");
@@ -235,7 +235,7 @@ int
 _PySandbox_CheckScopeOperationN(int count)
 {
     _PySandboxState *sandbox;
-    _PySandboxLimits *limits;
+    _PySandboxConfig *config;
 
     if (count <= 0) {
         return 0;  /* No-op for count <= 0 */
@@ -247,8 +247,8 @@ _PySandbox_CheckScopeOperationN(int count)
     }
 
     int result = sandbox_scope_check_prologue(
-        tstate, tstate->interp->sandbox.limits.max_operations,
-        &sandbox, &limits);
+        tstate, tstate->interp->sandbox.config.max_operations,
+        &sandbox, &config);
     if (result <= 0) {
         return result;
     }
@@ -257,7 +257,7 @@ _PySandbox_CheckScopeOperationN(int count)
     _PySandbox_CounterAdd(sandbox->counters.operation_count, count);
 
     /* Check limit - only raise error ONCE when crossing max to allow error handling */
-    if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= limits->max_operations + 1) {
+    if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= config->max_operations + 1) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox operation limit exceeded");
@@ -341,11 +341,11 @@ _PySandbox_CheckDunderAccess(PyObject *name)
     if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
 
     /* Fast path: if both __iter__ and general dunder access are allowed, skip */
-    int check_iter = !limits->allow_unsafe && is_iter_dunder(name);
-    int check_dunder = !limits->allow_dunder_access && is_dunder_name(name);
+    int check_iter = !config->allow_unsafe && is_iter_dunder(name);
+    int check_dunder = !config->allow_dunder_access && is_dunder_name(name);
 
     if (!check_iter && !check_dunder) {
         return 0;
@@ -405,7 +405,7 @@ _PySandbox_CheckUnsafeBlocked(const char *operation)
     if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
-    if (sandbox->limits.allow_unsafe) {
+    if (sandbox->config.allow_unsafe) {
         return 0;  /* Unsafe operations allowed */
     }
     if (sandbox->registered_filenames == NULL) {
@@ -446,7 +446,7 @@ _PySandbox_CheckIOAllowed(const char *operation)
     if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
-    if (sandbox->limits.allow_io) {
+    if (sandbox->config.allow_io) {
         return 0;  /* I/O operations allowed */
     }
     if (sandbox->registered_filenames == NULL) {
@@ -494,7 +494,7 @@ _PySandbox_CheckModuleAccess(PyObject *module)
     }
 
     /* Fast exit if module access restriction is not enabled */
-    if (!sandbox->limits.module_access_restrict_mode) {
+    if (!sandbox->config.module_access_restrict_mode) {
         return 0;
     }
 
@@ -539,7 +539,7 @@ _PySandbox_CheckModuleAccess(PyObject *module)
 
     /* Also check base module name for submodules (e.g., "xml" for "xml.etree.ElementTree")
      * Only if allow_submodules is enabled (default). */
-    if (!allowed && sandbox->limits.allow_submodules) {
+    if (!allowed && sandbox->config.allow_submodules) {
         const char *name_str = PyUnicode_AsUTF8(mod_name);
         if (name_str) {
             const char *dot = strchr(name_str, '.');
@@ -573,7 +573,7 @@ _PySandbox_CheckModuleAccess(PyObject *module)
 /* ============ Public C API ============ */
 
 int
-PySandbox_SetLimits(
+PySandbox_SetConfig(
     Py_ssize_t max_int_digits,
     Py_ssize_t max_str_length,
     Py_ssize_t max_bytes_length,
@@ -620,20 +620,20 @@ PySandbox_SetLimits(
     }
 
     _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
-    limits->max_int_digits = max_int_digits;
-    limits->max_str_length = max_str_length;
-    limits->max_bytes_length = max_bytes_length;
-    limits->max_list_size = max_list_size;
-    limits->max_dict_size = max_dict_size;
-    limits->max_set_size = max_set_size;
-    limits->allow_float = allow_float;
+    _PySandboxConfig *config = &sandbox->config;
+    config->max_int_digits = max_int_digits;
+    config->max_str_length = max_str_length;
+    config->max_bytes_length = max_bytes_length;
+    config->max_list_size = max_list_size;
+    config->max_dict_size = max_dict_size;
+    config->max_set_size = max_set_size;
+    config->allow_float = allow_float;
 
     return 0;
 }
 
 void
-PySandbox_GetLimits(
+PySandbox_GetConfig(
     Py_ssize_t *max_int_digits,
     Py_ssize_t *max_str_length,
     Py_ssize_t *max_bytes_length,
@@ -643,13 +643,13 @@ PySandbox_GetLimits(
     int *allow_float)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
-    _PySandboxLimits *limits = (interp != NULL) ? &interp->sandbox.limits : NULL;
+    _PySandboxConfig *config = (interp != NULL) ? &interp->sandbox.config : NULL;
 
-    if (max_int_digits) *max_int_digits = limits ? limits->max_int_digits : 0;
-    if (max_str_length) *max_str_length = limits ? limits->max_str_length : 0;
-    if (max_bytes_length) *max_bytes_length = limits ? limits->max_bytes_length : 0;
-    if (max_list_size) *max_list_size = limits ? limits->max_list_size : 0;
-    if (max_dict_size) *max_dict_size = limits ? limits->max_dict_size : 0;
-    if (max_set_size) *max_set_size = limits ? limits->max_set_size : 0;
-    if (allow_float) *allow_float = limits ? limits->allow_float : 1;
+    if (max_int_digits) *max_int_digits = config ? config->max_int_digits : 0;
+    if (max_str_length) *max_str_length = config ? config->max_str_length : 0;
+    if (max_bytes_length) *max_bytes_length = config ? config->max_bytes_length : 0;
+    if (max_list_size) *max_list_size = config ? config->max_list_size : 0;
+    if (max_dict_size) *max_dict_size = config ? config->max_dict_size : 0;
+    if (max_set_size) *max_set_size = config ? config->max_set_size : 0;
+    if (allow_float) *allow_float = config ? config->allow_float : 1;
 }

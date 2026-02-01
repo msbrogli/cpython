@@ -29,7 +29,7 @@ class MetaclassBlockingTests(ScopedFilenameTestCase):
 
     def test_direct_metaclass_arg_blocked(self):
         """class Foo(metaclass=Meta) should be blocked."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises((TypeError, SandboxSecurityError)):
             self.run_scoped_code("""
@@ -46,7 +46,7 @@ class Foo(metaclass=Meta):
         When a base class has a custom metaclass, creating a subclass
         should be blocked if the metaclass is not allowed.
         """
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         # Create a class with custom metaclass outside scope
         class Meta(type):
@@ -65,7 +65,7 @@ class Foo(metaclass=Meta):
         Note: This may or may not be blocked depending on implementation.
         Documenting current behavior.
         """
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         try:
             globs = self.run_scoped_code("Foo = type('Foo', (), {'x': 1})")
@@ -77,7 +77,7 @@ class Foo(metaclass=Meta):
 
     def test_regular_class_allowed(self):
         """Regular class definition without metaclass should work."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         globs = self.run_scoped_code("""
 class Foo:
@@ -92,7 +92,7 @@ result = obj.method()
 
     def test_class_inheritance_allowed(self):
         """Regular class inheritance should work."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         globs = self.run_scoped_code("""
 class Base:
@@ -118,7 +118,7 @@ class ABCMetaclassTests(ScopedFilenameTestCase):
 
     def test_abc_abstract_class(self):
         """ABC usage - document current behavior."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         try:
             globs = self.run_scoped_code("""
@@ -153,7 +153,7 @@ class EnumMetaclassTests(ScopedFilenameTestCase):
 
     def test_enum_class(self):
         """Enum usage - document current behavior."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         try:
             globs = self.run_scoped_code("""
@@ -180,7 +180,7 @@ class SubprocessMetaclassTests(unittest.TestCase):
         """Attempt to use metaclass __new__ to escape sandbox."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
 
 try:
@@ -217,7 +217,7 @@ except Exception as e:
         """
         code = '''
 import sys
-sys.sandbox.set_limits(max_operations=10000)
+sys.sandbox.set_config(max_operations=10000)
 sys.sandbox.enter_scope()
 
 try:
@@ -245,7 +245,7 @@ except Exception as e:
         """
         code = '''
 import sys
-sys.sandbox.set_limits(max_operations=10000)
+sys.sandbox.set_config(max_operations=10000)
 sys.sandbox.enter_scope()
 
 class Foo:
@@ -279,7 +279,7 @@ class TypeBuiltinTests(ScopedFilenameTestCase):
 
     def test_type_one_arg_allowed(self):
         """type(obj) for getting type should be allowed."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         globs = self.run_scoped_code("""
 x = 42
@@ -290,7 +290,7 @@ is_int = t is int
 
     def test_isinstance_allowed(self):
         """isinstance() should work normally."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         globs = self.run_scoped_code("""
 x = 42
@@ -300,7 +300,7 @@ result = isinstance(x, int)
 
     def test_issubclass_allowed(self):
         """issubclass() should work normally."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         globs = self.run_scoped_code("""
 class Foo:

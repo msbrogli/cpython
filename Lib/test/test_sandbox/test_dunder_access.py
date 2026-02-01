@@ -13,7 +13,7 @@ class DunderAccessBlockingTests(unittest.TestCase):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
         try:
             sys.sandbox.exit_scope()
         except RuntimeError:
@@ -21,14 +21,14 @@ class DunderAccessBlockingTests(unittest.TestCase):
 
     def test_default_allows_dunder(self):
         """Default should allow dunder access."""
-        limits = sys.sandbox.get_limits()
+        limits = sys.sandbox.get_config()
         self.assertTrue(limits['allow_dunder_access'])
 
     def test_dunder_read_blocked(self):
         """Reading dunder attributes blocked when configured."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.enter_scope()
 x = {}
 try:
@@ -52,7 +52,7 @@ import sys
 # Define class BEFORE entering sandbox scope
 class Foo:
     pass
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.enter_scope()
 try:
     Foo.__doc__ = "hacked"
@@ -75,7 +75,7 @@ import sys
 # Define class BEFORE entering sandbox scope
 class Foo:
     __doc__ = "test"
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.enter_scope()
 try:
     del Foo.__doc__
@@ -98,7 +98,7 @@ import sys
 # Define class BEFORE entering sandbox scope
 class Foo:
     pass
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.enter_scope()
 Foo.bar = 42
 print("OK:", Foo.bar)
@@ -113,7 +113,7 @@ sys.exit(0)
         """Dunder access allowed outside sandbox scope."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 # NOT entering sandbox scope
 x = {}
 print("OK:", x.__class__.__name__)
@@ -128,7 +128,7 @@ sys.exit(0)
         """Dunder blocking should work with filename-based scope tracking."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.add_filename("<sandbox>")
 
 try:
@@ -152,7 +152,7 @@ except SandboxAttributeError as e:
         """Dunder access allowed when allow_dunder_access is True."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_dunder_access=True)
+sys.sandbox.set_config(allow_dunder_access=True)
 sys.sandbox.enter_scope()
 x = {}
 print("OK:", x.__class__.__name__)
@@ -170,7 +170,7 @@ import sys
 # Define class BEFORE entering sandbox scope
 class Foo:
     pass
-sys.sandbox.set_limits(allow_dunder_access=False)
+sys.sandbox.set_config(allow_dunder_access=False)
 sys.sandbox.enter_scope()
 Foo._private = 42
 print("OK:", Foo._private)

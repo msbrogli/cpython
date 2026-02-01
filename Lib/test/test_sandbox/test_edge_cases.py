@@ -33,7 +33,7 @@ class LimitBoundaryTests(SandboxTestCase):
     def test_limit_zero_allows_unlimited(self):
         """Setting limit to 0 should disable the limit (allow unlimited)."""
         # Zero means no limit
-        sys.sandbox.set_limits(max_list_size=0)
+        sys.sandbox.set_config(max_list_size=0)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         # Should succeed with any size
         globs = _run_scoped("lst = list(range(10000))")
@@ -41,7 +41,7 @@ class LimitBoundaryTests(SandboxTestCase):
 
     def test_limit_small_list_size(self):
         """Setting a small list size limit should block large lists."""
-        sys.sandbox.set_limits(max_list_size=5)
+        sys.sandbox.set_config(max_list_size=5)
         sys.sandbox.add_filename(SCOPED_FILENAME)
         # Creating a small list should work
         globs = _run_scoped("lst = [1, 2, 3]")
@@ -55,7 +55,7 @@ class LimitBoundaryTests(SandboxTestCase):
         """Setting max_iterations to 1 should allow exactly one iteration."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_iterations=1)
+sys.sandbox.set_config(max_iterations=1)
 sys.sandbox.enter_scope()
 try:
     for i in range(10):
@@ -112,7 +112,7 @@ class OverflowProtectionTests(SandboxTestCase):
     def test_set_limits_overflow_rejected(self):
         """set_limits() should reject overflow values."""
         with self.assertRaises(OverflowError):
-            sys.sandbox.set_limits(max_iterations=(2**64 - 1))
+            sys.sandbox.set_config(max_iterations=(2**64 - 1))
 
 
 class NestedScopeTests(SandboxTestCase):
@@ -133,7 +133,7 @@ class NestedScopeTests(SandboxTestCase):
         """
         code = '''
 import sys
-sys.sandbox.set_limits(max_iterations=100000, max_operations=100000)
+sys.sandbox.set_config(max_iterations=100000, max_operations=100000)
 sys.sandbox.enter_scope()
 
 # Do some work to increment counters
@@ -159,7 +159,7 @@ except SandboxSecurityError:
         code = '''
 import sys
 PyCF_SANDBOX_COUNT = 0x8000
-sys.sandbox.set_limits(max_operations=1000000)
+sys.sandbox.set_config(max_operations=1000000)
 
 # Register first filename
 sys.sandbox.add_filename("<outer>")
@@ -278,7 +278,7 @@ class SuspendedLimitsEdgeCases(SandboxTestCase):
 
     def test_deeply_nested_suspend_resume(self):
         """Many levels of suspend/resume should work correctly."""
-        sys.sandbox.set_limits(max_list_size=5)
+        sys.sandbox.set_config(max_list_size=5)
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         # Suspend 10 times

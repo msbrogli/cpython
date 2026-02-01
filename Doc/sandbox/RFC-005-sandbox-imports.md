@@ -171,7 +171,7 @@ _PySandbox_CheckImport(PyObject *abs_name, PyObject *fromlist)
     _PySandboxState *sandbox = &interp->sandbox;
 
     /* Fast exit if not in restrict mode */
-    if (!sandbox->limits.import_restrict_mode) {
+    if (!sandbox->config.import_restrict_mode) {
         return 0;
     }
 
@@ -222,7 +222,7 @@ import_is_allowed(_PySandboxState *sandbox, PyObject *abs_name, PyObject *fromli
     }
 
     /* Check submodule allowance */
-    if (sandbox->limits.import_allow_submodules) {
+    if (sandbox->config.import_allow_submodules) {
         if (check_parent_module_allowed(sandbox, abs_name)) {
             Py_DECREF(empty_str);
             return 1;

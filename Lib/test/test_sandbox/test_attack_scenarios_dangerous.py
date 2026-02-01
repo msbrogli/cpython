@@ -26,7 +26,7 @@ class MemoryExhaustionAttacks(unittest.TestCase):
         """Attack: 'x' * huge_number to exhaust memory."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_str_length=10000)
+sys.sandbox.set_config(max_str_length=10000)
 sys.sandbox.enter_scope()
 n = 10**9
 bomb = 'x' * n  # Should raise SandboxOverflowError
@@ -39,7 +39,7 @@ bomb = 'x' * n  # Should raise SandboxOverflowError
         """Attack: list(range(huge_number)) to exhaust memory."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10000)
+sys.sandbox.set_config(max_list_size=10000)
 sys.sandbox.enter_scope()
 bomb = list(range(10**8))  # Should raise SandboxOverflowError
 '''
@@ -59,7 +59,7 @@ class CPUExhaustionAttacks(unittest.TestCase):
         """
         code = '''
 import sys
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 for _ in iter(int, 1):  # Infinite iterator
     pass  # Should raise SandboxRuntimeError
@@ -75,7 +75,7 @@ for _ in iter(int, 1):  # Infinite iterator
         """
         code = '''
 import sys
-sys.sandbox.set_limits(max_recursion_depth=50)
+sys.sandbox.set_config(max_recursion_depth=50)
 sys.sandbox.enter_scope()
 def bomb():
     return bomb()

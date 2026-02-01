@@ -24,7 +24,7 @@ class SysModulesAccessTests(ScopedFilenameTestCase):
     def test_sys_modules_access_allowed_when_unrestricted(self):
         """sys.modules should be accessible when restrictions disabled."""
         sys.sandbox.module_access_restrict_mode = False
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         # Should work
         globs = self.run_scoped_code("mods = sys.modules")
@@ -33,7 +33,7 @@ class SysModulesAccessTests(ScopedFilenameTestCase):
     def test_sys_modules_blocked_when_restricted(self):
         """sys.modules access should be blocked when restrictions enabled."""
         sys.sandbox.module_access_restrict_mode = True
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises((AttributeError, SandboxSecurityError)):
             self.run_scoped_code("mods = sys.modules")
@@ -47,7 +47,7 @@ class ModuleImportRestrictionTests(ScopedFilenameTestCase):
     def test_os_import_blocked_when_restricted(self):
         """os module import should be blocked when import_restrict_mode enabled."""
         sys.sandbox.import_restrict_mode = True
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises((ImportError, SandboxSecurityError, SandboxImportError)):
             self.run_scoped_code("import os")
@@ -55,7 +55,7 @@ class ModuleImportRestrictionTests(ScopedFilenameTestCase):
     def test_os_import_allowed_when_unrestricted(self):
         """os module import should work when import_restrict_mode disabled."""
         sys.sandbox.import_restrict_mode = False
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         # Should work
         globs = self.run_scoped_code("import os")
@@ -83,7 +83,7 @@ class AllowedModulesTests(ScopedFilenameTestCase):
         """
         import json
         sys.sandbox.allowed_modules = {'json'}
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         # Pass the pre-imported module to the scoped code
         globs = self.run_scoped_code("x = json.loads('[1, 2, 3]')", {"json": json})
@@ -94,7 +94,7 @@ class AllowedModulesTests(ScopedFilenameTestCase):
         import os
         sys.sandbox.module_access_restrict_mode = True  # Enable restriction
         sys.sandbox.allowed_modules = {'json'}  # os not in allowed list
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("x = os.getcwd()", {"os": os})
@@ -151,7 +151,7 @@ subprocess.run(["echo", "pwned"])
         """open() should be blocked when allow_io is False."""
         code = '''
 import sys
-sys.sandbox.set_limits(allow_io=False)
+sys.sandbox.set_config(allow_io=False)
 sys.sandbox.enter_scope()
 # Try to open a file - should raise SandboxSecurityError
 f = open("/etc/passwd", "r")
@@ -205,7 +205,7 @@ class BuiltinFunctionRestrictionTests(ScopedFilenameTestCase):
         Note: compile() and exec() are blocked to prevent code generation
         that could bypass sandbox restrictions.
         """
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("code = compile('x = 1', '<test>', 'exec')")
@@ -216,7 +216,7 @@ class BuiltinFunctionRestrictionTests(ScopedFilenameTestCase):
         Note: eval() is blocked to prevent code execution that could
         bypass sandbox restrictions.
         """
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("result = eval('1 + 2')")

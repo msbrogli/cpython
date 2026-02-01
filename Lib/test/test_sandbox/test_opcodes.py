@@ -92,7 +92,7 @@ class OpcodeRestrictionAPITests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_get_set_opcode_restrict_mode(self):
         """Setting and getting opcode restrict mode should work."""
@@ -148,7 +148,7 @@ class OpcodeRestrictionEnforcementTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     # --- yield blocked ---
 
@@ -393,7 +393,7 @@ class OpcodeRestrictionBypassTests(unittest.TestCase):
             sys.sandbox.exit_scope()
         except RuntimeError:
             pass
-        sys.sandbox.set_limits(**self.original_limits)
+        sys.sandbox.set_config(**self.original_limits)
 
     def test_not_enforced_when_mode_off(self):
         """Banned opcodes should NOT be enforced when mode is off."""

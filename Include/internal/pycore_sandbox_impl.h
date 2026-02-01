@@ -170,14 +170,14 @@ static inline int
 sandbox_scope_check_prologue(PyThreadState *tstate,
                              uint64_t max_limit,
                              _PySandboxState **sandbox_out,
-                             _PySandboxLimits **limits_out)
+                             _PySandboxConfig **config_out)
 {
     if (tstate == NULL || tstate->interp == NULL) {
         return 0;
     }
 
     _PySandboxState *sandbox = &tstate->interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
 
     /* Fast exit if sandbox not enforced (disabled, suspended, or suppressed) */
     if (!_PySandbox_IsEnforced(sandbox)) {
@@ -200,7 +200,7 @@ sandbox_scope_check_prologue(PyThreadState *tstate,
     }
 
     *sandbox_out = sandbox;
-    *limits_out = limits;
+    *config_out = config;
     return 1;
 }
 
@@ -214,14 +214,14 @@ sandbox_scope_check_prologue(PyThreadState *tstate,
  *
  * Optimized to fetch thread state only once.
  */
-#define _PYSANDBOX_CHECK_PROLOGUE(limit_field) \
+#define _PYSANDBOX_CHECK_PROLOGUE(config_field) \
     PyThreadState *_prologue_tstate = _PyThreadState_GET(); \
     if (_prologue_tstate == NULL || _prologue_tstate->interp == NULL) { return 0; } \
     _PySandboxState *sandbox = &_prologue_tstate->interp->sandbox; \
-    _PySandboxLimits *limits = &sandbox->limits; \
+    _PySandboxConfig *config = &sandbox->config; \
     /* Fast exit if sandbox not enforced */ \
     if (!_PySandbox_IsEnforced(sandbox)) { return 0; } \
-    if (limits->limit_field == 0) { \
+    if (config->config_field == 0) { \
         return 0; \
     } \
     if (sandbox->registered_filenames == NULL) { \
@@ -256,16 +256,16 @@ sandbox_check_iteration(void)
     }
 
     _PySandboxState *sandbox = &tstate->interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
 
     /* Fast exit if sandbox not enforced (disabled, suspended, or suppressed) */
     if (!_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
 
-    int check_iters = (limits->max_iterations > 0);
-    int check_ops = (limits->count_iterations_as_operations
-                     && limits->max_operations > 0);
+    int check_iters = (config->max_iterations > 0);
+    int check_ops = (config->count_iterations_as_operations
+                     && config->max_operations > 0);
 
     /* Fast exit: nothing to check */
     if (!check_iters && !check_ops) {
@@ -288,7 +288,7 @@ sandbox_check_iteration(void)
     /* Iteration counter */
     if (check_iters) {
         _PySandbox_CounterIncrement(sandbox->counters.iteration_count);
-        if (_PySandbox_CounterLoad(sandbox->counters.iteration_count) >= limits->max_iterations + 1) {
+        if (_PySandbox_CounterLoad(sandbox->counters.iteration_count) >= config->max_iterations + 1) {
             sandbox->suppress_checks = 1;
             PyErr_SetString(PyExc_SandboxRuntimeError,
                             "Sandbox iteration limit exceeded");
@@ -300,7 +300,7 @@ sandbox_check_iteration(void)
     /* Operation counter (optional, piggybacks on same scope check) */
     if (check_ops) {
         _PySandbox_CounterIncrement(sandbox->counters.operation_count);
-        if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= limits->max_operations + 1) {
+        if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= config->max_operations + 1) {
             sandbox->suppress_checks = 1;
             PyErr_SetString(PyExc_SandboxRuntimeError,
                             "Sandbox operation limit exceeded");

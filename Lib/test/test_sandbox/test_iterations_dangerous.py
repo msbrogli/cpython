@@ -45,7 +45,7 @@ class IteratorWrapperProtectionTests(unittest.TestCase):
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = list(cycle([0, 1]))  # Should hit iteration limit
@@ -69,7 +69,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = tuple(cycle([0, 1]))  # Should hit iteration limit
@@ -93,7 +93,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import count
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = set(count())  # Should hit iteration limit
@@ -117,7 +117,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import count
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = frozenset(count())  # Should hit iteration limit
@@ -141,7 +141,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = all(cycle([True]))  # Should hit iteration limit
@@ -165,7 +165,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = any(cycle([False]))  # Should hit iteration limit
@@ -189,7 +189,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     for x in cycle([0]):  # Should hit iteration limit
@@ -214,7 +214,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = list(enumerate(cycle([0])))  # Should hit iteration limit
@@ -238,7 +238,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = list(zip(cycle([0]), cycle([1])))  # Should hit iteration limit
@@ -262,7 +262,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = list(map(lambda x: x, cycle([0])))  # Should hit iteration limit
@@ -286,7 +286,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = list(filter(lambda x: True, cycle([0])))  # Should hit iteration limit
@@ -310,7 +310,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import count
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = sorted(count())  # Should hit iteration limit
@@ -334,7 +334,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = min(cycle([1, 2, 3]))  # Should hit iteration limit
@@ -358,7 +358,7 @@ except SandboxRuntimeError as e:
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=100)
+sys.sandbox.set_config(max_iterations=100)
 sys.sandbox.enter_scope()
 try:
     result = max(cycle([1, 2, 3]))  # Should hit iteration limit
@@ -381,7 +381,7 @@ except SandboxRuntimeError as e:
         code = '''
 import sys
 
-sys.sandbox.set_limits(max_iterations=1000)
+sys.sandbox.set_config(max_iterations=1000)
 sys.sandbox.enter_scope()
 try:
     # These should all work fine
@@ -409,7 +409,7 @@ except Exception as e:
         from itertools import islice, cycle
 
         # Outside sandbox scope, iteration should work without limit check
-        sys.sandbox.set_limits(max_iterations=10)
+        sys.sandbox.set_config(max_iterations=10)
         # NOT entering scope
 
         # This should work even though limit is 10, because we're not in scope

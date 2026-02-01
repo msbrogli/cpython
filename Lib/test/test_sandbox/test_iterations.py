@@ -51,14 +51,14 @@ class ScopedIterationCountTests(unittest.TestCase):
 
     def test_set_and_get_scope_max_iterations(self):
         """Setting and getting scope_max_iterations should work."""
-        sys.sandbox.set_limits(max_iterations=50000)
-        limits = sys.sandbox.get_limits()
+        sys.sandbox.set_config(max_iterations=50000)
+        limits = sys.sandbox.get_config()
         self.assertEqual(limits['max_iterations'], 50000)
 
     def test_iteration_count_tracked_with_sum(self):
         """Iteration count should be tracked when using sum()."""
         from itertools import islice, cycle
-        sys.sandbox.set_limits(max_iterations=1000000)
+        sys.sandbox.set_config(max_iterations=1000000)
         sys.sandbox.reset_counts()
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
@@ -77,7 +77,7 @@ _ = sum(islice(cycle([1, 2, 3]), 100))
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=1000)
+sys.sandbox.set_config(max_iterations=1000)
 sys.sandbox.reset_counts()
 sys.sandbox.enter_scope()
 try:
@@ -101,7 +101,7 @@ except Exception as e:
     def test_normal_iteration_within_limit_works(self):
         """Normal iteration within limits should work fine."""
         from itertools import islice, cycle
-        sys.sandbox.set_limits(max_iterations=1000000)
+        sys.sandbox.set_config(max_iterations=1000000)
         sys.sandbox.reset_counts()
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
@@ -119,7 +119,7 @@ result = sum(islice(cycle([1, 2, 3]), 999))
 import sys
 from itertools import cycle
 
-sys.sandbox.set_limits(max_iterations=500)
+sys.sandbox.set_config(max_iterations=500)
 sys.sandbox.enter_scope()
 try:
     sum(cycle([0]))  # Infinite iterator
@@ -136,7 +136,7 @@ except SandboxRuntimeError:
     def test_reset_iteration_count(self):
         """resetsandboxcounters should reset scope iteration counter."""
         from itertools import islice, cycle
-        sys.sandbox.set_limits(max_iterations=1000000)
+        sys.sandbox.set_config(max_iterations=1000000)
 
         sys.sandbox.add_filename(SCOPED_FILENAME)
         _run_scoped("""
@@ -155,7 +155,7 @@ _ = sum(islice(cycle([1]), 100))
     def test_no_iteration_limit_allows_many_iterations(self):
         """With no iteration limit (0), many iterations should be allowed."""
         from itertools import islice, cycle
-        sys.sandbox.set_limits(max_iterations=0)
+        sys.sandbox.set_config(max_iterations=0)
         sys.sandbox.reset_counts()
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
@@ -174,7 +174,7 @@ result = sum(islice(cycle([1]), 10000))
         due to security restrictions.
         """
         from itertools import islice, cycle
-        sys.sandbox.set_limits(max_iterations=1000000)
+        sys.sandbox.set_config(max_iterations=1000000)
 
         # First scope with some iterations
         sys.sandbox.add_filename(SCOPED_FILENAME)

@@ -28,7 +28,7 @@ class GeneratorFrameAccessTests(ScopedFilenameTestCase):
 
     def test_gi_frame_blocked_in_scope(self):
         """generator.gi_frame access should be blocked in scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises((AttributeError, SandboxSecurityError)):
             self.run_scoped_code("""
@@ -54,7 +54,7 @@ frame = g.gi_frame
         Note: This may or may not be blocked depending on implementation.
         Documenting current behavior.
         """
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         # Test whether gi_code is accessible or blocked
         try:
@@ -77,7 +77,7 @@ has_code = code_obj is not None
         Note: gi_yieldfrom may or may not be blocked - document current behavior.
         It exposes the inner generator but not frames directly.
         """
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         # Test current behavior - gi_yieldfrom may be allowed
         try:
@@ -105,7 +105,7 @@ class CoroutineFrameAccessTests(ScopedFilenameTestCase):
 
     def test_cr_frame_blocked_in_scope(self):
         """coroutine.cr_frame access should be blocked in scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises((AttributeError, SandboxSecurityError)):
             self.run_scoped_code("""
@@ -138,7 +138,7 @@ class AsyncGeneratorFrameAccessTests(ScopedFilenameTestCase):
 
     def test_ag_frame_blocked_in_scope(self):
         """async_generator.ag_frame access should be blocked in scope."""
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         with self.assertRaises((AttributeError, SandboxSecurityError)):
             self.run_scoped_code("""
@@ -172,7 +172,7 @@ class SubprocessFrameAccessTests(unittest.TestCase):
         """Attempt to use gi_frame to access f_globals should fail."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
 
 def gen():
@@ -199,7 +199,7 @@ except Exception as e:
         """Attempt to use cr_frame to access f_locals should fail."""
         code = '''
 import sys
-sys.sandbox.set_limits(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10)
 sys.sandbox.enter_scope()
 
 async def coro():
@@ -231,7 +231,7 @@ finally:
         """
         code = '''
 import sys
-sys.sandbox.set_limits(max_operations=10000)
+sys.sandbox.set_config(max_operations=10000)
 sys.sandbox.enter_scope()
 
 try:
@@ -265,7 +265,7 @@ class FrameAttributeTests(ScopedFilenameTestCase):
 
         Note: Documenting whether sys._getframe is available in scope.
         """
-        sys.sandbox.set_limits(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000)
 
         try:
             globs = self.run_scoped_code("frame = sys._getframe(0)")

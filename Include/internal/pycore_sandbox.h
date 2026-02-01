@@ -120,7 +120,7 @@ typedef struct {
      * When allow_submodules=1 (default), allowing 'xml' also allows 'xml.etree.ElementTree'.
      * When allow_submodules=0, only exact module names in allowed_modules are allowed. */
     int allow_submodules;
-} _PySandboxLimits;
+} _PySandboxConfig;
 
 /* Sandbox counters - separated from limits for clarity */
 typedef struct {
@@ -129,7 +129,7 @@ typedef struct {
 } _PySandboxCounters;
 
 /* Default values (no limits) */
-#define _PySandboxLimits_INIT { \
+#define _PySandboxConfig_INIT { \
     .max_int_digits = 0,            \
     .max_str_length = 0,            \
     .max_bytes_length = 0,          \
@@ -205,7 +205,7 @@ typedef struct {
 
 /* Combined sandbox state */
 typedef struct {
-    _PySandboxLimits limits;
+    _PySandboxConfig config;
     _PySandboxCounters counters;
     _PyObjectCreationHook creation_hook;
     int frozen_mode;  /* 1 = global freeze active (block all attr mutations), 0 = normal */
@@ -256,7 +256,7 @@ typedef struct {
 } _PySandboxState;
 
 #define _PySandboxState_INIT {              \
-    .limits = _PySandboxLimits_INIT,        \
+    .config = _PySandboxConfig_INIT,        \
     .counters = _PySandboxCounters_INIT,    \
     .creation_hook = _PyObjectCreationHook_INIT, \
     .frozen_mode = 0,                       \
@@ -398,8 +398,8 @@ PyAPI_FUNC(PyObject *) _PySandbox_WrapIterator(PyObject *iter);
 
 /* ============ Public C API ============ */
 
-/* Set sandbox limits. Returns 0 on success, -1 on error */
-PyAPI_FUNC(int) PySandbox_SetLimits(
+/* Set sandbox config. Returns 0 on success, -1 on error */
+PyAPI_FUNC(int) PySandbox_SetConfig(
     Py_ssize_t max_int_digits,
     Py_ssize_t max_str_length,
     Py_ssize_t max_bytes_length,
@@ -409,8 +409,8 @@ PyAPI_FUNC(int) PySandbox_SetLimits(
     int allow_float
 );
 
-/* Get current sandbox limits */
-PyAPI_FUNC(void) PySandbox_GetLimits(
+/* Get current sandbox config */
+PyAPI_FUNC(void) PySandbox_GetConfig(
     Py_ssize_t *max_int_digits,
     Py_ssize_t *max_str_length,
     Py_ssize_t *max_bytes_length,

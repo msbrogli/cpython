@@ -111,7 +111,7 @@ print(sys.sandbox.operation_count)  # 7
 You can merge iteration counting into operation counting:
 
 ```python
-sys.sandbox.set_limits(
+sys.sandbox.set_config(
     max_operations=100000,
     count_iterations_as_operations=True,
 )
@@ -244,7 +244,7 @@ In `Python/ceval.c`:
 ```c
 TARGET(SANDBOX_COUNT) {
     PyInterpreterState *interp = tstate->interp;
-    if (interp->sandbox.limits.max_operations > 0 &&
+    if (interp->sandbox.config.max_operations > 0 &&
         !interp->sandbox.suspend_depth) {
         if (_PySandbox_CheckScopeOperation() < 0) {
             goto error;
@@ -273,10 +273,10 @@ _PySandbox_CheckScopeOperation(void)
     }
 
     _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
     _PySandboxCounters *counters = &sandbox->counters;
 
-    if (limits->max_operations == 0 ||
+    if (config->max_operations == 0 ||
         sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
@@ -290,7 +290,7 @@ _PySandbox_CheckScopeOperation(void)
     counters->operation_count++;
 
     /* Single-raise: only at exactly max+1 */
-    if (counters->operation_count == limits->max_operations + 1) {
+    if (counters->operation_count == config->max_operations + 1) {
         sandbox->suppress_checks = 1;
         PyErr_SetString(PyExc_SandboxRuntimeError,
                         "Sandbox operation limit exceeded");

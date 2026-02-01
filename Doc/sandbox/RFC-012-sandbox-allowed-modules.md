@@ -258,7 +258,7 @@ typedef struct {
      * When allow_submodules=1 (default), allowing 'xml' also allows 'xml.etree.ElementTree'.
      * When allow_submodules=0, only exact module names in allowed_modules are allowed. */
     int allow_submodules;
-} _PySandboxLimits;
+} _PySandboxConfig;
 ```
 
 ## Module Access Check Function
@@ -277,7 +277,7 @@ _PySandbox_CheckModuleAccess(PyObject *module)
     }
 
     /* Fast exit if module access restriction is not enabled */
-    if (!sandbox->limits.module_access_restrict_mode) {
+    if (!sandbox->config.module_access_restrict_mode) {
         return 0;
     }
 
@@ -313,7 +313,7 @@ _PySandbox_CheckModuleAccess(PyObject *module)
     int allowed = PySet_Contains(sandbox->allowed_modules, mod_name);
 
     /* Check base module name for submodules if enabled */
-    if (!allowed && sandbox->limits.allow_submodules) {
+    if (!allowed && sandbox->config.allow_submodules) {
         const char *name_str = PyUnicode_AsUTF8(mod_name);
         if (name_str) {
             const char *dot = strchr(name_str, '.');

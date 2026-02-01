@@ -334,32 +334,32 @@ sandbox_get_##attr_name(_PySandboxObject *self, void *closure)             \
 }
 
 /* ---- Py_ssize_t R/W properties (limits) ---- */
-SANDBOX_SSIZE_GETSET(max_int_digits, limits.max_int_digits)
-SANDBOX_SSIZE_GETSET(max_str_length, limits.max_str_length)
-SANDBOX_SSIZE_GETSET(max_bytes_length, limits.max_bytes_length)
-SANDBOX_SSIZE_GETSET(max_list_size, limits.max_list_size)
-SANDBOX_SSIZE_GETSET(max_dict_size, limits.max_dict_size)
-SANDBOX_SSIZE_GETSET(max_set_size, limits.max_set_size)
-SANDBOX_SSIZE_GETSET(max_tuple_size, limits.max_tuple_size)
+SANDBOX_SSIZE_GETSET(max_int_digits, config.max_int_digits)
+SANDBOX_SSIZE_GETSET(max_str_length, config.max_str_length)
+SANDBOX_SSIZE_GETSET(max_bytes_length, config.max_bytes_length)
+SANDBOX_SSIZE_GETSET(max_list_size, config.max_list_size)
+SANDBOX_SSIZE_GETSET(max_dict_size, config.max_dict_size)
+SANDBOX_SSIZE_GETSET(max_set_size, config.max_set_size)
+SANDBOX_SSIZE_GETSET(max_tuple_size, config.max_tuple_size)
 
 /* ---- uint64_t R/W properties ---- */
-SANDBOX_UINT64_GETSET(max_iterations, limits.max_iterations)
-SANDBOX_UINT64_GETSET(max_operations, limits.max_operations)
-SANDBOX_UINT64_GETSET(max_recursion_depth, limits.max_recursion_depth)
+SANDBOX_UINT64_GETSET(max_iterations, config.max_iterations)
+SANDBOX_UINT64_GETSET(max_operations, config.max_operations)
+SANDBOX_UINT64_GETSET(max_recursion_depth, config.max_recursion_depth)
 
 /* ---- bool R/W properties ---- */
-SANDBOX_BOOL_GETSET(allow_float, limits.allow_float)
-SANDBOX_BOOL_GETSET(allow_complex, limits.allow_complex)
-SANDBOX_BOOL_GETSET(allow_dunder_access, limits.allow_dunder_access)
-SANDBOX_BOOL_GETSET(count_iterations_as_operations, limits.count_iterations_as_operations)
-SANDBOX_BOOL_GETSET(allow_unsafe, limits.allow_unsafe)
-SANDBOX_BOOL_GETSET(allow_io, limits.allow_io)
+SANDBOX_BOOL_GETSET(allow_float, config.allow_float)
+SANDBOX_BOOL_GETSET(allow_complex, config.allow_complex)
+SANDBOX_BOOL_GETSET(allow_dunder_access, config.allow_dunder_access)
+SANDBOX_BOOL_GETSET(count_iterations_as_operations, config.count_iterations_as_operations)
+SANDBOX_BOOL_GETSET(allow_unsafe, config.allow_unsafe)
+SANDBOX_BOOL_GETSET(allow_io, config.allow_io)
 SANDBOX_BOOL_GETSET(frozen_mode, frozen_mode)
 SANDBOX_BOOL_GETSET(auto_mutable, auto_mutable)
-SANDBOX_BOOL_GETSET(import_restrict_mode, limits.import_restrict_mode)
-SANDBOX_BOOL_GETSET(import_allow_submodules, limits.import_allow_submodules)
-SANDBOX_BOOL_GETSET(module_access_restrict_mode, limits.module_access_restrict_mode)
-SANDBOX_BOOL_GETSET(allow_submodules, limits.allow_submodules)
+SANDBOX_BOOL_GETSET(import_restrict_mode, config.import_restrict_mode)
+SANDBOX_BOOL_GETSET(import_allow_submodules, config.import_allow_submodules)
+SANDBOX_BOOL_GETSET(module_access_restrict_mode, config.module_access_restrict_mode)
+SANDBOX_BOOL_GETSET(allow_submodules, config.allow_submodules)
 
 /* opcode_restrict_mode needs special setter to update tracing state */
 static PyObject *
@@ -616,49 +616,60 @@ static PyGetSetDef sandbox_getsetters[] = {
 /* ============ Methods ============ */
 
 static PyObject *
-sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
+sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
 {
     if (_PySandbox_CheckConfigModification() < 0) return NULL;
 
     static char *kwlist[] = {
         "max_int_digits", "max_str_length", "max_bytes_length",
         "max_list_size", "max_dict_size", "max_set_size", "max_tuple_size",
-        "max_iterations", "max_operations",
+        "max_iterations", "max_operations", "max_recursion_depth",
         "allow_float", "allow_complex", "allow_dunder_access",
-        "count_iterations_as_operations", "allow_io", NULL
+        "count_iterations_as_operations", "allow_unsafe", "allow_io",
+        "import_restrict_mode", "import_allow_submodules",
+        "module_access_restrict_mode", "allow_submodules", NULL
     };
 
     PyInterpreterState *interp = sandbox_get_interp();
     if (interp == NULL) return NULL;
     _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
 
-    /* Use sentinel values to detect which kwargs were passed */
-    Py_ssize_t max_int_digits = limits->max_int_digits;
-    Py_ssize_t max_str_length = limits->max_str_length;
-    Py_ssize_t max_bytes_length = limits->max_bytes_length;
-    Py_ssize_t max_list_size = limits->max_list_size;
-    Py_ssize_t max_dict_size = limits->max_dict_size;
-    Py_ssize_t max_set_size = limits->max_set_size;
-    Py_ssize_t max_tuple_size = limits->max_tuple_size;
-    unsigned long long max_iterations = (unsigned long long)limits->max_iterations;
-    unsigned long long max_operations = (unsigned long long)limits->max_operations;
-    int allow_float = limits->allow_float;
-    int allow_complex = limits->allow_complex;
-    int allow_dunder_access = limits->allow_dunder_access;
-    int count_iterations_as_operations = limits->count_iterations_as_operations;
-    int allow_io = limits->allow_io;
+    /* Use current values as defaults (merge semantics) */
+    Py_ssize_t max_int_digits = config->max_int_digits;
+    Py_ssize_t max_str_length = config->max_str_length;
+    Py_ssize_t max_bytes_length = config->max_bytes_length;
+    Py_ssize_t max_list_size = config->max_list_size;
+    Py_ssize_t max_dict_size = config->max_dict_size;
+    Py_ssize_t max_set_size = config->max_set_size;
+    Py_ssize_t max_tuple_size = config->max_tuple_size;
+    unsigned long long max_iterations = (unsigned long long)config->max_iterations;
+    unsigned long long max_operations = (unsigned long long)config->max_operations;
+    unsigned long long max_recursion_depth = (unsigned long long)config->max_recursion_depth;
+    int allow_float = config->allow_float;
+    int allow_complex = config->allow_complex;
+    int allow_dunder_access = config->allow_dunder_access;
+    int count_iterations_as_operations = config->count_iterations_as_operations;
+    int allow_unsafe = config->allow_unsafe;
+    int allow_io = config->allow_io;
+    int import_restrict_mode = config->import_restrict_mode;
+    int import_allow_submodules = config->import_allow_submodules;
+    int module_access_restrict_mode = config->module_access_restrict_mode;
+    int allow_submodules = config->allow_submodules;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKppppp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKpppppppppp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
                                      &max_tuple_size,
                                      &max_iterations, &max_operations,
+                                     &max_recursion_depth,
                                      &allow_float, &allow_complex,
                                      &allow_dunder_access,
                                      &count_iterations_as_operations,
-                                     &allow_io)) {
+                                     &allow_unsafe, &allow_io,
+                                     &import_restrict_mode, &import_allow_submodules,
+                                     &module_access_restrict_mode, &allow_submodules)) {
         return NULL;
     }
 
@@ -671,49 +682,66 @@ sandbox_set_limits(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
         PyErr_SetString(PyExc_OverflowError, "max_operations exceeds maximum allowed value");
         return NULL;
     }
+    if (max_recursion_depth > SANDBOX_MAX_LIMIT) {
+        PyErr_SetString(PyExc_OverflowError, "max_recursion_depth exceeds maximum allowed value");
+        return NULL;
+    }
 
-    limits->max_int_digits = max_int_digits;
-    limits->max_str_length = max_str_length;
-    limits->max_bytes_length = max_bytes_length;
-    limits->max_list_size = max_list_size;
-    limits->max_dict_size = max_dict_size;
-    limits->max_set_size = max_set_size;
-    limits->max_tuple_size = max_tuple_size;
-    limits->max_iterations = (uint64_t)max_iterations;
-    limits->max_operations = (uint64_t)max_operations;
-    limits->allow_float = allow_float;
-    limits->allow_complex = allow_complex;
-    limits->allow_dunder_access = allow_dunder_access;
-    limits->count_iterations_as_operations = count_iterations_as_operations;
-    limits->allow_io = allow_io;
+    config->max_int_digits = max_int_digits;
+    config->max_str_length = max_str_length;
+    config->max_bytes_length = max_bytes_length;
+    config->max_list_size = max_list_size;
+    config->max_dict_size = max_dict_size;
+    config->max_set_size = max_set_size;
+    config->max_tuple_size = max_tuple_size;
+    config->max_iterations = (uint64_t)max_iterations;
+    config->max_operations = (uint64_t)max_operations;
+    config->max_recursion_depth = (uint64_t)max_recursion_depth;
+    config->allow_float = allow_float;
+    config->allow_complex = allow_complex;
+    config->allow_dunder_access = allow_dunder_access;
+    config->count_iterations_as_operations = count_iterations_as_operations;
+    config->allow_unsafe = allow_unsafe;
+    config->allow_io = allow_io;
+    config->import_restrict_mode = import_restrict_mode;
+    config->import_allow_submodules = import_allow_submodules;
+    config->module_access_restrict_mode = module_access_restrict_mode;
+    config->allow_submodules = allow_submodules;
 
     Py_RETURN_NONE;
 }
 
 static PyObject *
-sandbox_get_limits(_PySandboxObject *self, PyObject *Py_UNUSED(args))
+sandbox_get_config(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
     PyInterpreterState *interp = sandbox_get_interp();
     if (interp == NULL) return NULL;
     _PySandboxState *sandbox = &interp->sandbox;
-    _PySandboxLimits *limits = &sandbox->limits;
+    _PySandboxConfig *config = &sandbox->config;
 
     return Py_BuildValue(
-        "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:O, s:O, s:O, s:O, s:O}",
-        "max_int_digits", limits->max_int_digits,
-        "max_str_length", limits->max_str_length,
-        "max_bytes_length", limits->max_bytes_length,
-        "max_list_size", limits->max_list_size,
-        "max_dict_size", limits->max_dict_size,
-        "max_set_size", limits->max_set_size,
-        "max_tuple_size", limits->max_tuple_size,
-        "max_iterations", (unsigned long long)limits->max_iterations,
-        "max_operations", (unsigned long long)limits->max_operations,
-        "allow_float", limits->allow_float ? Py_True : Py_False,
-        "allow_complex", limits->allow_complex ? Py_True : Py_False,
-        "allow_dunder_access", limits->allow_dunder_access ? Py_True : Py_False,
-        "count_iterations_as_operations", limits->count_iterations_as_operations ? Py_True : Py_False,
-        "allow_io", limits->allow_io ? Py_True : Py_False);
+        "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, "
+        "s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O}",
+        "max_int_digits", config->max_int_digits,
+        "max_str_length", config->max_str_length,
+        "max_bytes_length", config->max_bytes_length,
+        "max_list_size", config->max_list_size,
+        "max_dict_size", config->max_dict_size,
+        "max_set_size", config->max_set_size,
+        "max_tuple_size", config->max_tuple_size,
+        "max_iterations", (unsigned long long)config->max_iterations,
+        "max_operations", (unsigned long long)config->max_operations,
+        "max_recursion_depth", (unsigned long long)config->max_recursion_depth,
+        "allow_float", config->allow_float ? Py_True : Py_False,
+        "allow_complex", config->allow_complex ? Py_True : Py_False,
+        "allow_dunder_access", config->allow_dunder_access ? Py_True : Py_False,
+        "count_iterations_as_operations", config->count_iterations_as_operations ? Py_True : Py_False,
+        "allow_unsafe", config->allow_unsafe ? Py_True : Py_False,
+        "allow_io", config->allow_io ? Py_True : Py_False,
+        "import_restrict_mode", config->import_restrict_mode ? Py_True : Py_False,
+        "import_allow_submodules", config->import_allow_submodules ? Py_True : Py_False,
+        "module_access_restrict_mode", config->module_access_restrict_mode ? Py_True : Py_False,
+        "allow_submodules", config->allow_submodules ? Py_True : Py_False);
 }
 
 static PyObject *
@@ -825,7 +853,7 @@ sandbox_use_default_allowed_modules(_PySandboxObject *self, PyObject *Py_UNUSED(
 
     /* Set allowed_modules and enable restrict mode */
     Py_XSETREF(interp->sandbox.allowed_modules, frozenset);
-    interp->sandbox.limits.module_access_restrict_mode = 1;
+    interp->sandbox.config.module_access_restrict_mode = 1;
 
     Py_RETURN_NONE;
 }
@@ -985,11 +1013,11 @@ sandbox_suspended_limits_cm(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 }
 
 static PyMethodDef sandbox_methods[] = {
-    {"set_limits", _PyCFunction_CAST(sandbox_set_limits),
+    {"set_config", _PyCFunction_CAST(sandbox_set_config),
      METH_VARARGS | METH_KEYWORDS,
-     "set_limits(**kwargs) -- Update sandbox limits (merge semantics)."},
-    {"get_limits", (PyCFunction)sandbox_get_limits, METH_NOARGS,
-     "get_limits() -> dict -- Return all limit values."},
+     "set_config(**kwargs) -- Update sandbox config (merge semantics)."},
+    {"get_config", (PyCFunction)sandbox_get_config, METH_NOARGS,
+     "get_config() -> dict -- Return all config values."},
     {"get_counts", (PyCFunction)sandbox_get_counts, METH_NOARGS,
      "get_counts() -> dict -- Return all counter values."},
     {"reset_counts", (PyCFunction)sandbox_reset_counts, METH_NOARGS,

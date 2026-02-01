@@ -185,7 +185,7 @@ def run_sandboxed_subprocess(code, timeout=SUBPROCESS_TIMEOUT,
         preamble_parts.append("sys.sandbox.module_access_restrict_mode = False")
     if limits:
         limit_str = ", ".join(f"{k}={v}" for k, v in limits.items())
-        preamble_parts.append(f"sys.sandbox.set_limits({limit_str})")
+        preamble_parts.append(f"sys.sandbox.set_config({limit_str})")
 
     preamble = "\n".join(preamble_parts) + "\n"
 
@@ -250,7 +250,7 @@ sys.sandbox.enable()
 sys.sandbox.import_restrict_mode = False
 sys.sandbox.module_access_restrict_mode = False
 {extra_setup}
-sys.sandbox.set_limits({limit_name}={limit_value})
+sys.sandbox.set_config({limit_name}={limit_value})
 sys.sandbox.enter_scope()
 {test_code}
 '''
@@ -263,7 +263,7 @@ def _get_settable_limits():
     Also enables sandbox - tests that save limits usually need sandbox enabled.
     """
     sys.sandbox.enable()
-    return sys.sandbox.get_limits()
+    return sys.sandbox.get_config()
 
 
 class SandboxTestCase(TimeoutTestCase):

@@ -4,6 +4,9 @@ This module contains tests for specific attack scenarios identified
 in the security audit. Each test documents an attack vector and
 verifies that the sandbox properly prevents it.
 
+Note: Dangerous tests that could hang if limits fail (MemoryExhaustionAttacks,
+CPUExhaustionAttacks) have been moved to test_attack_scenarios_dangerous.py.
+
 Security audit reference: Attack scenario tests
 """
 
@@ -16,72 +19,6 @@ from test.test_sandbox import (
     _run_sandboxed_code,
     SUBPROCESS_TIMEOUT,
 )
-
-
-class MemoryExhaustionAttacks(unittest.TestCase):
-    """Test prevention of memory exhaustion attacks."""
-
-    def test_huge_string_multiplication_attack(self):
-        """Attack: 'x' * huge_number to exhaust memory."""
-        code = '''
-import sys
-sys.sandbox.set_limits(max_str_length=10000)
-sys.sandbox.enter_scope()
-n = 10**9
-bomb = 'x' * n  # Should raise SandboxOverflowError
-'''
-        result = _run_sandboxed_code(code)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Sandbox", result.stderr)
-
-    def test_huge_list_attack(self):
-        """Attack: list(range(huge_number)) to exhaust memory."""
-        code = '''
-import sys
-sys.sandbox.set_limits(max_list_size=10000)
-sys.sandbox.enter_scope()
-bomb = list(range(10**8))  # Should raise SandboxOverflowError
-'''
-        result = _run_sandboxed_code(code)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Sandbox", result.stderr)
-
-
-class CPUExhaustionAttacks(unittest.TestCase):
-    """Test prevention of CPU exhaustion attacks."""
-
-    def test_infinite_loop_attack(self):
-        """Attack: Infinite iteration to hang process.
-
-        Note: Uses max_iterations since subprocess code isn't compiled
-        with PyCF_SANDBOX_COUNT flag required for max_operations.
-        """
-        code = '''
-import sys
-sys.sandbox.set_limits(max_iterations=100)
-sys.sandbox.enter_scope()
-for _ in iter(int, 1):  # Infinite iterator
-    pass  # Should raise SandboxRuntimeError
-'''
-        result = _run_sandboxed_code(code)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("SandboxRuntimeError", result.stderr)
-
-    def test_recursive_bomb_attack(self):
-        """Attack: Infinite recursion to exhaust stack.
-
-        Note: Uses max_recursion_depth to limit recursion depth.
-        """
-        code = '''
-import sys
-sys.sandbox.set_limits(max_recursion_depth=50)
-sys.sandbox.enter_scope()
-def bomb():
-    return bomb()
-bomb()  # Should raise SandboxRecursionError or RecursionError
-'''
-        result = _run_sandboxed_code(code)
-        self.assertNotEqual(result.returncode, 0)
 
 
 class SandboxEscapeAttacks(unittest.TestCase):

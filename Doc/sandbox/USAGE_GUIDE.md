@@ -45,13 +45,16 @@ sys.sandbox.set_config(
     allow_dunder_access=False,
 )
 
-# 2. Register a filename for scope tracking
+# 2. Enable the sandbox (required - disabled by default)
+sys.sandbox.enable()
+
+# 3. Register a filename for scope tracking
 sys.sandbox.add_filename("<sandbox>")
 
-# 3. Reset counters before each execution
+# 4. Reset counters before each execution
 sys.sandbox.reset_counts()
 
-# 4. Compile with operation counting flag and execute untrusted code
+# 5. Compile with operation counting flag and execute untrusted code
 untrusted_code = """
 result = sum(range(100))
 """
@@ -95,6 +98,21 @@ The sandbox determines which code is "sandboxed" by tracking filenames. When you
 ### Zero Means No Limit
 
 All numeric limit values default to `0`, which means no limit. You must explicitly set non-zero values to enable enforcement.
+
+### Enabling the Sandbox
+
+**Important:** The sandbox is disabled by default. You must call `sys.sandbox.enable()` before any limits are enforced. This provides a safety mechanism to prevent accidental enforcement while configuring limits.
+
+```python
+# Configure limits (sandbox still disabled)
+sys.sandbox.set_config(max_list_size=1000)
+sys.sandbox.add_filename("<sandbox>")
+
+# Enable enforcement (required!)
+sys.sandbox.enable()
+
+# Now limits are enforced
+```
 
 ---
 
@@ -194,6 +212,9 @@ PyCF_SANDBOX_COUNT = 0x8000
 
 sys.sandbox.set_config(max_operations=10_000)
 
+# Enable the sandbox
+sys.sandbox.enable()
+
 # Register a virtual filename
 sys.sandbox.add_filename("<user-code>")
 sys.sandbox.reset_counts()
@@ -249,6 +270,7 @@ Prevents infinite loops and long-running code by counting AST-level operations w
 PyCF_SANDBOX_COUNT = 0x8000
 
 sys.sandbox.set_config(max_operations=1000)
+sys.sandbox.enable()
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -270,6 +292,7 @@ Prevents excessive iteration even through C builtins like `sum()`, `list()`, `so
 
 ```python
 sys.sandbox.set_config(max_iterations=10_000)
+sys.sandbox.enable()
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -291,6 +314,7 @@ Limits the depth of sandbox-scoped frames in the call stack to prevent stack exh
 
 ```python
 sys.sandbox.set_config(max_recursion_depth=100)
+sys.sandbox.enable()
 sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
@@ -343,6 +367,7 @@ import sys
 PyCF_SANDBOX_COUNT = 0x8000
 
 sys.sandbox.set_config(max_operations=1000)
+sys.sandbox.enable()
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -412,6 +437,7 @@ sys.sandbox.set_config(
     max_operations=10_000,
     count_iterations_as_operations=True,
 )
+sys.sandbox.enable()
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.reset_counts()
 
@@ -1394,6 +1420,9 @@ def safe_eval(source, allowed_globals=None, max_ops=100_000):
             allow_dunder_access=False,
         )
 
+        # Enable sandbox enforcement
+        sys.sandbox.enable()
+
         # Set up scope
         sys.sandbox.add_filename("<safe-eval>")
         sys.sandbox.reset_counts()
@@ -1423,6 +1452,7 @@ def safe_eval(source, allowed_globals=None, max_ops=100_000):
         return {"error": f"{type(e).__name__}: {e}"}
 
     finally:
+        sys.sandbox.disable()
         sys.sandbox.auto_mutable = False
         sys.sandbox.frozen_mode = False
         sys.sandbox.clear_filenames()
@@ -1469,6 +1499,9 @@ def eval_expression(expr):
         sys.sandbox.banned_opcodes = banned
         sys.sandbox.opcode_restrict_mode = True
 
+        # Enable sandbox
+        sys.sandbox.enable()
+
         # Set up scope
         sys.sandbox.add_filename("<expr>")
         sys.sandbox.reset_counts()
@@ -1482,6 +1515,7 @@ def eval_expression(expr):
         raise ValueError(f"Expression error: {e}") from e
 
     finally:
+        sys.sandbox.disable()
         sys.sandbox.opcode_restrict_mode = False
         sys.sandbox.banned_opcodes = None
         sys.sandbox.clear_filenames()
@@ -1526,6 +1560,7 @@ class SandboxRunner:
                 allow_dunder_access=False,
             )
 
+            sys.sandbox.enable()
             sys.sandbox.add_filename(filename)
             sys.sandbox.reset_counts()
             sys.sandbox.frozen_mode = True
@@ -1556,6 +1591,7 @@ class SandboxRunner:
             }
 
         finally:
+            sys.sandbox.disable()
             sys.sandbox.frozen_mode = False
             sys.sandbox.clear_filenames()
             sys.sandbox.set_config(**original)
@@ -1986,6 +2022,9 @@ def create_sandbox():
     sys.sandbox.frozen_mode = True
     sys.sandbox.auto_mutable = True
 
+    # Enable sandbox enforcement
+    sys.sandbox.enable()
+
     return SAFE_BUILTINS
 
 
@@ -2073,6 +2112,14 @@ except SandboxError as e:
 ---
 
 ## API Quick Reference
+
+### Enable/Disable
+
+| Function | Description |
+|----------|-------------|
+| `sys.sandbox.enable()` | Enable sandbox enforcement (required before limits are enforced) |
+| `sys.sandbox.disable()` | Disable sandbox enforcement |
+| `sys.sandbox.enabled -> bool` | Check if sandbox is enabled (read-only property) |
 
 ### Limit Configuration
 

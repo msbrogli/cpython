@@ -69,6 +69,28 @@ extern "C" {
 
 /* ============ Inline Helpers ============ */
 
+/* Check if sandbox enforcement is active.
+ * Returns true when:
+ * - enabled=1 (sandbox is turned on)
+ * - suppress_checks=0 (not in recursive error handling)
+ * - suspended=0 (not temporarily bypassed)
+ *
+ * Check flow:
+ *   enabled=0?  ──YES──> BYPASSED (sandbox off)
+ *       │
+ *      NO
+ *       │
+ *   suppress_checks || suspended>0?  ──YES──> BYPASSED (temporary)
+ *       │
+ *      NO
+ *       │
+ *   ENFORCED (proceed with limit/scope checks)
+ */
+#define _PySandbox_IsEnforced(sandbox) \
+    ((sandbox)->enabled && \
+     !(sandbox)->suppress_checks && \
+     (sandbox)->suspended == 0)
+
 /* Helper to get current interpreter's sandbox state */
 static inline _PySandboxState *
 get_sandbox_state(void)

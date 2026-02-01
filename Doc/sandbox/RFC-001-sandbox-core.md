@@ -194,6 +194,21 @@ void PySandbox_Disable(void);
 int PySandbox_IsEnabled(void);
 ```
 
+### Enforcement Check Macro
+
+```c
+/* Check if sandbox enforcement is active.
+ * Returns true when:
+ * - enabled=1 (sandbox is turned on)
+ * - suppress_checks=0 (not in recursive error handling)
+ * - suspended=0 (not temporarily bypassed)
+ */
+#define _PySandbox_IsEnforced(sandbox) \
+    ((sandbox)->enabled && \
+     !(sandbox)->suppress_checks && \
+     (sandbox)->suspended == 0)
+```
+
 ### Suspend/Resume
 
 ```c

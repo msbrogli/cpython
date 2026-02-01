@@ -157,13 +157,13 @@ frame_in_sandbox_scope(PyObject *set, _PyInterpreterFrame *frame)
 
 /* Helper for scoped counter checks. Performs all early-exit checks:
  * - Thread/interpreter state availability
- * - Suspended or suppress_checks flags
+ * - Sandbox enforcement active (enabled, not suspended, not suppressed)
  * - Whether the specific limit is set (max_limit parameter)
  * - Registered filenames and scope check
  *
  * Returns:
  *   1 = proceed with check (sandbox/limits set via out params)
- *   0 = skip check (not in scope, suspended, no limit, etc.)
+ *   0 = skip check (not in scope, not enforced, no limit, etc.)
  *  -1 = error (exception set)
  */
 static inline int
@@ -179,7 +179,8 @@ sandbox_scope_check_prologue(PyThreadState *tstate,
     _PySandboxState *sandbox = &tstate->interp->sandbox;
     _PySandboxLimits *limits = &sandbox->limits;
 
-    if (sandbox->suppress_checks || sandbox->suspended) {
+    /* Fast exit if sandbox not enforced (disabled, suspended, or suppressed) */
+    if (!_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
     if (max_limit == 0) {
@@ -206,9 +207,8 @@ sandbox_scope_check_prologue(PyThreadState *tstate,
 /* Macro to reduce boilerplate in _PySandbox_Check* functions.
  * Returns 0 (allow) early if:
  * - No interpreter state available
+ * - Sandbox not enforced (disabled, suspended, or suppressed)
  * - The specific limit is not set (0)
- * - Already in a recursive check
- * - Sandbox is suspended
  * - No filenames registered (not in any scope)
  * - Current frame is not in sandbox scope
  *
@@ -219,8 +219,9 @@ sandbox_scope_check_prologue(PyThreadState *tstate,
     if (_prologue_tstate == NULL || _prologue_tstate->interp == NULL) { return 0; } \
     _PySandboxState *sandbox = &_prologue_tstate->interp->sandbox; \
     _PySandboxLimits *limits = &sandbox->limits; \
-    if (limits->limit_field == 0 || \
-        sandbox->suppress_checks || sandbox->suspended) { \
+    /* Fast exit if sandbox not enforced */ \
+    if (!_PySandbox_IsEnforced(sandbox)) { return 0; } \
+    if (limits->limit_field == 0) { \
         return 0; \
     } \
     if (sandbox->registered_filenames == NULL) { \
@@ -257,8 +258,8 @@ sandbox_check_iteration(void)
     _PySandboxState *sandbox = &tstate->interp->sandbox;
     _PySandboxLimits *limits = &sandbox->limits;
 
-    /* Fast exit: suspended or in recursive check */
-    if (sandbox->suppress_checks || sandbox->suspended) {
+    /* Fast exit if sandbox not enforced (disabled, suspended, or suppressed) */
+    if (!_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
 

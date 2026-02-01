@@ -485,6 +485,7 @@ class MinimalSafeLimitsTests(unittest.TestCase):
     }
 
     def setUp(self):
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
         # Disable import and module access restrictions for legacy tests
         sys.sandbox.import_restrict_mode = False
         sys.sandbox.module_access_restrict_mode = False
@@ -743,16 +744,18 @@ class ResetLimitsTests(unittest.TestCase):
         exec(code, globs)
         self.assertTrue(globs["in_scope_result"])
 
-        # Reset (this clears registered_filenames to NULL)
+        # Reset (this clears registered_filenames to NULL and disables sandbox)
         sys.sandbox.reset()
 
         # After reset, scoped code with same filename should NOT be in scope
         # (registered_filenames should be NULL, not an empty set)
+        # Note: With enabled=0 after reset, enforcement is off, so in_scope still returns False
         globs["in_scope_result"] = None
         exec(code, globs)
         self.assertFalse(globs["in_scope_result"])
 
-        # Verify we can add the filename again (internal state is clean)
+        # Re-enable sandbox and verify we can add the filename again (internal state is clean)
+        sys.sandbox.enable()
         sys.sandbox.add_filename(SCOPED_FILENAME)
         globs["in_scope_result"] = None
         exec(code, globs)

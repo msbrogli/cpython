@@ -45,8 +45,8 @@ _PySandbox_CheckOpcode(int opcode)
         return 0;
     }
 
-    /* Fast exit: suspended or in recursive check */
-    if (sandbox->suspended || sandbox->suppress_checks) {
+    /* Fast exit: sandbox not enforced (disabled, suspended, or in error handling) */
+    if (!_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
 

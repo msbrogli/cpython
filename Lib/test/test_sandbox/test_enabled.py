@@ -63,7 +63,11 @@ class EnabledPropertyInteractionTests(SandboxTestCase):
 
     def test_enabled_independent_of_limits(self):
         """enabled flag should be independent of limit values."""
-        # Set some limits
+        # Start with sandbox disabled
+        sys.sandbox.disable()
+        self.assertFalse(sys.sandbox.enabled)
+
+        # Set some limits - this should NOT enable sandbox
         sys.sandbox.set_limits(max_list_size=100)
         self.assertFalse(sys.sandbox.enabled)  # Still disabled
 

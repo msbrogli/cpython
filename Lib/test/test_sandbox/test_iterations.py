@@ -34,6 +34,7 @@ class ScopedIterationCountTests(unittest.TestCase):
     """
 
     def setUp(self):
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
         sys.sandbox.reset_counts()
         # Disable import and module access restrictions for legacy tests
         sys.sandbox.import_restrict_mode = False

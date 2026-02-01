@@ -14,6 +14,7 @@ class TestModuleAccessRestriction(unittest.TestCase):
     def setUp(self):
         """Reset sandbox state before each test."""
         sys.sandbox.reset()
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
 
     def tearDown(self):
         """Clean up sandbox state after each test."""
@@ -198,6 +199,7 @@ class TestUseDefaultAllowedModules(unittest.TestCase):
 
     def setUp(self):
         sys.sandbox.reset()
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
 
     def tearDown(self):
         sys.sandbox.reset()
@@ -267,6 +269,7 @@ class TestModuleAccessSecurityScenarios(unittest.TestCase):
 
     def setUp(self):
         sys.sandbox.reset()
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
 
     def tearDown(self):
         sys.sandbox.reset()

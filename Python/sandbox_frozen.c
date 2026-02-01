@@ -139,11 +139,16 @@ _PySandbox_CheckFrozen(PyObject *obj)
     }
 
     PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp == NULL || interp->sandbox.suspended) {
+    if (interp == NULL) {
         return 0;
     }
 
     _PySandboxState *sandbox = &interp->sandbox;
+
+    /* Fast exit if sandbox not enforced */
+    if (!_PySandbox_IsEnforced(sandbox)) {
+        return 0;
+    }
 
     /* Fast path: check mutable set first */
     if (sandbox->mutable_objects != NULL) {
@@ -311,7 +316,8 @@ _PySandbox_MaybeMarkMutable(PyObject *obj)
     if (!interp->sandbox.auto_mutable || !interp->sandbox.frozen_mode) {
         return;
     }
-    if (interp->sandbox.suspended) {
+    /* Fast exit if sandbox not enforced */
+    if (!_PySandbox_IsEnforced(&interp->sandbox)) {
         return;
     }
     if (interp->sandbox.registered_filenames == NULL) {

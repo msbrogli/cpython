@@ -43,6 +43,7 @@ while True:
         """Sandbox limits should catch issues before timeout."""
         code = '''
 import sys
+sys.sandbox.enable()
 sys.sandbox.set_limits(max_iterations=100)
 sys.sandbox.enter_scope()
 for _ in iter(int, 1):  # Infinite iterator

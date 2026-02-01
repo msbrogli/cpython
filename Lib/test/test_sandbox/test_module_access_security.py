@@ -107,6 +107,7 @@ class SubprocessModuleAccessTests(unittest.TestCase):
         """os.system should not be accessible in restricted mode."""
         code = '''
 import sys
+sys.sandbox.enable()  # Required before entering scope
 sys.sandbox.import_restrict_mode = True
 sys.sandbox.module_access_restrict_mode = True
 sys.sandbox.enter_scope()
@@ -128,6 +129,7 @@ os.system("echo pwned")
         """subprocess module should not be accessible in restricted mode."""
         code = '''
 import sys
+sys.sandbox.enable()  # Required before entering scope
 sys.sandbox.import_restrict_mode = True
 sys.sandbox.module_access_restrict_mode = True
 sys.sandbox.enter_scope()
@@ -170,6 +172,7 @@ f = open("/etc/passwd", "r")
 import sys
 import os  # Pre-import before sandbox
 
+sys.sandbox.enable()  # Required before entering scope
 sys.sandbox.import_restrict_mode = False
 sys.sandbox.module_access_restrict_mode = False
 sys.sandbox.enter_scope()

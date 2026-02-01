@@ -167,6 +167,14 @@ _PySandbox_EnterScope(void)
 
     _PySandboxState *sandbox = &interp->sandbox;
 
+    /* Require sandbox to be enabled before entering scope */
+    if (!sandbox->enabled) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "Sandbox must be enabled before entering scope. "
+            "Call sys.sandbox.enable() first.");
+        return -1;
+    }
+
     /* Get current frame and add its filename to registered set */
     _PyInterpreterFrame *frame = get_current_iframe(tstate);
     if (frame == NULL) {
@@ -255,6 +263,14 @@ _PySandbox_AddFrameToScope(void)
 
     _PySandboxState *sandbox = &interp->sandbox;
 
+    /* Require sandbox to be enabled before adding frame to scope */
+    if (!sandbox->enabled) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "Sandbox must be enabled before adding frame to scope. "
+            "Call sys.sandbox.enable() first.");
+        return -1;
+    }
+
     /* Get current frame */
     _PyInterpreterFrame *frame = get_current_iframe(NULL);
     if (frame == NULL) {
@@ -285,7 +301,17 @@ _PySandbox_AddFilename(PyObject *filename)
     }
     PyInterpreterState *interp = tstate->interp;
 
-    int result = add_filename_to_set(&interp->sandbox.registered_filenames, filename);
+    _PySandboxState *sandbox = &interp->sandbox;
+
+    /* Require sandbox to be enabled before adding filename to scope */
+    if (!sandbox->enabled) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "Sandbox must be enabled before adding filename to scope. "
+            "Call sys.sandbox.enable() first.");
+        return -1;
+    }
+
+    int result = add_filename_to_set(&sandbox->registered_filenames, filename);
     if (result == 0) {
         /* Update tracing state - statement counting requires tracing enabled */
         _PyThreadState_UpdateTracingState(tstate);

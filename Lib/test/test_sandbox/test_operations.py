@@ -37,6 +37,7 @@ class OperationCountingAPITests(unittest.TestCase):
     """Test the API for operation counting."""
 
     def setUp(self):
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
         try:
             sys.sandbox.exit_scope()
         except RuntimeError:
@@ -93,6 +94,7 @@ class StatementOperationCountTests(unittest.TestCase):
     """Test operation counts for statement AST nodes."""
 
     def setUp(self):
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
         try:
             sys.sandbox.exit_scope()
         except RuntimeError:
@@ -196,6 +198,7 @@ class ExpressionOperationCountTests(unittest.TestCase):
     """Test operation counts for expression operation AST nodes."""
 
     def setUp(self):
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
         try:
             sys.sandbox.exit_scope()
         except RuntimeError:
@@ -268,6 +271,7 @@ class CombinedCountTests(unittest.TestCase):
     """Test combined statement + expression operation counts."""
 
     def setUp(self):
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
         try:
             sys.sandbox.exit_scope()
         except RuntimeError:
@@ -328,6 +332,7 @@ class OperationLimitTests(unittest.TestCase):
     """Test that operation limits are enforced."""
 
     def setUp(self):
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
         try:
             sys.sandbox.exit_scope()
         except RuntimeError:
@@ -405,6 +410,7 @@ class CountIterationsAsOperationsTests(unittest.TestCase):
     ITER_FILENAME = "<sandbox-iter-ops-test>"
 
     def setUp(self):
+        sys.sandbox.enable()  # Required before add_filename or enter_scope
         try:
             sys.sandbox.exit_scope()
         except RuntimeError:

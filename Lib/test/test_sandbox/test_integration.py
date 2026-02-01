@@ -31,6 +31,7 @@ class IntegrationTests(unittest.TestCase):
         """Test running sandboxed code with all limit types."""
         code = '''
 import sys
+sys.sandbox.enable()  # Required before entering scope
 # Disable module access restrictions for this test
 sys.sandbox.module_access_restrict_mode = False
 sys.sandbox.set_limits(

@@ -32,8 +32,8 @@ _PySandbox_EnterFrame(_PyInterpreterFrame *frame)
 
     _PySandboxState *sandbox = &tstate->interp->sandbox;
 
-    /* Fast path exits */
-    if (sandbox->suspended || sandbox->suppress_checks) {
+    /* Fast path exits - sandbox not enforced */
+    if (!_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
     if (sandbox->limits.max_recursion_depth == 0) {
@@ -92,7 +92,7 @@ _PySandbox_ExitFrame(_PyInterpreterFrame *frame)
     _PySandboxState *sandbox = &tstate->interp->sandbox;
 
     /* Fast path exits - must match EnterFrame conditions */
-    if (sandbox->suspended || sandbox->suppress_checks) {
+    if (!_PySandbox_IsEnforced(sandbox)) {
         return;
     }
     if (sandbox->limits.max_recursion_depth == 0) {

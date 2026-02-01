@@ -130,8 +130,8 @@ int
 _PySandbox_CheckTypeAllowed(PyTypeObject *type)
 {
     _PySandboxState *sandbox = get_sandbox_state();
-    if (sandbox == NULL || sandbox->suspended || sandbox->suppress_checks) {
-        return 0;  /* No limits active, suspended, or recursive check */
+    if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
+        return 0;  /* No sandbox state or not enforced */
     }
     _PySandboxLimits *limits = &sandbox->limits;
 
@@ -338,7 +338,7 @@ _PySandbox_CheckDunderAccess(PyObject *name)
 {
     assert(name != NULL);
     _PySandboxState *sandbox = get_sandbox_state();
-    if (sandbox == NULL || sandbox->suppress_checks || sandbox->suspended) {
+    if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
     _PySandboxLimits *limits = &sandbox->limits;
@@ -402,7 +402,7 @@ int
 _PySandbox_CheckUnsafeBlocked(const char *operation)
 {
     _PySandboxState *sandbox = get_sandbox_state();
-    if (sandbox == NULL || sandbox->suspended || sandbox->suppress_checks) {
+    if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
     if (sandbox->limits.allow_unsafe) {
@@ -443,7 +443,7 @@ int
 _PySandbox_CheckIOAllowed(const char *operation)
 {
     _PySandboxState *sandbox = get_sandbox_state();
-    if (sandbox == NULL || sandbox->suspended || sandbox->suppress_checks) {
+    if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
     if (sandbox->limits.allow_io) {
@@ -489,7 +489,7 @@ int
 _PySandbox_CheckModuleAccess(PyObject *module)
 {
     _PySandboxState *sandbox = get_sandbox_state();
-    if (sandbox == NULL || sandbox->suspended || sandbox->suppress_checks) {
+    if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
 

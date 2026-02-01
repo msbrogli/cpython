@@ -149,8 +149,8 @@ def _run_sandboxed_code(code, timeout=SUBPROCESS_TIMEOUT):
     Returns:
         subprocess.CompletedProcess with returncode, stdout, and stderr
     """
-    # Prepend import and module access restriction disabling for legacy tests
-    preamble = "import sys; sys.sandbox.import_restrict_mode = False; sys.sandbox.module_access_restrict_mode = False\n"
+    # Prepend setup: enable sandbox and disable import/module restrictions for legacy tests
+    preamble = "import sys; sys.sandbox.enable(); sys.sandbox.import_restrict_mode = False; sys.sandbox.module_access_restrict_mode = False\n"
     return subprocess.run(
         [sys.executable, '-c', preamble + code],
         capture_output=True,
@@ -177,7 +177,7 @@ def run_sandboxed_subprocess(code, timeout=SUBPROCESS_TIMEOUT,
     Returns:
         subprocess.CompletedProcess result
     """
-    preamble_parts = ["import sys"]
+    preamble_parts = ["import sys", "sys.sandbox.enable()"]
 
     if disable_import_restrict:
         preamble_parts.append("sys.sandbox.import_restrict_mode = False")
@@ -245,7 +245,8 @@ def _run_scoped_test(limit_name, limit_value, test_code, extra_setup=""):
     """
     code = f'''
 import sys
-# Disable import and module access restrictions for legacy tests
+# Enable sandbox and disable import/module access restrictions for legacy tests
+sys.sandbox.enable()
 sys.sandbox.import_restrict_mode = False
 sys.sandbox.module_access_restrict_mode = False
 {extra_setup}
@@ -257,7 +258,11 @@ sys.sandbox.enter_scope()
 
 
 def _get_settable_limits():
-    """Get current limits for restoring in tearDown."""
+    """Get current limits for restoring in tearDown.
+
+    Also enables sandbox - tests that save limits usually need sandbox enabled.
+    """
+    sys.sandbox.enable()
     return sys.sandbox.get_limits()
 
 
@@ -283,6 +288,11 @@ class SandboxTestCase(TimeoutTestCase):
         try:
             sys.sandbox.exit_scope()
         except (RuntimeError, SandboxSecurityError):
+            pass
+        # Enable sandbox (required before entering scope or adding filenames)
+        try:
+            sys.sandbox.enable()
+        except SandboxSecurityError:
             pass
         # Disable import restrictions for existing tests
         # (tests weren't designed with import restrictions in mind)

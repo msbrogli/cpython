@@ -245,8 +245,8 @@ _PySandbox_CheckImport(PyObject *abs_name, PyObject *fromlist)
         return 0;
     }
 
-    /* Fast exit: suspended or suppress_checks */
-    if (sandbox->suspended || sandbox->suppress_checks) {
+    /* Fast exit: sandbox not enforced (disabled, suspended, or in error handling) */
+    if (!_PySandbox_IsEnforced(sandbox)) {
         return 0;
     }
 

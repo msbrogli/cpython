@@ -241,7 +241,7 @@ The `_PYSANDBOX_CHECK_PROLOGUE` macro provides fast exits:
 #define _PYSANDBOX_CHECK_PROLOGUE(limit_field) \
     _PySandboxState *sandbox = get_sandbox_state(); \
     if (sandbox == NULL || sandbox->limits.limit_field == 0 || \
-        sandbox->suppress_checks || sandbox->suspended) { \
+        sandbox->suppress_checks || sandbox->suspend_depth) { \
         return 0; \
     } \
     _PySandboxLimits *limits = &sandbox->limits;
@@ -266,7 +266,7 @@ int
 _PySandbox_CheckTypeAllowed(PyTypeObject *type)
 {
     _PySandboxState *sandbox = get_sandbox_state();
-    if (sandbox == NULL || sandbox->suspended) {
+    if (sandbox == NULL || sandbox->suspend_depth) {
         return 0;
     }
     _PySandboxLimits *limits = &sandbox->limits;
@@ -299,7 +299,7 @@ _PySandbox_CheckScopeOperation(void)
 {
     /* ... get sandbox state ... */
     if (limits->max_operations == 0 ||
-        sandbox->suppress_checks || sandbox->suspended) {
+        sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
 
@@ -362,7 +362,7 @@ _PySandbox_CheckDunderAccess(PyObject *name)
 {
     /* ... get sandbox state ... */
     if (sandbox->limits.allow_dunder_access ||
-        sandbox->suppress_checks || sandbox->suspended) {
+        sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
 
@@ -395,7 +395,7 @@ _PySandbox_CheckUnsafeBlocked(const char *operation)
 {
     /* ... get sandbox state ... */
     if (sandbox->limits.allow_unsafe ||
-        sandbox->suppress_checks || sandbox->suspended) {
+        sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
 
@@ -417,7 +417,7 @@ _PySandbox_CheckIOAllowed(const char *operation)
 {
     /* ... get sandbox state ... */
     if (sandbox->limits.allow_io ||
-        sandbox->suppress_checks || sandbox->suspended) {
+        sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
 

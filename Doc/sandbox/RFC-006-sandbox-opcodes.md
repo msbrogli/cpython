@@ -184,7 +184,7 @@ _PySandbox_CheckOpcode(int opcode)
     }
 
     /* Fast exit: suspended or in recursive check */
-    if (sandbox->suspended || sandbox->suppress_checks) {
+    if (sandbox->suspend_depth || sandbox->suppress_checks) {
         return 0;
     }
 

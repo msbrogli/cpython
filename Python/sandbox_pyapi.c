@@ -525,7 +525,7 @@ sandbox_get_suspended(_PySandboxObject *self, void *closure)
 {
     PyInterpreterState *interp = sandbox_get_interp();
     if (interp == NULL) return NULL;
-    return PyBool_FromLong(interp->sandbox.suspended > 0);
+    return PyBool_FromLong(interp->sandbox.suspend_depth > 0);
 }
 
 /* enabled: read-only bool (use enable()/disable() methods to modify) */

@@ -90,10 +90,10 @@ def trusted_helper_v2():
 
 Suspend calls are nested-counted:
 ```python
-sys.sandbox.suspend()   # suspended = 1
-sys.sandbox.suspend()   # suspended = 2
-sys.sandbox.resume()    # suspended = 1
-sys.sandbox.resume()    # suspended = 0 (limits active again)
+sys.sandbox.suspend()   # suspend_depth = 1
+sys.sandbox.suspend()   # suspend_depth = 2
+sys.sandbox.resume()    # suspend_depth = 1
+sys.sandbox.resume()    # suspend_depth = 0 (limits active again)
 ```
 
 ## Resetting State
@@ -125,7 +125,7 @@ typedef struct {
     PyObject *registered_filenames;     /* Python set of filenames */
     PyObject *allowed_imports;          /* Python set of (module, name) tuples */
     int suppress_checks;                /* Recursion prevention */
-    int suspended;                      /* Suspend count (nested) */
+    int suspend_depth;                  /* Suspend depth counter (nested) */
     int enabled;                        /* Master enable flag (0=disabled, 1=active) */
 } _PySandboxState;
 ```
@@ -201,12 +201,12 @@ int PySandbox_IsEnabled(void);
  * Returns true when:
  * - enabled=1 (sandbox is turned on)
  * - suppress_checks=0 (not in recursive error handling)
- * - suspended=0 (not temporarily bypassed)
+ * - suspend_depth=0 (not temporarily bypassed)
  */
 #define _PySandbox_IsEnforced(sandbox) \
     ((sandbox)->enabled && \
      !(sandbox)->suppress_checks && \
-     (sandbox)->suspended == 0)
+     (sandbox)->suspend_depth == 0)
 ```
 
 ### Suspend/Resume

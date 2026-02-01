@@ -175,7 +175,7 @@ _PySandbox_CheckImport(PyObject *abs_name, PyObject *fromlist)
         return 0;
     }
 
-    if (sandbox->suppress_checks || sandbox->suspended) {
+    if (sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
 

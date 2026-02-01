@@ -18,11 +18,11 @@
  *
  *   Flags (various files):
  *   - sandbox->suppress_checks reads/writes
- *   - sandbox->suspended reads/writes
+ *   - sandbox->suspend_depth reads/writes
  *   - sandbox->creation_hook.in_hook reads/writes
  *
  *   Recommendations for free-threading:
- *   - Use _Py_atomic_int for suppress_checks, suspended, in_hook
+ *   - Use _Py_atomic_int for suppress_checks, suspend_depth, in_hook
  *   - Use _Py_atomic_uint64 for counters
  *   - Add memory barriers for limit comparisons
  *
@@ -405,12 +405,12 @@ PySandbox_Suspend(void)
     }
 
     _PySandboxState *sandbox = &interp->sandbox;
-    if (sandbox->suspended == INT_MAX) {
-        PyErr_SetString(PyExc_OverflowError, "Sandbox suspend count overflow");
+    if (sandbox->suspend_depth == INT_MAX) {
+        PyErr_SetString(PyExc_OverflowError, "Sandbox suspend depth overflow");
         return -1;
     }
-    sandbox->suspended++;
-    return sandbox->suspended;
+    sandbox->suspend_depth++;
+    return sandbox->suspend_depth;
 }
 
 int
@@ -428,12 +428,12 @@ PySandbox_Resume(void)
     }
 
     _PySandboxState *sandbox = &interp->sandbox;
-    if (sandbox->suspended == 0) {
+    if (sandbox->suspend_depth == 0) {
         PyErr_SetString(PyExc_RuntimeError, "Sandbox resume without matching suspend");
         return -1;
     }
-    sandbox->suspended--;
-    return sandbox->suspended;
+    sandbox->suspend_depth--;
+    return sandbox->suspend_depth;
 }
 
 int
@@ -444,7 +444,7 @@ PySandbox_IsSuspended(void)
         return 0;  /* No interpreter means no limits anyway */
     }
 
-    return interp->sandbox.suspended > 0;
+    return interp->sandbox.suspend_depth > 0;
 }
 
 /* ============ Reset ============ */
@@ -478,7 +478,7 @@ _PySandbox_Reset(PyInterpreterState *interp)
 
     /* Reset state flags */
     sandbox->suppress_checks = 0;
-    sandbox->suspended = 0;
+    sandbox->suspend_depth = 0;
     sandbox->enabled = 0;
 
     /* Reset modes */

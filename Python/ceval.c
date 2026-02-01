@@ -1334,7 +1334,7 @@ _PySandbox_CheckOpcodeDispatch(int opcode, PyInterpreterState *interp)
     if (!sandbox->opcode_restrict_mode) {
         return 0;
     }
-    if (sandbox->suspended || sandbox->suppress_checks) {
+    if (sandbox->suspend_depth || sandbox->suppress_checks) {
         return 0;
     }
     /* De-optimize specialized opcodes to base form for bitmap check */

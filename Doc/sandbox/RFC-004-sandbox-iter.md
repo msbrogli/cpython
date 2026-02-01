@@ -204,7 +204,7 @@ _PySandbox_CheckIteration(void)
     _PySandboxLimits *limits = &sandbox->limits;
     _PySandboxCounters *counters = &sandbox->counters;
 
-    if (sandbox->suppress_checks || sandbox->suspended) {
+    if (sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
 

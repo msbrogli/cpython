@@ -272,7 +272,7 @@ _PySandbox_CheckModuleAccess(PyObject *module)
     _PySandboxState *sandbox = get_sandbox_state();
 
     /* Fast exits */
-    if (sandbox == NULL || sandbox->suspended || sandbox->suppress_checks) {
+    if (sandbox == NULL || sandbox->suspend_depth || sandbox->suppress_checks) {
         return 0;
     }
 

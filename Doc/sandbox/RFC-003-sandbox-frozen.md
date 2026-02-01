@@ -243,7 +243,7 @@ _PySandbox_CheckFrozen(PyObject *obj)
     }
 
     PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp == NULL || interp->sandbox.suspended) {
+    if (interp == NULL || interp->sandbox.suspend_depth) {
         return 0;
     }
 
@@ -313,7 +313,7 @@ _PySandbox_MaybeMarkMutable(PyObject *obj)
     if (!interp->sandbox.auto_mutable || !interp->sandbox.frozen_mode) {
         return;
     }
-    if (interp->sandbox.suspended) {
+    if (interp->sandbox.suspend_depth) {
         return;
     }
 

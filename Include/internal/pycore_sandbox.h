@@ -246,9 +246,9 @@ typedef struct {
        checks when error handling creates strings/integers) */
     int suppress_checks;
 
-    /* Suspend counter - when > 0, all limits are bypassed.
+    /* Suspend depth counter - when > 0, all limits are bypassed.
        Use PySandbox_Suspend/Resume for nested suspend/resume. */
-    int suspended;
+    int suspend_depth;
 
     /* Master enable flag. 0=disabled (default), 1=active.
        When disabled, sandbox limits are not enforced even if configured. */
@@ -269,7 +269,7 @@ typedef struct {
     .mutable_objects = NULL,                \
     .frozen_objects = NULL,                 \
     .suppress_checks = 0,                          \
-    .suspended = 0,                         \
+    .suspend_depth = 0,                     \
     .enabled = 0,                           \
 }
 

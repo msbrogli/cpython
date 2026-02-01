@@ -245,7 +245,7 @@ In `Python/ceval.c`:
 TARGET(SANDBOX_COUNT) {
     PyInterpreterState *interp = tstate->interp;
     if (interp->sandbox.limits.max_operations > 0 &&
-        !interp->sandbox.suspended) {
+        !interp->sandbox.suspend_depth) {
         if (_PySandbox_CheckScopeOperation() < 0) {
             goto error;
         }
@@ -277,7 +277,7 @@ _PySandbox_CheckScopeOperation(void)
     _PySandboxCounters *counters = &sandbox->counters;
 
     if (limits->max_operations == 0 ||
-        sandbox->suppress_checks || sandbox->suspended) {
+        sandbox->suppress_checks || sandbox->suspend_depth) {
         return 0;
     }
 

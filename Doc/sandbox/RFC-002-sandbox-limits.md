@@ -200,6 +200,7 @@ typedef struct {
     int allow_dunder_access;        /* 0 = blocked (default), 1 = allowed */
     int allow_class_creation;       /* 1 = allow class creation with whitelisted dunders (default) */
     int allow_magic_methods;        /* 1 = allow magic method definitions in class body (default) */
+    int allow_metaclasses;          /* 1 = allow all metaclasses (default), 0 = check whitelist */
     int allow_unsafe;               /* 1 = allowed, 0 = blocked */
     int allow_io;                   /* 1 = allowed, 0 = blocked (default) */
     int count_iterations_as_operations;  /* 1 = count iterations as ops */
@@ -484,9 +485,17 @@ class Point:
 
 **Limitation:** The whitelist only applies during class body execution. Method dunders like `__init__` accessed as attributes (e.g., `super().__init__()`) are blocked. Use `allow_dunder_access=True` if such patterns are needed.
 
-## Metaclass Creation Check
+## Metaclass Creation and Usage Check
 
-Sandbox code cannot create metaclasses (subclass `type`) but can use trusted metaclasses from outside the sandbox:
+The `allow_metaclasses` config flag controls both metaclass creation and usage:
+
+**When `allow_metaclasses=True` (default):**
+- All metaclass creation and usage is allowed (backward compatible)
+
+**When `allow_metaclasses=False`:**
+- Metaclass **creation** (subclassing `type`) is blocked
+- Metaclass **usage** is only allowed if the metaclass is in `allowed_metaclasses` set
+- If `allowed_metaclasses` is empty/NULL, only `type` is allowed
 
 ```c
 int
@@ -497,23 +506,80 @@ _PySandbox_CheckMetaclassAllowed(PyObject *meta, PyObject *bases)
         return 0;
     }
 
-    /* Check if meta is type and we're creating a metaclass */
-    if (!is_metaclass_creation(meta, bases)) {
-        return 0;  /* Not creating a metaclass - allowed */
+    /* When allow_metaclasses=True, allow everything */
+    if (config->allow_metaclasses) {
+        return 0;
     }
 
-    /* Block metaclass creation from within sandbox scope */
-    if (frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+    /* ... scope check ... */
+
+    /* Check 1: Block metaclass CREATION (subclassing type) */
+    int creating_metaclass = is_metaclass_creation(bases);
+    if (creating_metaclass) {
         PyErr_SetString(PyExc_SandboxSecurityError,
             "creating metaclasses (subclassing type) is not allowed in sandbox");
         return -1;
+    }
+
+    /* Check 2: Block metaclass USAGE unless whitelisted */
+    if (meta != (PyObject *)&PyType_Type) {
+        PyObject *allowed = sandbox->allowed_metaclasses;
+        if (allowed == NULL || !PySet_Contains(allowed, meta)) {
+            PyErr_Format(PyExc_SandboxSecurityError,
+                "metaclass '%.200s' is not in allowed_metaclasses",
+                ((PyTypeObject *)meta)->tp_name);
+            return -1;
+        }
     }
 
     return 0;
 }
 ```
 
-This prevents sandbox code from creating custom metaclasses that could override `__new__` or `__call__` to execute arbitrary code during class creation.
+This prevents sandbox code from:
+1. Creating custom metaclasses that could override `__new__` or `__call__`
+2. Using arbitrary metaclasses that might have security implications
+
+### Inheriting from Trusted Classes with Custom Metaclasses
+
+When `allow_metaclasses=False`, sandbox code can inherit from a trusted base class (created outside the sandbox) that has a custom metaclass, **provided the metaclass is whitelisted** in `allowed_metaclasses`:
+
+```python
+# Outside sandbox (trusted code)
+class TrustedMeta(type):
+    pass
+
+class TrustedBase(metaclass=TrustedMeta):
+    x = 1
+
+# Configure sandbox
+sys.sandbox.set_config(allow_metaclasses=False)
+sys.sandbox.allowed_metaclasses = frozenset({TrustedMeta})
+sys.sandbox.add_filename("<sandbox>")
+
+# Sandbox code inherits the metaclass from the trusted base
+code = compile("""
+class Derived(Base):  # OK - TrustedMeta is whitelisted
+    y = 2
+""", "<sandbox>", "exec")
+exec(code, {"Base": TrustedBase})
+```
+
+If the metaclass is NOT whitelisted, inheritance is blocked:
+
+```python
+sys.sandbox.set_config(allow_metaclasses=False)
+# TrustedMeta NOT in allowed_metaclasses
+sys.sandbox.add_filename("<sandbox>")
+
+code = compile("""
+class Derived(Base):  # SandboxSecurityError!
+    pass
+""", "<sandbox>", "exec")
+# Error: "metaclass 'TrustedMeta' is not in allowed_metaclasses"
+```
+
+This ensures that even when inheriting from trusted classes, the metaclass must be explicitly approved
 
 ## Unsafe Operation Check
 
@@ -586,6 +652,7 @@ Called from:
 | `allow_dunder_access` | bool | False | Allow `__dunder__` access |
 | `allow_class_creation` | bool | True | Allow class creation with whitelisted dunders |
 | `allow_magic_methods` | bool | True | Allow magic method definitions in class body |
+| `allow_metaclasses` | bool | True | Allow metaclass creation and usage |
 | `allow_unsafe` | bool | False | Allow unsafe operations |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterations as operations |

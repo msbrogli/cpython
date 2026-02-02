@@ -341,7 +341,7 @@ result = len(c.items)
 
 
 class MetaclassCreationBlockedTests(ScopedFilenameTestCase):
-    """Test that metaclass CREATION is blocked in sandbox."""
+    """Test that metaclass CREATION is blocked in sandbox when allow_metaclasses=False."""
 
     SCOPED_FILENAME = "<test_metaclass_blocked_scope>"
 
@@ -351,6 +351,7 @@ class MetaclassCreationBlockedTests(ScopedFilenameTestCase):
             max_operations=10000,
             allow_dunder_access=False,
             allow_class_creation=True,
+            allow_metaclasses=False,  # Explicitly disable metaclasses
         )
 
     def test_direct_type_subclass_blocked(self):
@@ -500,6 +501,7 @@ import sys
 sys.sandbox.set_config(
     allow_dunder_access=False,
     allow_class_creation=True,
+    allow_metaclasses=False,
 )
 sys.sandbox.add_filename("<sandbox>")
 
@@ -834,6 +836,295 @@ result = TypedClass.y
 
         # Restore
         sys.sandbox.allow_magic_methods = original
+
+
+class AllowMetaclassesTests(ScopedFilenameTestCase):
+    """Test the allow_metaclasses config flag."""
+
+    SCOPED_FILENAME = "<test_allow_metaclasses_scope>"
+
+    def setUp(self):
+        super().setUp()
+        # Default config - metaclasses allowed by default
+        sys.sandbox.set_config(
+            max_operations=10000,
+            allow_dunder_access=False,
+            allow_class_creation=True,
+        )
+
+    def test_metaclasses_allowed_by_default(self):
+        """Metaclass creation should work by default."""
+        globs = self.run_scoped_code("""
+class Meta(type):
+    pass
+result = True
+""")
+        self.assertTrue(globs['result'])
+
+    def test_metaclass_creation_blocked_when_disabled(self):
+        """Metaclass creation blocked when allow_metaclasses=False."""
+        sys.sandbox.set_config(allow_metaclasses=False)
+        with self.assertRaises(SandboxSecurityError):
+            self.run_scoped_code("""
+class Meta(type):
+    pass
+""")
+
+    def test_metaclass_usage_blocked_when_not_whitelisted(self):
+        """Using non-whitelisted metaclass should be blocked."""
+        from abc import ABCMeta
+        sys.sandbox.set_config(allow_metaclasses=False)
+        # ABCMeta is not in allowed_metaclasses by default
+        with self.assertRaises(SandboxSecurityError) as cm:
+            self.run_scoped_code("""
+from abc import ABC
+class MyABC(ABC):
+    pass
+""")
+        self.assertIn("ABCMeta", str(cm.exception))
+
+    def test_metaclass_usage_allowed_when_whitelisted(self):
+        """Using whitelisted metaclass should work."""
+        from abc import ABCMeta
+        sys.sandbox.set_config(allow_metaclasses=False)
+        sys.sandbox.allowed_metaclasses = frozenset({ABCMeta})
+        globs = self.run_scoped_code("""
+from abc import ABC
+class MyABC(ABC):
+    pass
+result = True
+""")
+        self.assertTrue(globs['result'])
+
+    def test_normal_class_works_without_metaclasses(self):
+        """Normal classes work when allow_metaclasses=False."""
+        sys.sandbox.set_config(allow_metaclasses=False)
+        globs = self.run_scoped_code("""
+class Foo:
+    pass
+result = True
+""")
+        self.assertTrue(globs['result'])
+
+    def test_enum_blocked_without_whitelist(self):
+        """Enum should be blocked when allow_metaclasses=False."""
+        sys.sandbox.set_config(allow_metaclasses=False)
+        with self.assertRaises(SandboxSecurityError) as cm:
+            self.run_scoped_code("""
+from enum import Enum
+class Color(Enum):
+    RED = 1
+""")
+        self.assertIn("EnumType", str(cm.exception))
+
+    def test_enum_allowed_when_whitelisted(self):
+        """Enum should work when its metaclass is whitelisted."""
+        from enum import EnumType
+        sys.sandbox.set_config(allow_metaclasses=False)
+        sys.sandbox.allowed_metaclasses = frozenset({EnumType})
+        globs = self.run_scoped_code("""
+from enum import Enum
+class Color(Enum):
+    RED = 1
+result = Color.RED.value
+""")
+        self.assertEqual(globs['result'], 1)
+
+    def test_multiple_metaclasses_whitelisted(self):
+        """Multiple metaclasses can be whitelisted."""
+        from abc import ABCMeta
+        from enum import EnumType
+        sys.sandbox.set_config(allow_metaclasses=False)
+        sys.sandbox.allowed_metaclasses = frozenset({ABCMeta, EnumType})
+
+        # Test ABC
+        globs = self.run_scoped_code("""
+from abc import ABC
+class MyABC(ABC):
+    pass
+result = True
+""")
+        self.assertTrue(globs['result'])
+
+        # Test Enum
+        globs = self.run_scoped_code("""
+from enum import Enum
+class Status(Enum):
+    OK = 1
+result = Status.OK.value
+""")
+        self.assertEqual(globs['result'], 1)
+
+    def test_allowed_metaclasses_must_be_types(self):
+        """allowed_metaclasses must contain only type objects."""
+        with self.assertRaises(TypeError):
+            sys.sandbox.allowed_metaclasses = frozenset({"not_a_type"})
+
+    def test_allowed_metaclasses_can_be_none(self):
+        """allowed_metaclasses can be set to None."""
+        from abc import ABCMeta
+        sys.sandbox.allowed_metaclasses = frozenset({ABCMeta})
+        sys.sandbox.allowed_metaclasses = None
+        self.assertIsNone(sys.sandbox.allowed_metaclasses)
+
+    def test_get_config_includes_allow_metaclasses(self):
+        """get_config() should include allow_metaclasses."""
+        sys.sandbox.set_config(allow_metaclasses=False)
+        config = sys.sandbox.get_config()
+        self.assertIn('allow_metaclasses', config)
+        self.assertFalse(config['allow_metaclasses'])
+
+        sys.sandbox.set_config(allow_metaclasses=True)
+        config = sys.sandbox.get_config()
+        self.assertTrue(config['allow_metaclasses'])
+
+    def test_property_getter_setter(self):
+        """allow_metaclasses property should work."""
+        original = sys.sandbox.allow_metaclasses
+
+        sys.sandbox.allow_metaclasses = False
+        self.assertFalse(sys.sandbox.allow_metaclasses)
+
+        sys.sandbox.allow_metaclasses = True
+        self.assertTrue(sys.sandbox.allow_metaclasses)
+
+        # Restore
+        sys.sandbox.allow_metaclasses = original
+
+    def test_inherit_from_trusted_base_with_whitelisted_metaclass(self):
+        """Inheriting from trusted class with whitelisted metaclass works.
+
+        When allow_metaclasses=False, if a trusted base class (created outside
+        sandbox) has a custom metaclass, sandbox code can inherit from it
+        if the metaclass is in allowed_metaclasses.
+        """
+        # Create metaclass and base OUTSIDE sandbox (trusted)
+        class TrustedMeta(type):
+            pass
+
+        class TrustedBase(metaclass=TrustedMeta):
+            x = 1
+
+        sys.sandbox.set_config(allow_metaclasses=False)
+        sys.sandbox.allowed_metaclasses = frozenset({TrustedMeta})
+
+        # This should work - metaclass is whitelisted
+        globs = self.run_scoped_code("""
+class Derived(Base):
+    y = 2
+result = Derived.x + Derived.y
+""", extra_globals={"Base": TrustedBase})
+        self.assertEqual(globs['result'], 3)
+        # Verify the metaclass was inherited
+        self.assertIs(type(globs['Derived']), TrustedMeta)
+
+    def test_inherit_from_trusted_base_without_whitelisted_metaclass_blocked(self):
+        """Inheriting from trusted class WITHOUT whitelisted metaclass is blocked.
+
+        Even if the base class is trusted, the metaclass must be whitelisted.
+        """
+        class TrustedMeta(type):
+            pass
+
+        class TrustedBase(metaclass=TrustedMeta):
+            pass
+
+        sys.sandbox.set_config(allow_metaclasses=False)
+        # NOT whitelisting TrustedMeta
+
+        with self.assertRaises(SandboxSecurityError) as cm:
+            self.run_scoped_code("""
+class Derived(Base):
+    pass
+""", extra_globals={"Base": TrustedBase})
+        self.assertIn("TrustedMeta", str(cm.exception))
+
+
+class AllowMetaclassesSubprocessTests(unittest.TestCase):
+    """Subprocess tests for allow_metaclasses."""
+
+    def test_metaclass_creation_blocked_subprocess(self):
+        """Test metaclass creation is blocked in subprocess."""
+        code = '''
+import sys
+sys.sandbox.set_config(
+    allow_dunder_access=False,
+    allow_class_creation=True,
+    allow_metaclasses=False,
+)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Meta(type):
+    pass
+""", "<sandbox>", "exec"))
+    sys.exit(1)  # Should not reach here
+except SandboxSecurityError:
+    sys.exit(0)  # Expected
+except Exception as e:
+    print(f"Unexpected: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(2)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Metaclass creation should be blocked: {result.stderr}")
+
+    def test_metaclass_usage_blocked_subprocess(self):
+        """Test metaclass usage blocked when not whitelisted in subprocess."""
+        code = '''
+import sys
+sys.sandbox.set_config(
+    allow_dunder_access=False,
+    allow_class_creation=True,
+    allow_metaclasses=False,
+)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+from abc import ABC
+class MyABC(ABC):
+    pass
+""", "<sandbox>", "exec"))
+    sys.exit(1)  # Should not reach here
+except SandboxSecurityError:
+    sys.exit(0)  # Expected
+except Exception as e:
+    print(f"Unexpected: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(2)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Metaclass usage should be blocked: {result.stderr}")
+
+    def test_metaclass_whitelisted_subprocess(self):
+        """Test whitelisted metaclass works in subprocess."""
+        code = '''
+import sys
+from abc import ABCMeta
+sys.sandbox.set_config(
+    allow_dunder_access=False,
+    allow_class_creation=True,
+    allow_metaclasses=False,
+)
+sys.sandbox.allowed_metaclasses = frozenset({ABCMeta})
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+from abc import ABC
+class MyABC(ABC):
+    pass
+""", "<sandbox>", "exec"))
+    sys.exit(0)  # Should succeed
+except Exception as e:
+    print(f"Unexpected: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Whitelisted metaclass should work: {result.stderr}")
 
 
 class AllowMagicMethodsSubprocessTests(unittest.TestCase):

@@ -92,6 +92,9 @@ _PySandbox_Fini(PyInterpreterState *interp)
     /* Free blocked modules set */
     Py_CLEAR(interp->sandbox.allowed_modules);
 
+    /* Free allowed metaclasses set */
+    Py_CLEAR(interp->sandbox.allowed_metaclasses);
+
     /* Free frozen mode side tables */
     Py_CLEAR(interp->sandbox.mutable_objects);
     Py_CLEAR(interp->sandbox.frozen_objects);
@@ -466,6 +469,7 @@ _PySandbox_Reset(PyInterpreterState *interp)
     Py_CLEAR(sandbox->creation_hook.hook_callback);
     Py_CLEAR(sandbox->allowed_imports);
     Py_CLEAR(sandbox->allowed_modules);
+    Py_CLEAR(sandbox->allowed_metaclasses);
 
     /* Clear frozen mode side tables */
     Py_CLEAR(sandbox->mutable_objects);

@@ -363,6 +363,7 @@ SANDBOX_BOOL_GETSET(module_access_restrict_mode, config.module_access_restrict_m
 SANDBOX_BOOL_GETSET(allow_submodules, config.allow_submodules)
 SANDBOX_BOOL_GETSET(allow_class_creation, config.allow_class_creation)
 SANDBOX_BOOL_GETSET(allow_magic_methods, config.allow_magic_methods)
+SANDBOX_BOOL_GETSET(allow_metaclasses, config.allow_metaclasses)
 
 /* opcode_restrict_mode needs special setter to update tracing state */
 static PyObject *
@@ -505,6 +506,65 @@ sandbox_set_allowed_modules(_PySandboxObject *self, PyObject *value, void *closu
     return 0;
 }
 
+/* allowed_metaclasses: frozenset getter / set|frozenset|iterable setter
+ * Stored internally as frozenset for O(1) getter.
+ * When allow_metaclasses=False, only these metaclasses can be used. */
+static PyObject *
+sandbox_get_allowed_metaclasses(_PySandboxObject *self, void *closure)
+{
+    PyInterpreterState *interp = sandbox_get_interp();
+    if (interp == NULL) return NULL;
+
+    PyObject *allowed = interp->sandbox.allowed_metaclasses;
+    if (allowed == NULL) {
+        Py_RETURN_NONE;  /* NULL means no metaclasses allowed */
+    }
+    return Py_NewRef(allowed);
+}
+
+static int
+sandbox_set_allowed_metaclasses(_PySandboxObject *self, PyObject *value, void *closure)
+{
+    if (_PySandbox_CheckConfigModification() < 0) return -1;
+    if (value == NULL) {
+        PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");
+        return -1;
+    }
+
+    PyInterpreterState *interp = sandbox_get_interp();
+    if (interp == NULL) return -1;
+
+    if (value == Py_None) {
+        Py_CLEAR(interp->sandbox.allowed_metaclasses);
+        return 0;
+    }
+
+    /* Validate all items are type objects (metaclasses) */
+    PyObject *iter = PyObject_GetIter(value);
+    if (iter == NULL) return -1;
+
+    PyObject *item;
+    while ((item = PyIter_Next(iter)) != NULL) {
+        if (!PyType_Check(item)) {
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            PyErr_SetString(PyExc_TypeError,
+                            "allowed_metaclasses must contain only type objects");
+            return -1;
+        }
+        Py_DECREF(item);
+    }
+    Py_DECREF(iter);
+    if (PyErr_Occurred()) return -1;
+
+    /* Convert to frozenset for immutability */
+    PyObject *new_frozenset = PyFrozenSet_New(value);
+    if (new_frozenset == NULL) return -1;
+
+    Py_XSETREF(interp->sandbox.allowed_metaclasses, new_frozenset);
+    return 0;
+}
+
 /* ---- Read-only properties (counters) ---- */
 SANDBOX_UINT64_GETTER(iteration_count, counters.iteration_count)
 SANDBOX_UINT64_GETTER(operation_count, counters.operation_count)
@@ -599,6 +659,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_allow_class_creation, "Allow class creation with whitelisted dunders (default True)", NULL},
     {"allow_magic_methods", (getter)sandbox_get_allow_magic_methods,
      (setter)sandbox_set_allow_magic_methods, "Allow magic method definitions in class body (default True)", NULL},
+    {"allow_metaclasses", (getter)sandbox_get_allow_metaclasses,
+     (setter)sandbox_set_allow_metaclasses, "Allow metaclass creation and usage (default True)", NULL},
     /* R/W special */
     {"banned_opcodes", (getter)sandbox_get_banned_opcodes,
      (setter)sandbox_set_banned_opcodes, "Banned opcodes (frozenset of ints)", NULL},
@@ -608,6 +670,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_allowed_imports, "Allowed imports (set of (module, name) tuples)", NULL},
     {"allowed_modules", (getter)sandbox_get_allowed_modules,
      (setter)sandbox_set_allowed_modules, "Allowed modules for access (set of module names, None=no restriction)", NULL},
+    {"allowed_metaclasses", (getter)sandbox_get_allowed_metaclasses,
+     (setter)sandbox_set_allowed_metaclasses, "Allowed metaclasses when allow_metaclasses=False (set of type objects, None=only type)", NULL},
     /* R/O counters */
     {"iteration_count", (getter)sandbox_get_iteration_count,
      NULL, "Current scoped iteration count", NULL},
@@ -635,7 +699,7 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
         "count_iterations_as_operations", "allow_unsafe", "allow_io",
         "import_restrict_mode", "import_allow_submodules",
         "module_access_restrict_mode", "allow_submodules", "allow_class_creation",
-        "allow_magic_methods", NULL
+        "allow_magic_methods", "allow_metaclasses", NULL
     };
 
     PyInterpreterState *interp = sandbox_get_interp();
@@ -666,8 +730,9 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     int allow_submodules = config->allow_submodules;
     int allow_class_creation = config->allow_class_creation;
     int allow_magic_methods = config->allow_magic_methods;
+    int allow_metaclasses = config->allow_metaclasses;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKpppppppppppp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKppppppppppppp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
@@ -680,7 +745,8 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
                                      &allow_unsafe, &allow_io,
                                      &import_restrict_mode, &import_allow_submodules,
                                      &module_access_restrict_mode, &allow_submodules,
-                                     &allow_class_creation, &allow_magic_methods)) {
+                                     &allow_class_creation, &allow_magic_methods,
+                                     &allow_metaclasses)) {
         return NULL;
     }
 
@@ -720,6 +786,7 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     config->allow_submodules = allow_submodules;
     config->allow_class_creation = allow_class_creation;
     config->allow_magic_methods = allow_magic_methods;
+    config->allow_metaclasses = allow_metaclasses;
 
     Py_RETURN_NONE;
 }
@@ -734,7 +801,7 @@ sandbox_get_config(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 
     return Py_BuildValue(
         "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, "
-        "s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O}",
+        "s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O}",
         "max_int_digits", config->max_int_digits,
         "max_str_length", config->max_str_length,
         "max_bytes_length", config->max_bytes_length,
@@ -756,7 +823,8 @@ sandbox_get_config(_PySandboxObject *self, PyObject *Py_UNUSED(args))
         "module_access_restrict_mode", config->module_access_restrict_mode ? Py_True : Py_False,
         "allow_submodules", config->allow_submodules ? Py_True : Py_False,
         "allow_class_creation", config->allow_class_creation ? Py_True : Py_False,
-        "allow_magic_methods", config->allow_magic_methods ? Py_True : Py_False);
+        "allow_magic_methods", config->allow_magic_methods ? Py_True : Py_False,
+        "allow_metaclasses", config->allow_metaclasses ? Py_True : Py_False);
 }
 
 static PyObject *

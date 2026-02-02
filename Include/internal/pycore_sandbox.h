@@ -133,6 +133,12 @@ typedef struct {
      * When allow_magic_methods=1 (default), STORE_NAME allows all dunders in class body.
      * When allow_magic_methods=0, STORE_NAME only allows whitelisted dunders. */
     int allow_magic_methods;
+
+    /* Allow metaclass creation and usage.
+     * When allow_metaclasses=1 (default), all metaclasses allowed.
+     * When allow_metaclasses=0, metaclass creation is blocked and
+     * only metaclasses in allowed_metaclasses set can be used. */
+    int allow_metaclasses;
 } _PySandboxConfig;
 
 /* Sandbox counters - separated from limits for clarity */
@@ -165,6 +171,7 @@ typedef struct {
     .allow_submodules = 1,          \
     .allow_class_creation = 1,      \
     .allow_magic_methods = 1,       \
+    .allow_metaclasses = 1,         \
 }
 
 #define _PySandboxCounters_INIT { \
@@ -271,6 +278,11 @@ typedef struct {
      * Stored as frozenset for O(1) getter performance. */
     PyObject *allowed_modules;
 
+    /* Allowed metaclasses - Python frozenset of type objects.
+     * When allow_metaclasses=0, only metaclasses in this set can be used.
+     * NULL or empty means only `type` is allowed (no custom metaclasses). */
+    PyObject *allowed_metaclasses;
+
     /* Side tables for frozen mode (avoids per-object ob_flags ABI change).
      * mutable_objects: set of objects allowed to be mutated in frozen mode.
      * frozen_objects: set of individually frozen objects.
@@ -298,6 +310,7 @@ typedef struct {
     .registered_filenames = NULL,           \
     .allowed_imports = NULL,                \
     .allowed_modules = NULL,                \
+    .allowed_metaclasses = NULL,            \
     .mutable_objects = NULL,                \
     .frozen_objects = NULL,                 \
 }

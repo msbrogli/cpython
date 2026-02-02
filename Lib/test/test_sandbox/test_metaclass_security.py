@@ -37,7 +37,7 @@ class MetaclassCreationBlockedTests(ScopedFilenameTestCase):
 
     def test_direct_type_subclass_blocked(self):
         """Subclassing type directly should be blocked."""
-        sys.sandbox.set_config(max_operations=10000)
+        sys.sandbox.set_config(max_operations=10000, allow_metaclasses=False)
 
         with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("""
@@ -182,7 +182,7 @@ class SubprocessMetaclassTests(unittest.TestCase):
         """Metaclass creation (subclassing type) should be blocked."""
         code = '''
 import sys
-sys.sandbox.set_config(max_operations=10000, allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.set_config(max_operations=10000, allow_dunder_access=False, allow_class_creation=True, allow_metaclasses=False)
 sys.sandbox.add_filename("<sandbox>")
 
 try:
@@ -208,7 +208,7 @@ except Exception as e:
         """Subclassing type should be blocked in sandbox."""
         code = '''
 import sys
-sys.sandbox.set_config(max_operations=10000, allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.set_config(max_operations=10000, allow_dunder_access=False, allow_class_creation=True, allow_metaclasses=False)
 sys.sandbox.add_filename("<sandbox>")
 
 try:

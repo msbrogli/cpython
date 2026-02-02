@@ -751,41 +751,48 @@ This is useful for creating data-only classes or simple containers without allow
 
 ### Metaclass Security
 
-Sandbox code **cannot** create metaclasses (subclass `type`), but **can** use trusted metaclasses from outside the sandbox:
+The `allow_metaclasses` config flag controls metaclass creation and usage:
+
+**When `allow_metaclasses=True` (default):**
+- All metaclass creation and usage is allowed (backward compatible)
+
+**When `allow_metaclasses=False`:**
+- Metaclass **creation** (subclassing `type`) is blocked
+- Metaclass **usage** is only allowed if the metaclass is in `allowed_metaclasses` set
+- If `allowed_metaclasses` is empty/None, only `type` is allowed (no custom metaclasses)
 
 ```python
-# ALLOWED: Using trusted metaclass from stdlib
-sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+# Restrict metaclass usage to a whitelist
+from abc import ABCMeta
+from enum import EnumType
+
+sys.sandbox.set_config(allow_metaclasses=False)
+sys.sandbox.allowed_metaclasses = frozenset({ABCMeta, EnumType})
 sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
-from abc import ABC, abstractmethod
+from abc import ABC
 from enum import Enum
-from dataclasses import dataclass
 
-# Using ABCMeta (trusted)
+# ALLOWED: ABCMeta is whitelisted
 class Shape(ABC):
-    @abstractmethod
-    def area(self):
-        pass
+    pass
 
-# Using EnumMeta (trusted)
+# ALLOWED: EnumType is whitelisted
 class Color(Enum):
     RED = 1
-    GREEN = 2
 
-# Using dataclass decorator (trusted)
-@dataclass
-class Point:
-    x: int
-    y: int
+# BLOCKED: Creating metaclass (class Meta(type)) is always blocked
 """, "<sandbox>", "exec")
 
-exec(code)  # Works!
+exec(code)
 ```
 
 ```python
 # BLOCKED: Creating metaclass (subclassing type)
+sys.sandbox.set_config(allow_metaclasses=False)
+sys.sandbox.add_filename("<sandbox>")
+
 code = compile("""
 class Meta(type):  # SandboxSecurityError!
     pass
@@ -795,6 +802,75 @@ try:
     exec(code)
 except SandboxSecurityError as e:
     print(e)  # "creating metaclasses (subclassing type) is not allowed in sandbox"
+```
+
+```python
+# BLOCKED: Using non-whitelisted metaclass
+sys.sandbox.set_config(allow_metaclasses=False)
+# allowed_metaclasses is None/empty
+sys.sandbox.add_filename("<sandbox>")
+
+code = compile("""
+from abc import ABC
+class MyABC(ABC):  # SandboxSecurityError - ABCMeta not in whitelist
+    pass
+""", "<sandbox>", "exec")
+
+try:
+    exec(code)
+except SandboxSecurityError as e:
+    print(e)  # "metaclass 'ABCMeta' is not in allowed_metaclasses"
+```
+
+**Inheriting from Trusted Classes with Custom Metaclasses:**
+
+When `allow_metaclasses=False`, sandbox code can inherit from a trusted base class (created outside the sandbox) that has a custom metaclass, provided the metaclass is whitelisted:
+
+```python
+# Create metaclass and base class OUTSIDE sandbox (trusted)
+class TrustedMeta(type):
+    pass
+
+class TrustedBase(metaclass=TrustedMeta):
+    x = 1
+
+# Configure sandbox
+sys.sandbox.set_config(allow_metaclasses=False)
+sys.sandbox.allowed_metaclasses = frozenset({TrustedMeta})  # Whitelist the metaclass
+sys.sandbox.add_filename("<sandbox>")
+
+# Sandbox code can inherit from TrustedBase because TrustedMeta is whitelisted
+code = compile("""
+class Derived(Base):
+    y = 2
+result = Derived.x + Derived.y  # Works: result = 3
+""", "<sandbox>", "exec")
+
+exec(code, {"Base": TrustedBase})  # OK - metaclass is whitelisted
+```
+
+If the metaclass is NOT whitelisted, inheritance is blocked even if the base class is trusted:
+
+```python
+class TrustedMeta(type):
+    pass
+
+class TrustedBase(metaclass=TrustedMeta):
+    pass
+
+sys.sandbox.set_config(allow_metaclasses=False)
+# NOT whitelisting TrustedMeta
+sys.sandbox.add_filename("<sandbox>")
+
+code = compile("""
+class Derived(Base):  # SandboxSecurityError - TrustedMeta not whitelisted
+    pass
+""", "<sandbox>", "exec")
+
+try:
+    exec(code, {"Base": TrustedBase})
+except SandboxSecurityError as e:
+    print(e)  # "metaclass 'TrustedMeta' is not in allowed_metaclasses"
 ```
 
 ### Implicit Dunder Blocking
@@ -2348,6 +2424,8 @@ except SandboxError as e:
 | `sys.sandbox.allow_submodules -> bool` | Check submodule access setting |
 | `sys.sandbox.allowed_modules = frozenset` | Set allowed module names |
 | `sys.sandbox.allowed_modules -> frozenset` | Get allowed modules |
+| `sys.sandbox.allowed_metaclasses = frozenset` | Set allowed metaclasses (type objects) |
+| `sys.sandbox.allowed_metaclasses -> frozenset` | Get allowed metaclasses |
 | `sys.sandbox.use_default_allowed_modules()` | Set safe module defaults |
 
 ### Exceptions
@@ -2382,6 +2460,7 @@ except SandboxError as e:
 | `allow_dunder_access` | bool | False | Allow `__dunder__` attributes |
 | `allow_class_creation` | bool | True | Allow class creation with whitelisted dunders |
 | `allow_magic_methods` | bool | True | Allow magic method definitions in class body |
+| `allow_metaclasses` | bool | True | Allow metaclass creation and usage |
 | `allow_unsafe` | bool | False | Allow unsafe operations (compile, gc introspection) |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterator yields toward `operation_count` |

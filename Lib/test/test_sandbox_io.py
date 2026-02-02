@@ -441,6 +441,7 @@ sys.sandbox.reset()
 sys.sandbox.allowed_imports = {('_socket', ''), ('socket', '')}
 sys.sandbox.allowed_modules = {'_socket', 'socket'}
 sys.sandbox.allow_io = False
+sys.sandbox.allow_dunder_access = 1  # Required for socket.__init__ access
 sys.sandbox.enable()
 sys.sandbox.add_filename(socket.__file__)  # Add socket.py to scope
 sys.sandbox.add_filename('<string>')

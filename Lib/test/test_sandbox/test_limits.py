@@ -84,7 +84,7 @@ class SandboxLimitsTests(unittest.TestCase):
         self.assertEqual(limits['max_tuple_size'], 0)
         self.assertTrue(limits['allow_float'])
         self.assertTrue(limits['allow_complex'])
-        self.assertTrue(limits['allow_dunder_access'])
+        self.assertFalse(limits['allow_dunder_access'])  # Default is False for security
 
     def test_setsandboxlimits_updates_limits(self):
         """setsandboxlimits should update the limits."""

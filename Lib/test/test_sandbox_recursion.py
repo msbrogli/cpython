@@ -100,6 +100,7 @@ class BasicRecursionLimitTest(unittest.TestCase):
 import sys
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 10
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -124,6 +125,7 @@ exec(compile(code_str, '<test>', 'exec'))
 import sys
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 20
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -148,6 +150,7 @@ exec(compile(code_str, '<test>', 'exec'))
 import sys
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 0  # No limit
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -184,6 +187,7 @@ def helper(callback, n):
 
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 5
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -219,6 +223,7 @@ def bridge(callback, *args):
 
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 10  # Low limit to verify only sandbox frames count
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox_a>')
 sys.sandbox.add_filename('<sandbox_b>')
 sys.sandbox.add_filename('<sandbox_c>')
@@ -272,6 +277,7 @@ def bridge_recurse(n, callback):
 
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 5  # Very low limit
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 
 code_str = """
@@ -303,6 +309,7 @@ def bridge(callback, n):
 
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 5
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox_a>')
 sys.sandbox.add_filename('<sandbox_b>')
 
@@ -353,6 +360,7 @@ def bridge3(callback, arg):
 
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 5
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 
 code_str = """
@@ -392,6 +400,7 @@ class GeneratorRecursionTest(unittest.TestCase):
 import sys
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 5
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -420,6 +429,7 @@ exec(compile(code_str, '<test>', 'exec'))
 import sys
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 5
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -449,6 +459,7 @@ class ExceptionHandlingTest(unittest.TestCase):
 import sys
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 20
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -479,6 +490,7 @@ exec(compile(code_str, '<test>', 'exec'))
 import sys
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 5
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -543,6 +555,7 @@ def capture_depth():
 
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 20
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -598,6 +611,7 @@ def trusted_recurse(n, callback):
 
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 20
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -647,6 +661,7 @@ def bridge_and_capture(callback, *args):
 
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 20
+sys.sandbox.enable()
 sys.sandbox.add_filename('<a>')
 sys.sandbox.add_filename('<b>')
 sys.sandbox.add_filename('<c>')
@@ -716,6 +731,7 @@ def record_depth(label):
 
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 20
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """
@@ -766,6 +782,7 @@ class SecurityRegressionTest(unittest.TestCase):
 import sys
 sys.sandbox.reset()
 sys.sandbox.max_recursion_depth = 50
+sys.sandbox.enable()
 sys.sandbox.add_filename('<test>')
 
 code_str = """

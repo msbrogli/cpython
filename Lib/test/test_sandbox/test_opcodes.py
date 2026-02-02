@@ -226,6 +226,8 @@ except SandboxRuntimeError as e:
 import sys
 sys.sandbox.banned_opcodes = {banned}
 sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename("<sandbox>")
 
 try:

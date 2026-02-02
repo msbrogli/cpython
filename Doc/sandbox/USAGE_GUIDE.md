@@ -171,7 +171,7 @@ except SandboxTypeError:
 limits = sys.sandbox.get_config()
 # Returns dict with all current limit values:
 # {'max_int_digits': 100, 'max_str_length': 100000, ...,
-#  'allow_float': True, 'allow_complex': True, 'allow_dunder_access': True}
+#  'allow_float': True, 'allow_complex': True, 'allow_dunder_access': False}
 ```
 
 ### Resetting All State
@@ -2232,7 +2232,7 @@ except SandboxError as e:
 | `max_recursion_depth` | int | 0 | Max sandbox-scoped recursion depth |
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
-| `allow_dunder_access` | bool | True | Allow `__dunder__` attributes |
+| `allow_dunder_access` | bool | False | Allow `__dunder__` attributes |
 | `allow_unsafe` | bool | False | Allow unsafe operations (compile, gc introspection) |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterator yields toward `operation_count` |

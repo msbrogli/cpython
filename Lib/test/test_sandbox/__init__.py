@@ -306,6 +306,12 @@ class SandboxTestCase(TimeoutTestCase):
             sys.sandbox.module_access_restrict_mode = False
         except SandboxSecurityError:
             pass
+        # Enable dunder access for existing tests
+        # (tests were designed with allow_dunder_access=True expectation)
+        try:
+            sys.sandbox.allow_dunder_access = True
+        except SandboxSecurityError:
+            pass
         # Reset counters for clean test state (may fail if in scope)
         try:
             sys.sandbox.reset_counts()

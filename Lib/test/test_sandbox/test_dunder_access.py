@@ -19,10 +19,10 @@ class DunderAccessBlockingTests(unittest.TestCase):
         except RuntimeError:
             pass
 
-    def test_default_allows_dunder(self):
-        """Default should allow dunder access."""
+    def test_default_blocks_dunder(self):
+        """Default should block dunder access for security."""
         limits = sys.sandbox.get_config()
-        self.assertTrue(limits['allow_dunder_access'])
+        self.assertFalse(limits['allow_dunder_access'])
 
     def test_dunder_read_blocked(self):
         """Reading dunder attributes blocked when configured."""

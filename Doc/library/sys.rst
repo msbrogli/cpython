@@ -1632,7 +1632,7 @@ All limit values are also available as read/write properties on the
        'max_scope_statements': 0, 'max_scope_allocations': 0,
        'max_scope_iterations': 0, 'max_scope_operations': 0,
        'allow_float': True, 'allow_complex': True,
-       'allow_dunder_access': True}
+       'allow_dunder_access': False}
 
    .. versionadded:: 3.12
 

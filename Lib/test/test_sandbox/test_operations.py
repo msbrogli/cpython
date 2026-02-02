@@ -23,6 +23,7 @@ def _run_and_count(source, max_ops=100000):
     # Disable import and module access restrictions for legacy tests
     sys.sandbox.import_restrict_mode = False
     sys.sandbox.module_access_restrict_mode = False
+    sys.sandbox.allow_dunder_access = True  # Required for class definitions
     sys.sandbox.set_config(max_operations=max_ops)
     sys.sandbox.add_filename(SANDBOX_FILENAME)
     sys.sandbox.reset_counts()

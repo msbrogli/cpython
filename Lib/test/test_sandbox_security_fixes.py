@@ -28,20 +28,22 @@ def run_sandbox_test(code: str) -> tuple[int, str, str]:
     return result.returncode, result.stdout, result.stderr
 
 
-class StatementLimitPropertySetterTest(unittest.TestCase):
-    """Test that setting max_statements via property enables tracing."""
+class OperationLimitPropertySetterTest(unittest.TestCase):
+    """Test that setting max_operations via property enables tracing."""
 
-    def test_statement_count_increments(self):
-        """Statement count should increment when max_statements is set via property."""
+    def test_operation_count_increments(self):
+        """Operation count should increment when max_operations is set via property."""
         code = '''
 import sys
 # Store reference to sandbox before entering scope (sys access is blocked in scope)
 sandbox = sys.sandbox
-sandbox.max_statements = 1000
+sandbox.max_operations = 1000
+sandbox.count_iterations_as_operations = True  # Enable iteration counting
+sandbox.enable()
 sandbox.add_filename('<string>')
-initial = sandbox.statement_count
+initial = sandbox.operation_count
 for i in range(10): pass
-final = sandbox.statement_count
+final = sandbox.operation_count
 if final > initial:
     print("PASS")
 else:
@@ -50,11 +52,13 @@ else:
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
-    def test_statement_limit_enforced(self):
-        """Statement limit should be enforced when set via property setter."""
+    def test_operation_limit_enforced(self):
+        """Operation limit should be enforced when set via property setter."""
         code = '''
 import sys
-sys.sandbox.max_statements = 20
+sys.sandbox.max_operations = 20
+sys.sandbox.count_iterations_as_operations = True  # Enable iteration counting
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 # The loop should raise SandboxRuntimeError when limit is exceeded
 for i in range(1000): pass
@@ -74,6 +78,7 @@ class ListMultiplicationSizeLimitTest(unittest.TestCase):
         code = '''
 import sys
 sys.sandbox.max_list_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     x = [1, 2, 3] * 1000
@@ -89,6 +94,7 @@ except SandboxOverflowError:
         code = '''
 import sys
 sys.sandbox.max_list_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 x = [1, 2, 3] * 10  # 30 items
 if len(x) == 30:
@@ -104,6 +110,7 @@ else:
         code = '''
 import sys
 sys.sandbox.max_list_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     x = [1] * 1000
@@ -127,6 +134,7 @@ class FrozenModeTest(unittest.TestCase):
         code = '''
 import sys
 sys.sandbox.frozen_mode = 1
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     sys.test_attr = "test"
@@ -148,6 +156,7 @@ class MyObj:
 
 obj = MyObj()
 sys.sandbox.frozen_mode = 1
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     obj.value = 2
@@ -165,6 +174,7 @@ import sys
 d = {"key": "value"}
 sys.sandbox.set_mutable(d, True)
 sys.sandbox.frozen_mode = 1
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 d["new_key"] = "new_value"
 if d.get("new_key") == "new_value":
@@ -183,6 +193,7 @@ class EvalExecBlockingTest(unittest.TestCase):
         """eval() with string should be blocked in sandbox scope."""
         code = '''
 import sys
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     eval('1+1')
@@ -197,6 +208,7 @@ except SandboxSecurityError:
         """exec() with string should be blocked in sandbox scope."""
         code = '''
 import sys
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     exec('x = 1')
@@ -213,6 +225,7 @@ except SandboxSecurityError:
 import sys
 # Compile BEFORE entering sandbox scope
 code = compile('2+2', '<test>', 'eval')
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     result = eval(code)
@@ -229,6 +242,7 @@ except SandboxSecurityError:
 import sys
 # Compile BEFORE entering sandbox scope
 code = compile('test_var = 42', '<test>', 'exec')
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     ns = {}
@@ -245,6 +259,7 @@ except SandboxSecurityError:
         code = '''
 import sys
 sys.sandbox.allow_unsafe = 1
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 result = eval('3+3')
 if result == 6:
@@ -260,6 +275,7 @@ else:
         code = '''
 import sys
 sys.sandbox.allow_unsafe = 1
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 ns = {}
 exec('y = 99', ns)
@@ -279,6 +295,7 @@ class CompileStillBlockedTest(unittest.TestCase):
         """Direct compile() should still be blocked in sandbox scope."""
         code = '''
 import sys
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     compile('x = 1', '<test>', 'exec')
@@ -302,6 +319,7 @@ class FloatTypeBlockingTest(unittest.TestCase):
         code = '''
 import sys
 sys.sandbox.allow_float = 0
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 # Use variables to prevent constant folding
 a = 1
@@ -320,6 +338,7 @@ except SandboxTypeError:
         code = '''
 import sys
 sys.sandbox.allow_float = 0
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     x = float(5)
@@ -339,6 +358,7 @@ except SandboxTypeError:
         code = '''
 import sys
 sys.sandbox.allow_float = 0
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     # 1/2 is constant-folded to 0.5 at compile time
@@ -354,6 +374,7 @@ except SandboxTypeError:
         """Float should be allowed by default."""
         code = '''
 import sys
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 x = 1 / 2
 if x == 0.5:
@@ -373,6 +394,7 @@ class ComplexTypeBlockingTest(unittest.TestCase):
         code = '''
 import sys
 sys.sandbox.allow_complex = 0
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     x = complex(1, 2)
@@ -392,6 +414,7 @@ except SandboxTypeError:
         code = '''
 import sys
 sys.sandbox.allow_complex = 0
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 # Use variables to prevent constant folding
 a = 1
@@ -414,6 +437,7 @@ except SandboxTypeError:
         code = '''
 import sys
 sys.sandbox.allow_complex = 0
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     x = 1+2j  # Complex literal
@@ -428,6 +452,7 @@ except SandboxTypeError:
         """Complex should be allowed by default."""
         code = '''
 import sys
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 x = complex(1, 2)
 if x == (1+2j):
@@ -449,6 +474,7 @@ class LoadConstSizeCheckTest(unittest.TestCase):
         code = f'''
 import sys
 sys.sandbox.max_str_length = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     s = "{large_string}"
@@ -466,6 +492,7 @@ except SandboxOverflowError:
         code = f'''
 import sys
 sys.sandbox.max_tuple_size = 50
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     t = ({tuple_elements})
@@ -482,6 +509,7 @@ except SandboxOverflowError:
 import sys
 sys.sandbox.max_str_length = 100
 sys.sandbox.max_tuple_size = 50
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 s = "hello"
 t = (1, 2, 3)
@@ -502,6 +530,7 @@ class DunderVariableAccessTest(unittest.TestCase):
         code = '''
 import sys
 sys.sandbox.allow_dunder_access = 0
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     x = __builtins__
@@ -517,6 +546,7 @@ except SandboxAttributeError:
         code = '''
 import sys
 sys.sandbox.allow_dunder_access = 0
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     x = __name__
@@ -527,18 +557,41 @@ except SandboxAttributeError:
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
-    def test_dunder_access_allowed_by_default(self):
-        """Dunder variable access should be allowed by default."""
+    def test_dunder_access_blocked_by_default(self):
+        """Dunder variable access should be blocked by default for security."""
         code = '''
 import sys
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
-# allow_dunder_access defaults to 1 (allowed)
-x = __name__
-# __name__ is "__main__" when running with -c
-if x is not None:
+# allow_dunder_access defaults to 0 (blocked) for security
+try:
+    x = __name__
+    # __name__ is a builtin, not a dunder attribute access, so it works
+    # But accessing obj.__class__ should be blocked
+    class Foo:
+        pass
+    cls = Foo.__class__  # This should raise SandboxAttributeError
+    print("FAIL: dunder access should be blocked")
+except SandboxAttributeError:
+    print("PASS: dunder access correctly blocked by default")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_dunder_access_allowed_when_enabled(self):
+        """Dunder variable access should work when explicitly enabled."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=True)
+sys.sandbox.enable()
+sys.sandbox.add_filename('<string>')
+class Foo:
+    pass
+cls = Foo.__class__  # Should work when explicitly enabled
+if cls is not None:
     print("PASS")
 else:
-    print("FAIL: __name__ is None")
+    print("FAIL: __class__ is None")
 '''
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
@@ -552,6 +605,8 @@ class MetaclassBlockingTest(unittest.TestCase):
         code = '''
 import sys
 sys.sandbox.allow_unsafe = 0
+sys.sandbox.allow_dunder_access = 1  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     class Meta(type):
@@ -570,6 +625,8 @@ except SandboxSecurityError:
         code = '''
 import sys
 sys.sandbox.allow_unsafe = 0
+sys.sandbox.allow_dunder_access = 1  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 class Foo:
     def __init__(self):
@@ -589,6 +646,8 @@ else:
         code = '''
 import sys
 sys.sandbox.allow_unsafe = 1
+sys.sandbox.allow_dunder_access = 1  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 class Meta(type):
     pass
@@ -608,6 +667,7 @@ class InputBlockingTest(unittest.TestCase):
         code = '''
 import sys
 sys.sandbox.allow_unsafe = 0
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     x = input("Enter: ")
@@ -627,6 +687,8 @@ except SandboxSecurityError:
         code = '''
 import sys
 sys.sandbox.allow_unsafe = 1
+sys.sandbox.allow_dunder_access = 1  # Required for type(e).__name__
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     # input() with no actual stdin will raise EOFError or RuntimeError
@@ -651,6 +713,7 @@ class DictUpdateBypassTest(unittest.TestCase):
 import sys
 big_dict = {i: i for i in range(500)}
 sys.sandbox.max_dict_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     small_dict = {}
@@ -668,6 +731,7 @@ except SandboxOverflowError:
 import sys
 big_dict = {i: i for i in range(500)}
 sys.sandbox.max_dict_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     small_dict = {}
@@ -685,6 +749,7 @@ except SandboxOverflowError:
 import sys
 small_update = {1: 'a', 2: 'b'}
 sys.sandbox.max_dict_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 d = {}
 d.update(small_update)
@@ -707,6 +772,7 @@ import sys
 # Create large dict BEFORE sandbox
 big_dict = {i: i for i in range(500)}
 sys.sandbox.max_dict_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     copy = big_dict.copy()
@@ -723,6 +789,7 @@ except SandboxOverflowError:
 import sys
 small_dict = {1: 'a', 2: 'b', 3: 'c'}
 sys.sandbox.max_dict_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 copy = small_dict.copy()
 if len(copy) == 3:
@@ -744,6 +811,7 @@ import sys
 # Create large set BEFORE sandbox
 big_set = {i for i in range(500)}
 sys.sandbox.max_set_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     copy = big_set.copy()
@@ -760,6 +828,7 @@ except SandboxOverflowError:
 import sys
 big_set = {i for i in range(500)}
 sys.sandbox.max_set_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     small_set = set()
@@ -777,6 +846,7 @@ except SandboxOverflowError:
 import sys
 big_set = {i for i in range(500)}
 sys.sandbox.max_set_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     result = set().union(big_set)
@@ -793,6 +863,7 @@ except SandboxOverflowError:
 import sys
 small_set = {1, 2, 3, 4, 5}
 sys.sandbox.max_set_size = 100
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 copy = small_set.copy()
 if len(copy) == 5:
@@ -815,6 +886,7 @@ import sys
 exc_info = sys.exc_info
 sys.sandbox.module_access_restrict_mode = True
 sys.sandbox.allowed_modules = frozenset({"sys"})
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     raise ValueError("test")
@@ -860,6 +932,7 @@ def trusted_func():
 
 sys.sandbox.module_access_restrict_mode = True
 sys.sandbox.allowed_modules = frozenset({"sys"})
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     trusted_func()
@@ -886,6 +959,7 @@ import sys
 exc_info = sys.exc_info
 sys.sandbox.module_access_restrict_mode = True
 sys.sandbox.allowed_modules = frozenset({"sys"})
+sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
 try:
     1/0

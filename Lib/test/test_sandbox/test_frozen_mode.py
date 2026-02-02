@@ -447,6 +447,7 @@ class FrozenModeSubprocessTests(unittest.TestCase):
 import sys
 # Set frozen_mode BEFORE entering scope (security feature blocks config changes in scope)
 sys.sandbox.frozen_mode = True
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
 sys.sandbox.enter_scope()
 
 class Foo:
@@ -519,6 +520,7 @@ sys.exit(0)
 import sys
 # Set frozen_mode BEFORE entering scope
 sys.sandbox.frozen_mode = True
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
 sys.sandbox.enter_scope()
 
 class Foo:
@@ -620,6 +622,8 @@ print("PASS")
         """Functions created in sandbox scope should be auto-marked mutable."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
@@ -642,6 +646,8 @@ exec(code)
         """Classes created in sandbox scope should be auto-marked mutable."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
@@ -664,6 +670,8 @@ exec(code)
         """Instances created in sandbox scope should be auto-marked mutable."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
@@ -687,6 +695,8 @@ exec(code)
         """Imported modules should remain frozen (different co_filename)."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
@@ -709,6 +719,8 @@ exec(code)
         """Nested functions should also be auto-marked mutable."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
@@ -734,6 +746,8 @@ exec(code)
         """Closure functions should be auto-marked mutable."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
@@ -762,6 +776,8 @@ exec(code)
         """Decorated functions should be auto-marked mutable."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
@@ -793,6 +809,8 @@ exec(code)
         """Classes created via metaclass should be auto-marked mutable."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
@@ -818,6 +836,8 @@ exec(code)
         """Auto-mutable alone (without frozen mode) should not break anything."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.auto_mutable = True
 # Frozen mode is NOT enabled
@@ -845,6 +865,8 @@ exec(code)
         """Built-in instances (dict, list) created in scope should be mutable."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
@@ -872,6 +894,8 @@ exec(code)
         """Full integration: classes, functions, instances mutable; imports frozen."""
         code = '''
 import sys
+sys.sandbox.allow_dunder_access = True  # Required for class definitions
+sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True

@@ -180,7 +180,7 @@ class SubprocessMetaclassTests(unittest.TestCase):
         """Attempt to use metaclass __new__ to escape sandbox."""
         code = '''
 import sys
-sys.sandbox.set_config(max_list_size=10)
+sys.sandbox.set_config(max_list_size=10, allow_dunder_access=True)
 sys.sandbox.enter_scope()
 
 try:
@@ -217,7 +217,7 @@ except Exception as e:
         """
         code = '''
 import sys
-sys.sandbox.set_config(max_operations=10000)
+sys.sandbox.set_config(max_operations=10000, allow_dunder_access=True)
 sys.sandbox.enter_scope()
 
 try:
@@ -245,7 +245,7 @@ except Exception as e:
         """
         code = '''
 import sys
-sys.sandbox.set_config(max_operations=10000)
+sys.sandbox.set_config(max_operations=10000, allow_dunder_access=True)
 sys.sandbox.enter_scope()
 
 class Foo:

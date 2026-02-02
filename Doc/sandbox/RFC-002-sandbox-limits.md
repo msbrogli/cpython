@@ -197,7 +197,7 @@ typedef struct {
     /* Type/access restrictions */
     int allow_float;                /* 1 = allowed, 0 = forbidden */
     int allow_complex;              /* 1 = allowed, 0 = forbidden */
-    int allow_dunder_access;        /* 1 = allowed, 0 = blocked */
+    int allow_dunder_access;        /* 0 = blocked (default), 1 = allowed */
     int allow_unsafe;               /* 1 = allowed, 0 = blocked */
     int allow_io;                   /* 1 = allowed, 0 = blocked (default) */
     int count_iterations_as_operations;  /* 1 = count iterations as ops */
@@ -455,7 +455,7 @@ Called from:
 | `max_recursion_depth` | int | 0 | Max sandbox frame recursion depth |
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
-| `allow_dunder_access` | bool | True | Allow `__dunder__` access |
+| `allow_dunder_access` | bool | False | Allow `__dunder__` access |
 | `allow_unsafe` | bool | False | Allow unsafe operations |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterations as operations |

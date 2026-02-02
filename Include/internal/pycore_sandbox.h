@@ -92,7 +92,7 @@ typedef struct {
     int allow_complex;       /* 0 = forbidden, 1 = allowed (default) */
 
     /* Allow access to dunder attributes (names containing __) */
-    int allow_dunder_access;     /* 1 = allowed (default), 0 = block __ attributes */
+    int allow_dunder_access;     /* 0 = block __ attributes (default), 1 = allowed */
 
     /* Count iterator yields as operations towards max_operations */
     int count_iterations_as_operations;  /* 0 = off (default), 1 = each yield increments operation_count */
@@ -142,7 +142,7 @@ typedef struct {
     .max_recursion_depth = 0,       \
     .allow_float = 1,               \
     .allow_complex = 1,             \
-    .allow_dunder_access = 1,       \
+    .allow_dunder_access = 0,       \
     .count_iterations_as_operations = 0, \
     .allow_unsafe = 0,              \
     .allow_io = 0,                  \

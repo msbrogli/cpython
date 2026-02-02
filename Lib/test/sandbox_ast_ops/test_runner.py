@@ -59,27 +59,27 @@ def save_expected(test_file, bytecode):
 def run_test(test_file, generate=False):
     """
     Run a single test case.
-    
+
     Returns:
         (passed, message, total_ops)
     """
     source = test_file.read_text()
-    
+
     # Extract bytecode
     ops = extract_bytecode(source, str(test_file))
     bytecode = format_bytecode(ops)
     total_ops = get_total_operations_count(ops)
-    
+
     if generate:
         # Generate expected output
         expected_file = save_expected(test_file, bytecode)
         return True, f"Generated expected output: {expected_file}", total_ops
-    
+
     # Compare with expected
     expected = load_expected(test_file)
     if expected is None:
         return False, f"No expected output found (run with --generate)", total_ops
-    
+
     # Parse expected bytecode
     # Expected format: "offset: L<line> OPNAME arg" or "offset:      OPNAME arg"
     expected_ops = []
@@ -108,43 +108,43 @@ def run_test(test_file, generate=False):
             # Create OpcodeInfo without position info for comparison
             from bytecode_extract import OpcodeInfo
             expected_ops.append(OpcodeInfo(offset, opname, arg, None, None, None))
-    
+
     is_equal, message = compare_bytecode(expected_ops, ops)
-    
+
     return is_equal, message, total_ops
 
 
 def test_deterministic(test_file):
     """
     Test that bytecode extraction is deterministic (same result every time).
-    
+
     Returns:
         (consistent, message, total_ops1, total_ops2)
     """
     source = test_file.read_text()
-    
+
     # Extract bytecode twice
     ops1 = extract_bytecode(source, str(test_file))
     total_ops1 = get_total_operations_count(ops1)
-    
+
     ops2 = extract_bytecode(source, str(test_file))
     total_ops2 = get_total_operations_count(ops2)
-    
+
     # Should be exactly the same
     is_consistent = total_ops1 == total_ops2
-    
+
     if is_consistent:
         message = f"Deterministic: {total_ops1} operations (consistent across runs)"
     else:
         message = f"Non-deterministic: {total_ops1} vs {total_ops2} - WARNING!"
-    
+
     return is_consistent, message, total_ops1, total_ops2
 
 
 def run_all_tests(generate=False, deterministic_check=False):
     """Run all discovered tests."""
     tests = discover_tests()
-    
+
     results = {
         'passed': 0,
         'failed': 0,
@@ -153,21 +153,21 @@ def run_all_tests(generate=False, deterministic_check=False):
         'non_deterministic': 0,
         'details': []
     }
-    
+
     print(f"\n{'='*70}")
     print("SANDBOX_COUNT AST Operations Count Tests")
     print(f"{'='*70}\n")
-    
+
     for category in TEST_CATEGORIES:
         if category not in tests or not tests[category]:
             continue
-        
+
         print(f"\n{category.upper()} TESTS:")
         print("-" * 70)
-        
+
         for test_file in tests[category]:
             test_name = test_file.name
-            
+
             if generate:
                 passed, message, total_ops = run_test(test_file, generate=True)
                 results['generated'] += 1
@@ -192,12 +192,12 @@ def run_all_tests(generate=False, deterministic_check=False):
                 print(f"  {status} {test_name:<40} ops={total_ops}")
                 if not passed:
                     print(f"       -> {message}")
-    
+
     # Print summary
     print(f"\n{'='*70}")
     print("SUMMARY:")
     print(f"{'='*70}")
-    
+
     if generate:
         print(f"Generated {results['generated']} expected output files")
     elif deterministic_check:
@@ -215,14 +215,14 @@ def run_all_tests(generate=False, deterministic_check=False):
 def list_tests():
     """List all available test cases."""
     tests = discover_tests()
-    
+
     print("\nAvailable Test Cases:")
     print("=" * 70)
-    
+
     for category in TEST_CATEGORIES:
         if category not in tests or not tests[category]:
             continue
-        
+
         print(f"\n{category.upper()}:")
         for test_file in tests[category]:
             # Read first comment line for description
@@ -247,20 +247,20 @@ def main():
                         help='Test bytecode extraction determinism')
     parser.add_argument('test_file', nargs='?',
                         help='Run specific test file')
-    
+
     args = parser.parse_args()
-    
+
     if args.list:
         list_tests()
         return 0
-    
+
     if args.test_file:
         # Run specific test
         test_file = Path(args.test_file)
         if not test_file.exists():
             print(f"Error: Test file not found: {test_file}")
             return 1
-        
+
         if args.deterministic_check:
             consistent, message, total_ops1, total_ops2 = test_deterministic(test_file)
             print(f"Test: {test_file.name}")
@@ -276,7 +276,7 @@ def main():
             if not passed:
                 print(f"  Message: {message}")
             return 0 if passed else 1
-    
+
     # Run all tests
     success = run_all_tests(generate=args.generate, deterministic_check=args.deterministic_check)
     return 0 if success else 1

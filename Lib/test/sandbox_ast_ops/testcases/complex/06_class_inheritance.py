@@ -7,7 +7,7 @@ class Base:
 class Derived(Base):
     def __init__(self):
         self.value = 0
-    
+
     def compute(self, x):
         return self.value + x
 

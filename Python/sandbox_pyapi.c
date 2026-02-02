@@ -13,6 +13,7 @@
 #include "pycore_pystate.h"
 #include "pycore_sandbox.h"
 #include "pycore_sandbox_impl.h"
+#include "pycore_typeobject.h"
 #include "frameobject.h"
 
 /* ============ Object Creation Hook ============ */
@@ -1204,6 +1205,21 @@ static PyTypeObject _PySandboxObject_Type = {
 /* ============ Factory ============ */
 
 static int _sandbox_types_ready = 0;
+
+/* Finalize sandbox types during interpreter shutdown */
+void
+_PySandbox_FiniTypes(PyInterpreterState *interp)
+{
+    if (!_Py_IsMainInterpreter(interp)) {
+        return;
+    }
+    if (_sandbox_types_ready) {
+        _PyStaticType_Dealloc(&_PySandboxSuspendContext_Type);
+        _PyStaticType_Dealloc(&_PySandboxScopeContext_Type);
+        _PyStaticType_Dealloc(&_PySandboxObject_Type);
+        _sandbox_types_ready = 0;
+    }
+}
 
 PyObject *
 _PySandbox_NewObject(void)

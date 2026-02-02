@@ -415,6 +415,10 @@ PyAPI_FUNC(PyObject *) _PySandbox_CallCreationHook(
 PyAPI_FUNC(void) _PySandbox_Init(PyInterpreterState *interp);
 PyAPI_FUNC(void) _PySandbox_Fini(PyInterpreterState *interp);
 
+/* Finalize sandbox types (called during interpreter finalization) */
+PyAPI_FUNC(void) _PySandbox_FiniTypes(PyInterpreterState *interp);
+PyAPI_FUNC(void) _PySandbox_FiniIteratorType(PyInterpreterState *interp);
+
 /* ============ Iterator Wrapper ============ */
 
 /* Sandbox iterator wrapper type - wraps iterators to check limits on each step */

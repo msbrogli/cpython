@@ -99,6 +99,10 @@ _PySandbox_Fini(PyInterpreterState *interp)
     Py_CLEAR(interp->sandbox.creation_hook.hook_callback);
     interp->sandbox.creation_hook.hook_func = NULL;
     interp->sandbox.creation_hook.hook_userdata = NULL;
+
+    /* Finalize sandbox static types to avoid memory leaks */
+    _PySandbox_FiniIteratorType(interp);
+    _PySandbox_FiniTypes(interp);
 }
 
 /* ============ Registered Filenames Set ============ */

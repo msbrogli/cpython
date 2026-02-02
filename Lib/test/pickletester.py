@@ -1998,6 +1998,18 @@ class AbstractPickleTests:
                     self.assertIs(self.loads(s), t)
 
     def test_builtin_exceptions(self):
+        # Sandbox exceptions map to their closest Python 2 equivalents for proto <= 2
+        sandbox_exception_mapping = {
+            'SandboxError': Exception,
+            'SandboxAttributeError': AttributeError,
+            'SandboxImportError': ImportError,
+            'SandboxMemoryError': MemoryError,
+            'SandboxOverflowError': OverflowError,
+            'SandboxRecursionError': RuntimeError,
+            'SandboxRuntimeError': RuntimeError,
+            'SandboxSecurityError': RuntimeError,
+            'SandboxTypeError': TypeError,
+        }
         for t in builtins.__dict__.values():
             if isinstance(t, type) and issubclass(t, BaseException):
                 for proto in protocols:
@@ -2005,8 +2017,11 @@ class AbstractPickleTests:
                     u = self.loads(s)
                     if proto <= 2 and issubclass(t, OSError) and t is not BlockingIOError:
                         self.assertIs(u, OSError)
-                    elif proto <= 2 and issubclass(t, ImportError):
+                    elif proto <= 2 and issubclass(t, ImportError) and t.__name__ not in sandbox_exception_mapping:
                         self.assertIs(u, ImportError)
+                    elif proto <= 2 and t.__name__ in sandbox_exception_mapping:
+                        # Sandbox exceptions only exist in Python 3
+                        self.assertIs(u, sandbox_exception_mapping[t.__name__])
                     else:
                         self.assertIs(u, t)
 

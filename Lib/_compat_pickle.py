@@ -250,3 +250,15 @@ PYTHON3_IMPORTERROR_EXCEPTIONS = (
 for excname in PYTHON3_IMPORTERROR_EXCEPTIONS:
     REVERSE_NAME_MAPPING[('builtins', excname)] = ('exceptions', 'ImportError')
 del excname
+
+# Sandbox exceptions (Python 3.x only) -> closest Python 2 equivalent
+# These exceptions don't exist in Python 2, so map them to their base types
+REVERSE_NAME_MAPPING[('builtins', 'SandboxError')] = ('exceptions', 'Exception')
+REVERSE_NAME_MAPPING[('builtins', 'SandboxAttributeError')] = ('exceptions', 'AttributeError')
+REVERSE_NAME_MAPPING[('builtins', 'SandboxImportError')] = ('exceptions', 'ImportError')
+REVERSE_NAME_MAPPING[('builtins', 'SandboxMemoryError')] = ('exceptions', 'MemoryError')
+REVERSE_NAME_MAPPING[('builtins', 'SandboxOverflowError')] = ('exceptions', 'OverflowError')
+REVERSE_NAME_MAPPING[('builtins', 'SandboxRecursionError')] = ('exceptions', 'RuntimeError')
+REVERSE_NAME_MAPPING[('builtins', 'SandboxRuntimeError')] = ('exceptions', 'RuntimeError')
+REVERSE_NAME_MAPPING[('builtins', 'SandboxSecurityError')] = ('exceptions', 'RuntimeError')
+REVERSE_NAME_MAPPING[('builtins', 'SandboxTypeError')] = ('exceptions', 'TypeError')

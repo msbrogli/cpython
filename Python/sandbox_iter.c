@@ -9,10 +9,24 @@
 #include "pycore_pystate.h"
 #include "pycore_sandbox.h"
 #include "pycore_sandbox_impl.h"
+#include "pycore_typeobject.h"
 
 /* Declared in sandbox_core.c */
 extern int _sandbox_wrapper_type_ready;
 extern int _PySandbox_InitWrapperType(void);
+
+/* Finalize the iterator wrapper type during interpreter shutdown */
+void
+_PySandbox_FiniIteratorType(PyInterpreterState *interp)
+{
+    if (!_Py_IsMainInterpreter(interp)) {
+        return;
+    }
+    if (_sandbox_wrapper_type_ready) {
+        _PyStaticType_Dealloc(&_PySandboxIteratorWrapper_Type);
+        _sandbox_wrapper_type_ready = 0;
+    }
+}
 
 /* ============ Sandbox Iterator Wrapper ============ */
 

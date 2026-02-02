@@ -182,5 +182,162 @@ sys.exit(0)
         self.assertIn("OK: 42", result.stdout)
 
 
+class ClassBodyWhitelistTests(unittest.TestCase):
+    """Test class body dunder whitelist with allow_class_creation=True."""
+
+    def setUp(self):
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        sys.sandbox.set_config(**self.original_limits)
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+
+    def test_class_creation_allowed_with_whitelist(self):
+        """Class creation should work with allow_class_creation=True."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Foo:
+    x = 1
+    def method(self):
+        return self.x
+""", "<sandbox>", "exec"))
+    print("OK: class created")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_class_with_slots_allowed(self):
+        """Class with __slots__ should work."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Point:
+    __slots__ = ('x', 'y')
+""", "<sandbox>", "exec"))
+    print("OK: class with __slots__ created")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_class_with_annotations_allowed(self):
+        """Class with __annotations__ should work."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Config:
+    debug: bool = False
+    max_size: int = 100
+""", "<sandbox>", "exec"))
+    print("OK: class with annotations created")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_class_with_docstring_allowed(self):
+        """Class with __doc__ should work."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Documented:
+    "This class has a docstring."
+    pass
+""", "<sandbox>", "exec"))
+    print("OK: class with docstring created")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_introspection_dunder_still_blocked(self):
+        """Introspection dunders like __class__ should still be blocked."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+x = {}
+c = x.__class__
+""", "<sandbox>", "exec"))
+    print("ERROR: should have raised")
+    sys.exit(1)
+except SandboxAttributeError:
+    print("OK: __class__ blocked")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(2)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_allow_class_creation_property_exists(self):
+        """allow_class_creation property should exist on sys.sandbox."""
+        code = '''
+import sys
+# Check property exists and has correct default
+if hasattr(sys.sandbox, 'allow_class_creation'):
+    if sys.sandbox.allow_class_creation == True:  # Default is True
+        print("OK: property exists with correct default")
+        sys.exit(0)
+    else:
+        print("ERROR: wrong default value")
+        sys.exit(1)
+else:
+    print("ERROR: property does not exist")
+    sys.exit(2)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

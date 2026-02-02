@@ -8,6 +8,7 @@
 #include "pycore_pystate.h"
 #include "pycore_sandbox.h"
 #include "pycore_sandbox_impl.h"
+#include "pycore_code.h"  /* For CO_CLASS_BODY */
 
 /* ============ Size Limit Checks ============ */
 
@@ -319,12 +320,38 @@ is_iter_dunder(PyObject *name)
     return _PyUnicode_EqualToASCIIString(name, "__iter__");
 }
 
+/* Whitelist of dunders allowed in class body when allow_class_creation=1.
+ * These are needed for class creation machinery to function:
+ * - __name__: injected by compiler for class body
+ * - __module__: set by class body
+ * - __qualname__: set by class body
+ * - __annotations__: for annotated class variables
+ * - __doc__: docstrings
+ * - __classcell__: for super() support
+ * - __slots__: slot definitions
+ * Returns: 1 if whitelisted, 0 otherwise. */
+static int
+is_class_body_safe_dunder(PyObject *name)
+{
+    return (_PyUnicode_EqualToASCIIString(name, "__name__") ||
+            _PyUnicode_EqualToASCIIString(name, "__module__") ||
+            _PyUnicode_EqualToASCIIString(name, "__qualname__") ||
+            _PyUnicode_EqualToASCIIString(name, "__annotations__") ||
+            _PyUnicode_EqualToASCIIString(name, "__doc__") ||
+            _PyUnicode_EqualToASCIIString(name, "__classcell__") ||
+            _PyUnicode_EqualToASCIIString(name, "__slots__"));
+}
+
 /* _PySandbox_CheckDunderAccess - Check if dunder attribute access is blocked
  *
  * This function is called from ceval.c for LOAD_ATTR, STORE_ATTR, DELETE_ATTR.
  * It blocks access to:
  * - __iter__ when allow_unsafe=0
  * - All dunder attributes when allow_dunder_access=0
+ *
+ * Special handling for class body context:
+ * - When allow_class_creation=1 and in a class body (CO_CLASS_BODY flag),
+ *   certain dunders needed for class creation are whitelisted.
  *
  * Requirements for blocking:
  * - Sandbox is not suspended and not in recursive check
@@ -377,6 +404,18 @@ _PySandbox_CheckDunderAccess(PyObject *name)
         return -1;
     }
 
+    /* Check class body whitelist before blocking general dunder access.
+     * When allow_class_creation=1 and we're in a class body (CO_CLASS_BODY flag),
+     * allow certain dunders needed for class creation machinery. */
+    if (check_dunder && config->allow_class_creation) {
+        if (frame->f_code != NULL &&
+            (frame->f_code->co_flags & CO_CLASS_BODY)) {
+            if (is_class_body_safe_dunder(name)) {
+                return 0;  /* Allow this dunder in class body */
+            }
+        }
+    }
+
     /* Block general dunder access if allow_dunder_access=0 */
     if (check_dunder) {
         sandbox->suppress_checks = 1;
@@ -387,6 +426,113 @@ _PySandbox_CheckDunderAccess(PyObject *name)
     }
 
     return 0;
+}
+
+/* ============ Metaclass Creation Checking ============ */
+
+/* Check if any base is `type` or a subclass of `type` (i.e., creating a metaclass).
+ * A metaclass is created when a class inherits from `type`.
+ * Returns: 1 if metaclass creation, 0 if normal class, -1 on error */
+static int
+is_metaclass_creation(PyObject *bases)
+{
+    if (!PyTuple_Check(bases)) {
+        return 0;
+    }
+    Py_ssize_t n = PyTuple_GET_SIZE(bases);
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *base = PyTuple_GET_ITEM(bases, i);
+        /* Check if base is `type` itself */
+        if (base == (PyObject *)&PyType_Type) {
+            return 1;
+        }
+        /* Check if base is a metaclass (subclass of type).
+         * We use PyType_IsSubtype to check if the base IS a type object
+         * and then check if it's a subtype of type.
+         * All metaclasses are instances of type, but we specifically want
+         * classes whose instances are classes (i.e., metaclasses). */
+        if (PyType_Check(base)) {
+            /* Check if this type is a subclass of type (a metaclass) */
+            int is_subtype = PyObject_IsSubclass(base, (PyObject *)&PyType_Type);
+            if (is_subtype < 0) {
+                return -1;  /* Error */
+            }
+            if (is_subtype) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* _PySandbox_CheckMetaclassAllowed - Check if metaclass creation/usage is allowed
+ *
+ * Called from __build_class__ to prevent sandbox code from:
+ * 1. Creating metaclasses (subclassing type)
+ * 2. Using metaclasses that were created in sandbox (future enhancement)
+ *
+ * When allow_class_creation=1:
+ * - Sandbox code can create normal classes (inheriting from object, etc.)
+ * - Sandbox code CANNOT create metaclasses (inheriting from type)
+ * - Sandbox code CAN use trusted metaclasses passed from outside sandbox
+ *
+ * Returns: 0 if allowed, -1 if blocked (SandboxSecurityError set)
+ */
+int
+_PySandbox_CheckMetaclassAllowed(PyObject *meta, PyObject *bases)
+{
+    _PySandboxState *sandbox = get_sandbox_state();
+    if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
+        return 0;
+    }
+    _PySandboxConfig *config = &sandbox->config;
+
+    /* If class creation is disabled, don't do special metaclass checks here.
+     * The dunder access checks will block class creation anyway. */
+    if (!config->allow_class_creation) {
+        return 0;
+    }
+
+    if (sandbox->registered_filenames == NULL) {
+        return 0;  /* No scope registered */
+    }
+
+    /* Check if currently in sandbox scope */
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    if (frame == NULL) {
+        return 0;
+    }
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;  /* Error during scope check */
+    }
+    if (!in_scope) {
+        return 0;  /* Not in scope, allow everything */
+    }
+
+    /* Check 1: Block metaclass CREATION (subclassing type).
+     * This prevents sandbox code from creating their own metaclasses. */
+    int creating_metaclass = is_metaclass_creation(bases);
+    if (creating_metaclass < 0) {
+        return -1;  /* Error */
+    }
+    if (creating_metaclass) {
+        sandbox->suppress_checks = 1;
+        PyErr_SetString(PyExc_SandboxSecurityError,
+                        "creating metaclasses (subclassing type) is not allowed in sandbox");
+        sandbox->suppress_checks = 0;
+        return -1;
+    }
+
+    /* Note: We explicitly ALLOW using non-standard metaclasses here.
+     * If meta != type, it means the class has a custom metaclass.
+     * This is ALLOWED because:
+     * - The metaclass must come from trusted code (sandbox can't create metaclasses
+     *   due to Check 1 above)
+     * - This allows sandboxed code to subclass from base classes that have
+     *   metaclasses (like ABCMeta, dataclasses, etc.) */
+
+    return 0;  /* Allowed */
 }
 
 /* ============ Unsafe Operation Checking ============ */

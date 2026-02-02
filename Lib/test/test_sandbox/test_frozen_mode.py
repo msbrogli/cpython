@@ -809,15 +809,19 @@ exec(code)
         """Classes created via metaclass should be auto-marked mutable."""
         code = '''
 import sys
+
+# Create trusted metaclass OUTSIDE sandbox scope
+class Meta(type):
+    pass
+
 sys.sandbox.allow_dunder_access = True  # Required for class definitions
 sys.sandbox.enable()
 sys.sandbox.add_filename('<sandbox>')
 sys.sandbox.frozen_mode = True
 sys.sandbox.auto_mutable = True
-sys.sandbox.allow_unsafe = True  # Allow metaclasses
+
+# Pass the trusted metaclass to sandboxed code
 code = compile("""
-class Meta(type):
-    pass
 class MyClass(metaclass=Meta):
     pass
 MyClass.attr = 'meta'
@@ -826,7 +830,7 @@ if MyClass.attr != 'meta':
     sys.exit(1)
 print("PASS")
 """, '<sandbox>', 'exec')
-exec(code)
+exec(code, {'Meta': Meta})
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,

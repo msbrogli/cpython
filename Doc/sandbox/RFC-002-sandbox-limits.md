@@ -198,6 +198,7 @@ typedef struct {
     int allow_float;                /* 1 = allowed, 0 = forbidden */
     int allow_complex;              /* 1 = allowed, 0 = forbidden */
     int allow_dunder_access;        /* 0 = blocked (default), 1 = allowed */
+    int allow_class_creation;       /* 1 = allow class creation with whitelisted dunders (default) */
     int allow_unsafe;               /* 1 = allowed, 0 = blocked */
     int allow_io;                   /* 1 = allowed, 0 = blocked (default) */
     int count_iterations_as_operations;  /* 1 = count iterations as ops */
@@ -374,6 +375,17 @@ _PySandbox_CheckDunderAccess(PyObject *name)
         return 0;
     }
 
+    /* Class body whitelist: allow certain dunders needed for class creation
+     * when allow_class_creation is enabled and we're in a class body */
+    if (sandbox->config.allow_class_creation) {
+        PyCodeObject *code = frame->f_code;
+        if (code->co_flags & CO_CLASS_BODY) {
+            if (is_class_body_safe_dunder(name)) {
+                return 0;  /* Allowed in class body context */
+            }
+        }
+    }
+
     PyErr_Format(PyExc_SandboxAttributeError,
                  "dunder attribute access blocked in sandbox: '%U'", name);
     return -1;
@@ -385,7 +397,69 @@ is_dunder_name(PyObject *name)
     const char *str = PyUnicode_AsUTF8(name);
     return strstr(str, "__") != NULL;
 }
+
+/* Whitelist of dunders allowed in class body context */
+static int
+is_class_body_safe_dunder(PyObject *name)
+{
+    return (_PyUnicode_EqualToASCIIString(name, "__name__") ||
+            _PyUnicode_EqualToASCIIString(name, "__module__") ||
+            _PyUnicode_EqualToASCIIString(name, "__qualname__") ||
+            _PyUnicode_EqualToASCIIString(name, "__annotations__") ||
+            _PyUnicode_EqualToASCIIString(name, "__doc__") ||
+            _PyUnicode_EqualToASCIIString(name, "__classcell__") ||
+            _PyUnicode_EqualToASCIIString(name, "__slots__"));
+}
 ```
+
+### Class Body Whitelist
+
+When `allow_class_creation=True` (default) and dunder access is blocked, certain dunders are whitelisted within class body execution (identified by `CO_CLASS_BODY` flag):
+
+| Dunder | Purpose |
+|--------|---------|
+| `__name__` | Class name (injected by compiler) |
+| `__module__` | Module where class is defined |
+| `__qualname__` | Qualified name |
+| `__annotations__` | Type annotations |
+| `__doc__` | Docstrings |
+| `__classcell__` | For `super()` support |
+| `__slots__` | Slot definitions |
+
+This allows class definitions to work while still blocking introspection dunders like `__class__`, `__bases__`, `__dict__`, etc.
+
+**Limitation:** The whitelist only applies during class body execution. Method dunders like `__init__` accessed as attributes (e.g., `super().__init__()`) are blocked. Use `allow_dunder_access=True` if such patterns are needed.
+
+## Metaclass Creation Check
+
+Sandbox code cannot create metaclasses (subclass `type`) but can use trusted metaclasses from outside the sandbox:
+
+```c
+int
+_PySandbox_CheckMetaclassAllowed(PyObject *meta, PyObject *bases)
+{
+    /* ... get sandbox state ... */
+    if (!_PySandbox_IsEnforced(sandbox)) {
+        return 0;
+    }
+
+    /* Check if meta is type and we're creating a metaclass */
+    if (!is_metaclass_creation(meta, bases)) {
+        return 0;  /* Not creating a metaclass - allowed */
+    }
+
+    /* Block metaclass creation from within sandbox scope */
+    if (frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "creating metaclasses (subclassing type) is not allowed in sandbox");
+        return -1;
+    }
+
+    return 0;
+}
+```
+
+This prevents sandbox code from creating custom metaclasses that could override `__new__` or `__call__` to execute arbitrary code during class creation.
 
 ## Unsafe Operation Check
 
@@ -456,6 +530,7 @@ Called from:
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | False | Allow `__dunder__` access |
+| `allow_class_creation` | bool | True | Allow class creation with whitelisted dunders |
 | `allow_unsafe` | bool | False | Allow unsafe operations |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterations as operations |
@@ -498,7 +573,8 @@ Called from:
 | `Python/ceval.c` | `LOAD_ATTR`, etc. | `_PySandbox_CheckDunderAccess()` |
 | `Python/ceval.c` | `LOAD_NAME` (dunder variables) | `_PySandbox_CheckDunderAccess()` |
 | `Python/ceval.c` | `LOAD_GLOBAL` (dunder variables) | `_PySandbox_CheckDunderAccess()` |
-| `Python/bltinmodule.c` | `__build_class__` (metaclass) | `_PySandbox_CheckUnsafeBlocked()` |
+| `Python/bltinmodule.c` | `__build_class__` (metaclass) | `_PySandbox_CheckMetaclassAllowed()` |
+| `Python/compile.c` | `compute_code_flags()` | Sets `CO_CLASS_BODY` flag for class bodies |
 | `Modules/_io/_iomodule.c` | `_io_open_impl()` | `_PySandbox_CheckIOAllowed()` |
 | `Modules/_io/fileio.c` | `_io_FileIO___init___impl()` | `_PySandbox_CheckIOAllowed()` |
 | `Modules/socketmodule.c` | `sock_initobj_impl()` | `_PySandbox_CheckIOAllowed()` |

@@ -111,6 +111,7 @@ Each exception type has specific error message formats:
 | `SandboxAttributeError` | `"dunder attribute access blocked in sandbox: '__class__'"` |
 | `SandboxSecurityError` | `"compile() is not allowed in sandbox"` |
 | `SandboxSecurityError` | `"Cannot modify sandbox configuration from within sandbox scope"` |
+| `SandboxSecurityError` | `"creating metaclasses (subclassing type) is not allowed in sandbox"` |
 | `SandboxImportError` | `"Import of 'os' is not allowed in sandbox"` |
 
 ## Checking Exception Type
@@ -294,6 +295,15 @@ _PySandbox_CheckConfigModification(void)
     /* ... checks ... */
     PyErr_SetString(PyExc_SandboxSecurityError,
                     "Cannot modify sandbox configuration from within sandbox scope");
+    return -1;
+}
+
+int
+_PySandbox_CheckMetaclassAllowed(PyObject *meta, PyObject *bases)
+{
+    /* ... checks ... */
+    PyErr_SetString(PyExc_SandboxSecurityError,
+                    "creating metaclasses (subclassing type) is not allowed in sandbox");
     return -1;
 }
 ```

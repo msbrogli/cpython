@@ -87,7 +87,8 @@ except SandboxError as e:
 | `Objects/descrobject.c` | Dunder check, frozen check |
 | `Objects/exceptions.c` | Sandbox exceptions |
 | `Python/ceval.c` | Statement/operation counting, opcode check |
-| `Python/compile.c` | SANDBOX_COUNT emission |
+| `Python/compile.c` | SANDBOX_COUNT emission, CO_CLASS_BODY flag |
+| `Python/bltinmodule.c` | Metaclass creation check |
 | `Modules/gcmodule.c` | Allocation counting |
 | `Modules/_io/_iomodule.c` | I/O check (open) |
 | `Modules/_io/fileio.c` | I/O check (FileIO) |
@@ -122,6 +123,7 @@ Exception
 | Float restriction | 002 | `allow_float` |
 | Complex restriction | 002 | `allow_complex` |
 | Dunder blocking | 002 | `allow_dunder_access` |
+| Class creation | 002 | `allow_class_creation` |
 | Unsafe blocking | 002 | `allow_unsafe` |
 | I/O blocking | 002 | `allow_io` |
 | Iteration limit | 004 | `max_iterations` |

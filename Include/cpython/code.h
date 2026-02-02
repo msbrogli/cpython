@@ -109,6 +109,7 @@ struct PyCodeObject _PyCode_DEF(1);
 #define CO_VARKEYWORDS  0x0008
 #define CO_NESTED       0x0010
 #define CO_GENERATOR    0x0020
+#define CO_CLASS_BODY   0x0040  /* class body code object (for sandbox whitelist) */
 
 /* The CO_COROUTINE flag is set for coroutine functions (defined with
    ``async def`` keywords) */

@@ -314,6 +314,19 @@ frame_in_sandbox_scope(PyObject *registered_filenames, _PyInterpreterFrame *fram
 }
 ```
 
+### Class Body Context Detection
+
+The `CO_CLASS_BODY` flag (0x0040) identifies code objects that represent class bodies. This is set by the compiler in `Python/compile.c`:
+
+```c
+/* In compute_code_flags() */
+if (ste->ste_type == ClassBlock) {
+    flags |= CO_CLASS_BODY;
+}
+```
+
+This flag is used by `_PySandbox_CheckDunderAccess()` to allow whitelisted dunders (like `__name__`, `__module__`, `__slots__`) during class body execution while blocking introspection dunders (like `__class__`, `__bases__`). See RFC-002 for details on the class body dunder whitelist.
+
 ### Security: Configuration Modification Check
 
 Sandboxed code cannot modify sandbox configuration:
@@ -366,8 +379,10 @@ _gen_getframe(PyGenObject *gen, const char *const name)
 | File | Purpose |
 |------|---------|
 | `Python/sandbox_core.c` | Core state management (~422 lines) |
+| `Python/sandbox_limits.c` | Limit checks, dunder whitelist, metaclass check |
 | `Include/internal/pycore_sandbox.h` | Public API declarations |
 | `Include/internal/pycore_sandbox_impl.h` | Inline helpers |
+| `Include/cpython/code.h` | CO_CLASS_BODY flag definition |
 
 # Drawbacks
 [drawbacks]: #drawbacks

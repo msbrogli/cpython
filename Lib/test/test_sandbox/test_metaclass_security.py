@@ -1,7 +1,15 @@
-"""Tests for custom metaclass blocking in sandbox.
+"""Tests for metaclass security in sandbox.
 
-This module tests that custom metaclass creation is blocked in sandbox scope
-to prevent metaclass-based sandbox escapes.
+This module tests:
+1. Metaclass CREATION (subclassing type) is blocked in sandbox
+2. Trusted metaclasses from outside sandbox work (ABC, Enum, dataclass, etc.)
+3. Sandbox code cannot escape via metaclass __new__ or __call__ overrides
+
+Security model:
+- Sandbox code CAN create normal classes
+- Sandbox code CANNOT create metaclasses (subclassing type)
+- Sandbox code CAN use trusted metaclasses passed from outside
+- This prevents sandbox escapes while allowing use of stdlib abstractions
 
 Security audit reference: Fix proposal 08 - Metaclass blocking
 """
@@ -17,8 +25,8 @@ from test.test_sandbox import (
 )
 
 
-class MetaclassBlockingTests(ScopedFilenameTestCase):
-    """Test custom metaclass creation is blocked in sandbox.
+class MetaclassCreationBlockedTests(ScopedFilenameTestCase):
+    """Test that metaclass CREATION (subclassing type) is blocked.
 
     Attack vector: Custom metaclasses can override __new__ or __call__
     to execute arbitrary code during class creation, potentially
@@ -27,36 +35,34 @@ class MetaclassBlockingTests(ScopedFilenameTestCase):
 
     SCOPED_FILENAME = "<test_metaclass_security_scope>"
 
-    def test_direct_metaclass_arg_blocked(self):
-        """class Foo(metaclass=Meta) should be blocked."""
+    def test_direct_type_subclass_blocked(self):
+        """Subclassing type directly should be blocked."""
         sys.sandbox.set_config(max_operations=10000)
 
-        with self.assertRaises((TypeError, SandboxSecurityError)):
+        with self.assertRaises(SandboxSecurityError):
             self.run_scoped_code("""
 class Meta(type):
     pass
-
-class Foo(metaclass=Meta):
-    pass
 """)
 
-    def test_metaclass_via_base_class_blocked(self):
-        """class Foo(Base) where Base defines __class_getitem__ metaclass.
+    def test_metaclass_via_base_class_allowed(self):
+        """Subclassing a base with trusted metaclass should work.
 
-        When a base class has a custom metaclass, creating a subclass
-        should be blocked if the metaclass is not allowed.
+        When a base class has a custom metaclass from OUTSIDE sandbox,
+        creating a subclass should be ALLOWED (the metaclass is trusted).
         """
         sys.sandbox.set_config(max_operations=10000)
 
-        # Create a class with custom metaclass outside scope
+        # Create a class with custom metaclass outside scope (trusted)
         class Meta(type):
             pass
 
         class Base(metaclass=Meta):
             pass
 
-        with self.assertRaises((TypeError, SandboxSecurityError)):
-            self.run_scoped_code("class Derived(Base): pass", {"Base": Base})
+        # This should succeed - Base's metaclass is trusted (created outside sandbox)
+        globs = self.run_scoped_code("class Derived(Base): pass", {"Base": Base})
+        self.assertIn('Derived', globs)
 
     def test_type_call_three_args_behavior(self):
         """type('Foo', (), {}) behavior in scope.
@@ -107,21 +113,20 @@ result = obj.x + obj.y
         self.assertEqual(globs['result'], 3)
 
 
-class ABCMetaclassTests(ScopedFilenameTestCase):
-    """Test that ABC (Abstract Base Class) metaclass is handled.
+class TrustedMetaclassTests(ScopedFilenameTestCase):
+    """Test that trusted metaclasses from stdlib work.
 
-    ABC uses ABCMeta which is a metaclass. This should either be
-    allowed (since it's from stdlib) or blocked consistently.
+    ABC uses ABCMeta, Enum uses EnumMeta - both are trusted metaclasses
+    from outside sandbox and should work.
     """
 
     SCOPED_FILENAME = "<test_metaclass_security_scope>"
 
     def test_abc_abstract_class(self):
-        """ABC usage - document current behavior."""
+        """ABC usage should work (ABCMeta is a trusted metaclass)."""
         sys.sandbox.set_config(max_operations=10000)
 
-        try:
-            globs = self.run_scoped_code("""
+        globs = self.run_scoped_code("""
 from abc import ABC, abstractmethod
 
 class AbstractBase(ABC):
@@ -136,27 +141,13 @@ class Concrete(AbstractBase):
 obj = Concrete()
 result = obj.do_something()
 """)
-            # If allowed, ABC works normally
-            self.assertEqual(globs['result'], 42)
-        except (TypeError, SandboxSecurityError, ImportError):
-            # If blocked, that's also acceptable
-            pass
-
-
-class EnumMetaclassTests(ScopedFilenameTestCase):
-    """Test that Enum metaclass is handled.
-
-    Enum uses EnumMeta which is a metaclass.
-    """
-
-    SCOPED_FILENAME = "<test_metaclass_security_scope>"
+        self.assertEqual(globs['result'], 42)
 
     def test_enum_class(self):
-        """Enum usage - document current behavior."""
+        """Enum usage should work (EnumMeta is a trusted metaclass)."""
         sys.sandbox.set_config(max_operations=10000)
 
-        try:
-            globs = self.run_scoped_code("""
+        globs = self.run_scoped_code("""
 from enum import Enum
 
 class Color(Enum):
@@ -166,76 +157,77 @@ class Color(Enum):
 
 result = Color.RED.value
 """)
-            # If allowed, Enum works normally
-            self.assertEqual(globs['result'], 1)
-        except (TypeError, SandboxSecurityError, ImportError):
-            # If blocked, that's also acceptable
+        self.assertEqual(globs['result'], 1)
+
+    def test_explicit_metaclass_from_trusted_allowed(self):
+        """Using trusted metaclass explicitly should work."""
+        sys.sandbox.set_config(max_operations=10000)
+
+        # Create metaclass outside sandbox (trusted)
+        class TrustedMeta(type):
             pass
+
+        globs = self.run_scoped_code("""
+class Foo(metaclass=Meta):
+    x = 1
+result = Foo.x
+""", extra_globals={"Meta": TrustedMeta})
+        self.assertEqual(globs['result'], 1)
 
 
 class SubprocessMetaclassTests(unittest.TestCase):
     """Subprocess tests for metaclass security that need full isolation."""
 
-    def test_metaclass_escape_attempt_blocked(self):
-        """Attempt to use metaclass __new__ to escape sandbox."""
+    def test_metaclass_creation_blocked(self):
+        """Metaclass creation (subclassing type) should be blocked."""
         code = '''
 import sys
-sys.sandbox.set_config(max_list_size=10, allow_dunder_access=True)
-sys.sandbox.enter_scope()
+sys.sandbox.set_config(max_operations=10000, allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
 
 try:
-    class EscapeMeta(type):
-        def __new__(mcs, name, bases, namespace):
-            # Try to create large list during class creation
-            namespace['large_list'] = list(range(1000))
-            return super().__new__(mcs, name, bases, namespace)
-
-    class Victim(metaclass=EscapeMeta):
-        pass
-
-    # If we got here, check if escape worked
-    if len(Victim.large_list) > 10:
-        sys.exit(2)  # Escape succeeded - security hole!
-    else:
-        sys.exit(3)  # Unexpected state
-
-except (TypeError, SandboxSecurityError, SandboxOverflowError):
-    sys.exit(0)  # Expected - blocked
+    exec(compile("""
+class EscapeMeta(type):
+    def __new__(mcs, name, bases, namespace):
+        # This would be dangerous if allowed
+        namespace['escaped'] = True
+        return super().__new__(mcs, name, bases, namespace)
+""", "<sandbox>", "exec"))
+    sys.exit(1)  # Should not reach here - metaclass creation should be blocked
+except SandboxSecurityError:
+    sys.exit(0)  # Expected - metaclass creation blocked
 except Exception as e:
     print(f"Unexpected: {type(e).__name__}: {e}", file=sys.stderr)
-    sys.exit(4)
+    sys.exit(2)
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
-                        f"Metaclass escape not blocked: {result.stderr}")
+                        f"Metaclass creation should be blocked: {result.stderr}")
 
-    def test_type_subclass_behavior(self):
-        """Subclassing type behavior in sandbox.
-
-        Note: Subclassing type may be allowed if custom metaclasses are
-        not explicitly blocked. Document current behavior.
-        """
+    def test_type_subclass_blocked(self):
+        """Subclassing type should be blocked in sandbox."""
         code = '''
 import sys
-sys.sandbox.set_config(max_operations=10000, allow_dunder_access=True)
-sys.sandbox.enter_scope()
+sys.sandbox.set_config(max_operations=10000, allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
 
 try:
-    class MyMeta(type):
-        pass
-    # If allowed, verify it's actually a type subclass
-    if issubclass(MyMeta, type):
-        sys.exit(0)  # Type subclassing allowed
-    sys.exit(3)  # Unexpected state
-except (TypeError, SandboxSecurityError):
-    sys.exit(0)  # Blocked is also acceptable
+    exec(compile("""
+class MyMeta(type):
+    pass
+""", "<sandbox>", "exec"))
+    sys.exit(1)  # Should not reach - type subclassing should be blocked
+except SandboxSecurityError as e:
+    if "metaclass" in str(e).lower():
+        sys.exit(0)  # Expected - clear error message
+    sys.exit(0)  # Still blocked, just different message
 except Exception as e:
-    print(f"Note: {type(e).__name__}: {e}", file=sys.stderr)
-    sys.exit(0)  # Document any other behavior
+    print(f"Unexpected: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(2)
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
-                        f"Unexpected behavior: {result.stderr}")
+                        f"Type subclass should be blocked: {result.stderr}")
 
     def test_dunder_class_assignment_behavior(self):
         """__class__ assignment behavior in sandbox.

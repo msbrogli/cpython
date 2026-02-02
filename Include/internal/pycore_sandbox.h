@@ -120,6 +120,13 @@ typedef struct {
      * When allow_submodules=1 (default), allowing 'xml' also allows 'xml.etree.ElementTree'.
      * When allow_submodules=0, only exact module names in allowed_modules are allowed. */
     int allow_submodules;
+
+    /* Allow class creation in sandbox with whitelisted dunders.
+     * When allow_class_creation=1 (default), class creation is allowed and
+     * certain dunders (__name__, __module__, __qualname__, __annotations__,
+     * __doc__, __classcell__, __slots__) are whitelisted in class body context.
+     * When allow_class_creation=0, class creation follows normal dunder rules. */
+    int allow_class_creation;
 } _PySandboxConfig;
 
 /* Sandbox counters - separated from limits for clarity */
@@ -150,6 +157,7 @@ typedef struct {
     .import_allow_submodules = 0,   \
     .module_access_restrict_mode = 1, \
     .allow_submodules = 1,          \
+    .allow_class_creation = 1,      \
 }
 
 #define _PySandboxCounters_INIT { \
@@ -324,6 +332,13 @@ PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
  * Returns 0 if allowed, -1 if blocked (sets SandboxSecurityError).
  * Unsafe operations include: compile(), __iter__() access, gc introspection. */
 PyAPI_FUNC(int) _PySandbox_CheckUnsafeBlocked(const char *operation);
+
+/* Check if metaclass creation/usage is allowed in sandbox scope.
+ * Called from __build_class__ to prevent sandbox code from:
+ * 1. Creating metaclasses (subclassing type)
+ * 2. Using metaclasses created within sandbox
+ * Returns 0 if allowed, -1 if blocked (sets SandboxSecurityError). */
+PyAPI_FUNC(int) _PySandbox_CheckMetaclassAllowed(PyObject *meta, PyObject *bases);
 
 /* Check if I/O operations are blocked in sandbox scope.
  * Returns 0 if allowed, -1 if blocked (sets SandboxSecurityError).

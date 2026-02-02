@@ -59,6 +59,7 @@ class SandboxLimitsTests(unittest.TestCase):
             'max_list_size', 'max_dict_size', 'max_set_size', 'max_tuple_size',
             'max_iterations', 'max_operations', 'max_recursion_depth',
             'allow_float', 'allow_complex', 'allow_dunder_access',
+            'allow_class_creation',
             'count_iterations_as_operations', 'allow_unsafe', 'allow_io',
             'import_restrict_mode', 'import_allow_submodules',
             'module_access_restrict_mode', 'allow_submodules',
@@ -938,7 +939,7 @@ class ConfigFieldsTests(unittest.TestCase):
         self.assertFalse(config['module_access_restrict_mode'])
 
     def test_get_config_returns_all_fields(self):
-        """get_config should return all 20 config fields."""
+        """get_config should return all 21 config fields."""
         config = sys.sandbox.get_config()
         expected_keys = {
             # Size limits
@@ -948,6 +949,7 @@ class ConfigFieldsTests(unittest.TestCase):
             'max_iterations', 'max_operations', 'max_recursion_depth',
             # Type/access restrictions
             'allow_float', 'allow_complex', 'allow_dunder_access',
+            'allow_class_creation',
             'count_iterations_as_operations', 'allow_unsafe', 'allow_io',
             # Import restrictions
             'import_restrict_mode', 'import_allow_submodules',

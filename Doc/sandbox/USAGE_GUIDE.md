@@ -650,6 +650,95 @@ Any attribute name containing `__` (double underscore) anywhere in the name is b
 
 Single underscore attributes (`_private`) are not affected.
 
+### Class Creation with Dunder Blocking
+
+When `allow_dunder_access=False`, class creation still works because certain dunders needed for class creation are automatically whitelisted when `allow_class_creation=True` (the default):
+
+```python
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+code = compile("""
+class Point:
+    '''A point in 2D space.'''
+    __slots__ = ('x', 'y')
+
+    def __init__(self, x: int, y: int):
+        self.x = x
+        self.y = y
+
+p = Point(3, 4)
+""", "<sandbox>", "exec")
+
+exec(code)  # Works! Class creation dunders are whitelisted
+```
+
+**Whitelisted dunders for class body:**
+- `__name__` - Injected by compiler for class body
+- `__module__` - Module where class is defined
+- `__qualname__` - Qualified name
+- `__annotations__` - Type annotations
+- `__doc__` - Docstrings
+- `__classcell__` - For `super()` support
+- `__slots__` - Slot definitions
+
+**Introspection dunders remain blocked:**
+- `__class__` - Reading object's class
+- `__bases__` - Reading class bases
+- `__subclasses__()` - Finding subclasses
+- `__dict__` - Reading class/object dictionary
+- `__mro__` - Method resolution order
+
+**Limitation:** The whitelist only applies during class body execution (when `CO_CLASS_BODY` flag is set). Method dunders like `__init__`, `__str__`, etc. are still blocked when accessed as attributes. For example, `super().__init__()` is blocked because it accesses `__init__` on the super() result. If you need to use `super().__init__()` or similar patterns, set `allow_dunder_access=True`.
+
+### Metaclass Security
+
+Sandbox code **cannot** create metaclasses (subclass `type`), but **can** use trusted metaclasses from outside the sandbox:
+
+```python
+# ALLOWED: Using trusted metaclass from stdlib
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+code = compile("""
+from abc import ABC, abstractmethod
+from enum import Enum
+from dataclasses import dataclass
+
+# Using ABCMeta (trusted)
+class Shape(ABC):
+    @abstractmethod
+    def area(self):
+        pass
+
+# Using EnumMeta (trusted)
+class Color(Enum):
+    RED = 1
+    GREEN = 2
+
+# Using dataclass decorator (trusted)
+@dataclass
+class Point:
+    x: int
+    y: int
+""", "<sandbox>", "exec")
+
+exec(code)  # Works!
+```
+
+```python
+# BLOCKED: Creating metaclass (subclassing type)
+code = compile("""
+class Meta(type):  # SandboxSecurityError!
+    pass
+""", "<sandbox>", "exec")
+
+try:
+    exec(code)
+except SandboxSecurityError as e:
+    print(e)  # "creating metaclasses (subclassing type) is not allowed in sandbox"
+```
+
 ### Implicit Dunder Blocking
 
 When `allow_dunder_access=False`, certain implicit dunder operations are also restricted:
@@ -2233,6 +2322,7 @@ except SandboxError as e:
 | `allow_float` | bool | True | Allow float creation |
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | False | Allow `__dunder__` attributes |
+| `allow_class_creation` | bool | True | Allow class creation with whitelisted dunders |
 | `allow_unsafe` | bool | False | Allow unsafe operations (compile, gc introspection) |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterator yields toward `operation_count` |

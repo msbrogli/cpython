@@ -7926,6 +7926,11 @@ compute_code_flags(struct compiler *c)
             flags |= CO_VARKEYWORDS;
     }
 
+    /* Set CO_CLASS_BODY for class body code objects (used by sandbox whitelist) */
+    if (ste->ste_type == ClassBlock) {
+        flags |= CO_CLASS_BODY;
+    }
+
     /* (Only) inherit compilerflags in PyCF_MASK */
     flags |= (c->c_flags->cf_flags & PyCF_MASK);
 

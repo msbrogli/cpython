@@ -325,7 +325,13 @@ if (ste->ste_type == ClassBlock) {
 }
 ```
 
-This flag is used by `_PySandbox_CheckDunderAccess()` to allow whitelisted dunders (like `__name__`, `__module__`, `__slots__`) during class body execution while blocking introspection dunders (like `__class__`, `__bases__`). See RFC-002 for details on the class body dunder whitelist.
+This flag is used by `_PySandbox_CheckDunderAccess(name, class_body_mode)` to control dunder access in class body context:
+
+- `DUNDER_CLASS_NEVER` (0): Block all dunders (used by `LOAD_ATTR`, `STORE_ATTR`, etc.)
+- `DUNDER_CLASS_WHITELIST` (1): Allow whitelisted dunders like `__name__`, `__module__`, `__slots__` (used by `LOAD_NAME`)
+- `DUNDER_CLASS_ALL` (2): Allow ALL dunders for magic method definitions (used by `STORE_NAME`)
+
+See RFC-002 for details on the class body dunder whitelist and mode semantics.
 
 ### Security: Configuration Modification Check
 

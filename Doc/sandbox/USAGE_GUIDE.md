@@ -652,7 +652,15 @@ Single underscore attributes (`_private`) are not affected.
 
 ### Class Creation with Dunder Blocking
 
-When `allow_dunder_access=False`, class creation still works because certain dunders needed for class creation are automatically whitelisted when `allow_class_creation=True` (the default):
+When `allow_dunder_access=False`, class creation still works because the sandbox uses a three-level system to control dunder access in class bodies when `allow_class_creation=True` (the default):
+
+| Level | Mode | Operations | Effect in Class Body |
+|-------|------|------------|---------------------|
+| 0 | `DUNDER_CLASS_NEVER` | `LOAD_ATTR`, `STORE_ATTR`, `DELETE_ATTR`, `LOAD_METHOD`, `LOAD_GLOBAL`, `getattr()`, `hasattr()` | Block all dunders |
+| 1 | `DUNDER_CLASS_WHITELIST` | `LOAD_NAME` | Allow 7 whitelisted dunders |
+| 2 | `DUNDER_CLASS_ALL` | `STORE_NAME` | Allow ALL dunders |
+
+This allows defining classes with magic methods:
 
 ```python
 sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
@@ -667,13 +675,16 @@ class Point:
         self.x = x
         self.y = y
 
+    def __str__(self):
+        return f"Point({self.x}, {self.y})"
+
 p = Point(3, 4)
 """, "<sandbox>", "exec")
 
-exec(code)  # Works! Class creation dunders are whitelisted
+exec(code)  # Works! Class creation with magic methods is allowed
 ```
 
-**Whitelisted dunders for class body:**
+**Whitelisted dunders for LOAD_NAME (class_body_mode=1):**
 - `__name__` - Injected by compiler for class body
 - `__module__` - Module where class is defined
 - `__qualname__` - Qualified name
@@ -682,14 +693,19 @@ exec(code)  # Works! Class creation dunders are whitelisted
 - `__classcell__` - For `super()` support
 - `__slots__` - Slot definitions
 
-**Introspection dunders remain blocked:**
+**All dunders allowed for STORE_NAME (class_body_mode=2):**
+- `__init__`, `__str__`, `__repr__` - Method definitions
+- `__add__`, `__eq__`, `__hash__` - Operator overloading
+- Any custom dunder name - User-defined dunders
+
+**Introspection dunders remain blocked (class_body_mode=0):**
 - `__class__` - Reading object's class
 - `__bases__` - Reading class bases
 - `__subclasses__()` - Finding subclasses
 - `__dict__` - Reading class/object dictionary
 - `__mro__` - Method resolution order
 
-**Limitation:** The whitelist only applies during class body execution (when `CO_CLASS_BODY` flag is set). Method dunders like `__init__`, `__str__`, etc. are still blocked when accessed as attributes. For example, `super().__init__()` is blocked because it accesses `__init__` on the super() result. If you need to use `super().__init__()` or similar patterns, set `allow_dunder_access=True`.
+**Limitation:** The class body exception only applies during class body execution (when `CO_CLASS_BODY` flag is set). Method dunders like `__init__`, `__str__`, etc. are still blocked when accessed as attributes. For example, `super().__init__()` is blocked because it accesses `__init__` on the super() result. If you need to use `super().__init__()` or similar patterns, set `allow_dunder_access=True`.
 
 ### Metaclass Security
 

@@ -268,8 +268,13 @@ _PySandbox_CheckFrozen(PyObject *obj)
 }
 
 int
-_PySandbox_CheckDunderAccess(PyObject *name)
+_PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode)
 {
+    /* class_body_mode:
+     * - DUNDER_CLASS_NEVER (0): Block all dunders in class body
+     * - DUNDER_CLASS_WHITELIST (1): Allow whitelisted dunders in class body
+     * - DUNDER_CLASS_ALL (2): Allow ALL dunders in class body (STORE_NAME)
+     */
     /* ... checks ... */
     PyErr_Format(PyExc_SandboxAttributeError,
                  "dunder attribute access blocked in sandbox: '%U'", name);

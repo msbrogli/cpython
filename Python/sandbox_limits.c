@@ -344,14 +344,21 @@ is_class_body_safe_dunder(PyObject *name)
 
 /* _PySandbox_CheckDunderAccess - Check if dunder attribute access is blocked
  *
- * This function is called from ceval.c for LOAD_ATTR, STORE_ATTR, DELETE_ATTR.
+ * This function is called from ceval.c for LOAD_ATTR, STORE_ATTR, DELETE_ATTR,
+ * LOAD_NAME, LOAD_GLOBAL, LOAD_METHOD, STORE_NAME, and from bltinmodule.c for
+ * getattr() and hasattr().
+ *
  * It blocks access to:
  * - __iter__ when allow_unsafe=0
  * - All dunder attributes when allow_dunder_access=0
  *
- * Special handling for class body context:
- * - When allow_class_creation=1 and in a class body (CO_CLASS_BODY flag),
- *   certain dunders needed for class creation are whitelisted.
+ * The class_body_mode parameter controls class body exception handling:
+ * - DUNDER_CLASS_NEVER (0): Never allow dunders in class body
+ *   Used by: LOAD_ATTR, STORE_ATTR, DELETE_ATTR, LOAD_METHOD, LOAD_GLOBAL, getattr, hasattr
+ * - DUNDER_CLASS_WHITELIST (1): Allow whitelisted dunders in class body
+ *   Used by: LOAD_NAME (allows __name__, __module__, __qualname__, etc.)
+ * - DUNDER_CLASS_ALL (2): Allow ALL dunders in class body
+ *   Used by: STORE_NAME (allows defining __init__, __str__, etc. in class body)
  *
  * Requirements for blocking:
  * - Sandbox is not suspended and not in recursive check
@@ -361,7 +368,7 @@ is_class_body_safe_dunder(PyObject *name)
  * Returns: 0 if access allowed, -1 if blocked (exception set)
  */
 int
-_PySandbox_CheckDunderAccess(PyObject *name)
+_PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode)
 {
     assert(name != NULL);
     _PySandboxState *sandbox = get_sandbox_state();
@@ -404,15 +411,25 @@ _PySandbox_CheckDunderAccess(PyObject *name)
         return -1;
     }
 
-    /* Check class body whitelist before blocking general dunder access.
+    /* Class body exception handling based on mode.
      * When allow_class_creation=1 and we're in a class body (CO_CLASS_BODY flag),
-     * allow certain dunders needed for class creation machinery. */
+     * the mode determines what dunders are allowed:
+     * - DUNDER_CLASS_ALL (2): Allow ALL dunders (STORE_NAME - for __init__, etc.)
+     * - DUNDER_CLASS_WHITELIST (1): Allow only whitelisted dunders (LOAD_NAME)
+     * - DUNDER_CLASS_NEVER (0): No exceptions (LOAD_ATTR, STORE_ATTR, etc.) */
     if (check_dunder && config->allow_class_creation) {
         if (frame->f_code != NULL &&
             (frame->f_code->co_flags & CO_CLASS_BODY)) {
-            if (is_class_body_safe_dunder(name)) {
-                return 0;  /* Allow this dunder in class body */
+
+            if (class_body_mode == DUNDER_CLASS_ALL) {
+                return 0;  /* Allow ALL dunders (STORE_NAME) */
             }
+            if (class_body_mode == DUNDER_CLASS_WHITELIST) {
+                if (is_class_body_safe_dunder(name)) {
+                    return 0;  /* Allow whitelisted dunder (LOAD_NAME) */
+                }
+            }
+            /* DUNDER_CLASS_NEVER: fall through to block */
         }
     }
 

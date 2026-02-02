@@ -325,8 +325,23 @@ PyAPI_FUNC(int) _PySandbox_CheckScopeOperationN(int count);
  * This is the exported version; sandbox.c uses a static inline for internal callers. */
 PyAPI_FUNC(int) _PySandbox_CheckIteration(void);
 
-/* Check dunder attribute access - returns -1 and sets exception when blocked */
-PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name);
+/* Class body mode constants for _PySandbox_CheckDunderAccess */
+#define DUNDER_CLASS_NEVER     0  /* Never allow dunders in class body */
+#define DUNDER_CLASS_WHITELIST 1  /* Allow whitelisted dunders in class body */
+#define DUNDER_CLASS_ALL       2  /* Allow ALL dunders in class body */
+
+/* Check dunder attribute access - returns -1 and sets exception when blocked
+ *
+ * class_body_mode controls exception handling in class body context:
+ *   DUNDER_CLASS_NEVER (0):     Never allow dunders in class body
+ *                               Used by: LOAD_ATTR, STORE_ATTR, DELETE_ATTR,
+ *                                        LOAD_METHOD, LOAD_GLOBAL, getattr, hasattr
+ *   DUNDER_CLASS_WHITELIST (1): Allow whitelisted dunders in class body
+ *                               Used by: LOAD_NAME
+ *   DUNDER_CLASS_ALL (2):       Allow ALL dunders in class body
+ *                               Used by: STORE_NAME (for __init__, __str__, etc.)
+ */
+PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode);
 
 /* Check if an unsafe operation is blocked in sandbox scope.
  * Returns 0 if allowed, -1 if blocked (sets SandboxSecurityError).

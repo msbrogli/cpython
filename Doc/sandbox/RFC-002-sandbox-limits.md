@@ -358,8 +358,13 @@ _PySandbox_CheckIteration(void)
 ## Dunder Access Check
 
 ```c
+/* Class body mode constants */
+#define DUNDER_CLASS_NEVER     0  /* Never allow in class body */
+#define DUNDER_CLASS_WHITELIST 1  /* Allow whitelisted dunders in class body */
+#define DUNDER_CLASS_ALL       2  /* Allow ALL dunders in class body */
+
 int
-_PySandbox_CheckDunderAccess(PyObject *name)
+_PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode)
 {
     /* ... get sandbox state ... */
     if (sandbox->config.allow_dunder_access ||
@@ -375,14 +380,23 @@ _PySandbox_CheckDunderAccess(PyObject *name)
         return 0;
     }
 
-    /* Class body whitelist: allow certain dunders needed for class creation
-     * when allow_class_creation is enabled and we're in a class body */
+    /* Class body exception handling based on mode.
+     * When allow_class_creation=1 and in a class body (CO_CLASS_BODY flag):
+     * - DUNDER_CLASS_ALL (2): Allow ALL dunders (STORE_NAME)
+     * - DUNDER_CLASS_WHITELIST (1): Allow whitelisted dunders (LOAD_NAME)
+     * - DUNDER_CLASS_NEVER (0): No exceptions (LOAD_ATTR, etc.) */
     if (sandbox->config.allow_class_creation) {
         PyCodeObject *code = frame->f_code;
         if (code->co_flags & CO_CLASS_BODY) {
-            if (is_class_body_safe_dunder(name)) {
-                return 0;  /* Allowed in class body context */
+            if (class_body_mode == DUNDER_CLASS_ALL) {
+                return 0;  /* Allow ALL dunders (STORE_NAME) */
             }
+            if (class_body_mode == DUNDER_CLASS_WHITELIST) {
+                if (is_class_body_safe_dunder(name)) {
+                    return 0;  /* Allowed in class body context */
+                }
+            }
+            /* DUNDER_CLASS_NEVER: fall through to block */
         }
     }
 
@@ -412,9 +426,19 @@ is_class_body_safe_dunder(PyObject *name)
 }
 ```
 
-### Class Body Whitelist
+### Class Body Mode
 
-When `allow_class_creation=True` (default) and dunder access is blocked, certain dunders are whitelisted within class body execution (identified by `CO_CLASS_BODY` flag):
+The `class_body_mode` parameter controls dunder access exception handling within class bodies:
+
+| Mode | Constant | Effect in Class Body | Used By |
+|------|----------|---------------------|---------|
+| 0 | `DUNDER_CLASS_NEVER` | Block all dunders | `LOAD_ATTR`, `STORE_ATTR`, `DELETE_ATTR`, `LOAD_METHOD`, `LOAD_GLOBAL`, `getattr()`, `hasattr()` |
+| 1 | `DUNDER_CLASS_WHITELIST` | Allow 7 whitelisted dunders | `LOAD_NAME` |
+| 2 | `DUNDER_CLASS_ALL` | Allow ALL dunders | `STORE_NAME` |
+
+### Class Body Whitelist (DUNDER_CLASS_WHITELIST)
+
+When `allow_class_creation=True` (default) and dunder access is blocked, certain dunders are whitelisted within class body execution for `LOAD_NAME` operations (identified by `CO_CLASS_BODY` flag):
 
 | Dunder | Purpose |
 |--------|---------|
@@ -427,6 +451,19 @@ When `allow_class_creation=True` (default) and dunder access is blocked, certain
 | `__slots__` | Slot definitions |
 
 This allows class definitions to work while still blocking introspection dunders like `__class__`, `__bases__`, `__dict__`, etc.
+
+### All Dunders in Class Body (DUNDER_CLASS_ALL)
+
+The `STORE_NAME` opcode uses `DUNDER_CLASS_ALL` mode, which allows storing ALL dunders in a class body. This enables defining magic methods like `__init__`, `__str__`, `__add__`, etc.:
+
+```python
+class MyClass:
+    def __init__(self):  # STORE_NAME __init__ - allowed with DUNDER_CLASS_ALL
+        pass
+
+    def __str__(self):   # STORE_NAME __str__ - allowed with DUNDER_CLASS_ALL
+        return "MyClass"
+```
 
 **Limitation:** The whitelist only applies during class body execution. Method dunders like `__init__` accessed as attributes (e.g., `super().__init__()`) are blocked. Use `allow_dunder_access=True` if such patterns are needed.
 
@@ -570,9 +607,11 @@ Called from:
 | `Objects/typeobject.c` | `type_call()` | `_PySandbox_CheckTypeAllowed()` |
 | `Python/ceval.c` | `SANDBOX_COUNT` | `_PySandbox_CheckScopeOperation()` |
 | `Python/ceval.c` | `start_frame` | `_PySandbox_EnterFrame()` |
-| `Python/ceval.c` | `LOAD_ATTR`, etc. | `_PySandbox_CheckDunderAccess()` |
-| `Python/ceval.c` | `LOAD_NAME` (dunder variables) | `_PySandbox_CheckDunderAccess()` |
-| `Python/ceval.c` | `LOAD_GLOBAL` (dunder variables) | `_PySandbox_CheckDunderAccess()` |
+| `Python/ceval.c` | `LOAD_ATTR`, `STORE_ATTR`, `DELETE_ATTR`, `LOAD_METHOD` | `_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER)` |
+| `Python/ceval.c` | `LOAD_NAME` | `_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_WHITELIST)` |
+| `Python/ceval.c` | `STORE_NAME` | `_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_ALL)` |
+| `Python/ceval.c` | `LOAD_GLOBAL` | `_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER)` |
+| `Python/bltinmodule.c` | `getattr()`, `hasattr()` | `_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER)` |
 | `Python/bltinmodule.c` | `__build_class__` (metaclass) | `_PySandbox_CheckMetaclassAllowed()` |
 | `Python/compile.c` | `compute_code_flags()` | Sets `CO_CLASS_BODY` flag for class bodies |
 | `Modules/_io/_iomodule.c` | `_io_open_impl()` | `_PySandbox_CheckIOAllowed()` |

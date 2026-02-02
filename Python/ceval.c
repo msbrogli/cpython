@@ -2896,6 +2896,15 @@ handle_eval_breaker:
         TARGET(STORE_NAME) {
             PyObject *name = GETITEM(names, oparg);
             PyObject *v = POP();
+
+            /* Sandbox check: block dunder stores outside class body.
+             * Use DUNDER_CLASS_ALL to allow ALL dunders in class body
+             * for magic method definitions like __init__, __str__, etc. */
+            if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_ALL) < 0) {
+                Py_DECREF(v);
+                goto error;
+            }
+
             PyObject *ns = LOCALS();
             int err;
             if (ns == NULL) {
@@ -3027,7 +3036,7 @@ handle_eval_breaker:
             /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
             if (!tstate->interp->sandbox.config.allow_dunder_access ||
                 !tstate->interp->sandbox.config.allow_unsafe) {
-                if (_PySandbox_CheckDunderAccess(name) < 0) {
+                if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
                     goto error;
                 }
             }
@@ -3049,7 +3058,7 @@ handle_eval_breaker:
             /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
             if (!tstate->interp->sandbox.config.allow_dunder_access ||
                 !tstate->interp->sandbox.config.allow_unsafe) {
-                if (_PySandbox_CheckDunderAccess(name) < 0) {
+                if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
                     Py_DECREF(owner);
                     goto error;
                 }
@@ -3089,8 +3098,9 @@ handle_eval_breaker:
         TARGET(LOAD_NAME) {
             PyObject *name = GETITEM(names, oparg);
 
-            /* Sandbox check: block dunder variable names (e.g., __builtins__) */
-            if (_PySandbox_CheckDunderAccess(name) < 0) {
+            /* Sandbox check: block dunder variable names (e.g., __builtins__)
+             * Use DUNDER_CLASS_WHITELIST to allow class body dunders */
+            if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_WHITELIST) < 0) {
                 goto error;
             }
 
@@ -3163,7 +3173,7 @@ handle_eval_breaker:
             PyObject *name = GETITEM(names, oparg>>1);
 
             /* Sandbox check: block dunder variable names (e.g., __builtins__) */
-            if (_PySandbox_CheckDunderAccess(name) < 0) {
+            if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
                 goto error;
             }
 
@@ -3634,7 +3644,7 @@ handle_eval_breaker:
             /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
             if (!tstate->interp->sandbox.config.allow_dunder_access ||
                 !tstate->interp->sandbox.config.allow_unsafe) {
-                if (_PySandbox_CheckDunderAccess(name) < 0) {
+                if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
                     goto error;
                 }
             }
@@ -4667,7 +4677,7 @@ handle_eval_breaker:
             /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
             if (!tstate->interp->sandbox.config.allow_dunder_access ||
                 !tstate->interp->sandbox.config.allow_unsafe) {
-                if (_PySandbox_CheckDunderAccess(name) < 0) {
+                if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
                     goto error;
                 }
             }

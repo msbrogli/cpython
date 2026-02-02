@@ -1149,7 +1149,7 @@ builtin_getattr(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
     v = args[0];
     name = args[1];
 
-    if (_PySandbox_CheckDunderAccess(name) < 0) {
+    if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
         return NULL;
     }
 
@@ -1213,7 +1213,7 @@ builtin_hasattr_impl(PyObject *module, PyObject *obj, PyObject *name)
 {
     PyObject *v;
 
-    if (_PySandbox_CheckDunderAccess(name) < 0) {
+    if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
         return NULL;
     }
 

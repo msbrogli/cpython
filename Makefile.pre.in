@@ -1975,6 +1975,12 @@ TESTSUBDIRS=	ctypes/test \
 		test/sndhdrdata \
 		test/subprocessdata \
 		test/support \
+		test/sandbox_ast_ops \
+		test/sandbox_ast_ops/testcases \
+		test/sandbox_ast_ops/testcases/complex \
+		test/sandbox_ast_ops/testcases/medium \
+		test/sandbox_ast_ops/testcases/simple \
+		test/test_sandbox \
 		test/test_asyncio \
 		test/test_capi \
 		test/test_cppext \

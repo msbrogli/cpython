@@ -227,6 +227,7 @@
     <ClCompile Include="..\Python\pytime.c" />
     <ClCompile Include="..\Python\sandbox_core.c" />
     <ClCompile Include="..\Python\sandbox_frozen.c" />
+    <ClCompile Include="..\Python\sandbox_imports.c" />
     <ClCompile Include="..\Python\sandbox_iter.c" />
     <ClCompile Include="..\Python\sandbox_limits.c" />
     <ClCompile Include="..\Python\sandbox_opcodes.c" />

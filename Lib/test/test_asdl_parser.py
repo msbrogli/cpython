@@ -64,20 +64,22 @@ class TestAsdlParser(unittest.TestCase):
             str(alias),
             'Product([Field(identifier, name), Field(identifier, asname, opt=True)], '
             '[Field(int, lineno), Field(int, col_offset), '
-            'Field(int, end_lineno, opt=True), Field(int, end_col_offset, opt=True)])')
+            'Field(int, end_lineno, opt=True), Field(int, end_col_offset, opt=True), '
+            'Field(int, operations_count, opt=True)])')
 
     def test_attributes(self):
         stmt = self.types['stmt']
-        self.assertEqual(len(stmt.attributes), 4)
+        self.assertEqual(len(stmt.attributes), 5)
         self.assertEqual(repr(stmt.attributes[0]), 'Field(int, lineno)')
         self.assertEqual(repr(stmt.attributes[1]), 'Field(int, col_offset)')
         self.assertEqual(repr(stmt.attributes[2]), 'Field(int, end_lineno, opt=True)')
         self.assertEqual(repr(stmt.attributes[3]), 'Field(int, end_col_offset, opt=True)')
+        self.assertEqual(repr(stmt.attributes[4]), 'Field(int, operations_count, opt=True)')
 
     def test_constructor_fields(self):
         ehandler = self.types['excepthandler']
         self.assertEqual(len(ehandler.types), 1)
-        self.assertEqual(len(ehandler.attributes), 4)
+        self.assertEqual(len(ehandler.attributes), 5)
 
         cons = ehandler.types[0]
         self.assertIsInstance(cons, self.asdl.Constructor)

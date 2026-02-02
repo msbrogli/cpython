@@ -511,17 +511,20 @@ _PySandbox_CheckMetaclassAllowed(PyObject *meta, PyObject *bases)
     }
 
     /* Check 1: Block metaclass CREATION (subclassing type).
-     * This prevents sandbox code from creating their own metaclasses. */
-    int creating_metaclass = is_metaclass_creation(bases);
-    if (creating_metaclass < 0) {
-        return -1;  /* Error */
-    }
-    if (creating_metaclass) {
-        sandbox->suppress_checks = 1;
-        PyErr_SetString(PyExc_SandboxSecurityError,
-                        "creating metaclasses (subclassing type) is not allowed in sandbox");
-        sandbox->suppress_checks = 0;
-        return -1;
+     * This prevents sandbox code from creating their own metaclasses.
+     * However, if allow_unsafe=1, permit metaclass creation. */
+    if (!config->allow_unsafe) {
+        int creating_metaclass = is_metaclass_creation(bases);
+        if (creating_metaclass < 0) {
+            return -1;  /* Error */
+        }
+        if (creating_metaclass) {
+            sandbox->suppress_checks = 1;
+            PyErr_SetString(PyExc_SandboxSecurityError,
+                            "creating metaclasses (subclassing type) is not allowed in sandbox");
+            sandbox->suppress_checks = 0;
+            return -1;
+        }
     }
 
     /* Note: We explicitly ALLOW using non-standard metaclasses here.

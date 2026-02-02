@@ -127,6 +127,12 @@ typedef struct {
      * __doc__, __classcell__, __slots__) are whitelisted in class body context.
      * When allow_class_creation=0, class creation follows normal dunder rules. */
     int allow_class_creation;
+
+    /* Allow magic method definitions (__init__, __str__, etc.) in class body.
+     * Only relevant when allow_class_creation=1.
+     * When allow_magic_methods=1 (default), STORE_NAME allows all dunders in class body.
+     * When allow_magic_methods=0, STORE_NAME only allows whitelisted dunders. */
+    int allow_magic_methods;
 } _PySandboxConfig;
 
 /* Sandbox counters - separated from limits for clarity */
@@ -158,6 +164,7 @@ typedef struct {
     .module_access_restrict_mode = 1, \
     .allow_submodules = 1,          \
     .allow_class_creation = 1,      \
+    .allow_magic_methods = 1,       \
 }
 
 #define _PySandboxCounters_INIT { \

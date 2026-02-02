@@ -657,5 +657,243 @@ result = d.x + d.y
         self.assertEqual(globs['result'], 3)
 
 
+class AllowMagicMethodsTests(ScopedFilenameTestCase):
+    """Test the allow_magic_methods config flag."""
+
+    SCOPED_FILENAME = "<test_allow_magic_methods_scope>"
+
+    def setUp(self):
+        super().setUp()
+        # Default config with allow_class_creation=True
+        sys.sandbox.set_config(
+            max_operations=10000,
+            allow_dunder_access=False,
+            allow_class_creation=True,
+        )
+
+    def test_magic_methods_allowed_by_default(self):
+        """Magic methods should work by default."""
+        # allow_magic_methods defaults to True
+        globs = self.run_scoped_code("""
+class Foo:
+    def __init__(self):
+        self.value = 42
+
+f = Foo()
+result = f.value
+""")
+        self.assertEqual(globs['result'], 42)
+
+    def test_magic_methods_blocked_when_disabled(self):
+        """Magic methods blocked when allow_magic_methods=False."""
+        sys.sandbox.set_config(
+            allow_class_creation=True,
+            allow_magic_methods=False,
+        )
+        with self.assertRaises(SandboxAttributeError):
+            self.run_scoped_code("""
+class Foo:
+    def __init__(self):
+        pass
+""")
+
+    def test_str_magic_method_blocked_when_disabled(self):
+        """__str__ blocked when allow_magic_methods=False."""
+        sys.sandbox.set_config(
+            allow_class_creation=True,
+            allow_magic_methods=False,
+        )
+        with self.assertRaises(SandboxAttributeError):
+            self.run_scoped_code("""
+class Foo:
+    def __str__(self):
+        return "Foo"
+""")
+
+    def test_basic_class_works_without_magic_methods(self):
+        """Basic class creation works even without magic methods."""
+        sys.sandbox.set_config(
+            allow_class_creation=True,
+            allow_magic_methods=False,
+        )
+        globs = self.run_scoped_code('''
+class Point:
+    """A point in 2D space."""
+    __slots__ = ('x', 'y')
+    x: int
+    y: int
+
+result = True
+''')
+        self.assertTrue(globs['result'])
+
+    def test_regular_methods_work_without_magic_methods(self):
+        """Regular (non-dunder) methods work when allow_magic_methods=False."""
+        sys.sandbox.set_config(
+            allow_class_creation=True,
+            allow_magic_methods=False,
+        )
+        globs = self.run_scoped_code("""
+class Calculator:
+    def add(self, a, b):
+        return a + b
+
+calc = Calculator()
+result = calc.add(2, 3)
+""")
+        self.assertEqual(globs['result'], 5)
+
+    def test_class_attributes_work_without_magic_methods(self):
+        """Class attributes work when allow_magic_methods=False."""
+        sys.sandbox.set_config(
+            allow_class_creation=True,
+            allow_magic_methods=False,
+        )
+        globs = self.run_scoped_code("""
+class Config:
+    debug = True
+    max_retries = 3
+
+result = Config.debug and Config.max_retries == 3
+""")
+        self.assertTrue(globs['result'])
+
+    def test_inheritance_works_without_magic_methods(self):
+        """Inheritance works when allow_magic_methods=False."""
+        sys.sandbox.set_config(
+            allow_class_creation=True,
+            allow_magic_methods=False,
+        )
+        globs = self.run_scoped_code("""
+class Animal:
+    def speak(self):
+        return "..."
+
+class Dog(Animal):
+    def speak(self):
+        return "Woof!"
+
+dog = Dog()
+result = dog.speak()
+""")
+        self.assertEqual(globs['result'], "Woof!")
+
+    def test_docstring_works_without_magic_methods(self):
+        """Class with docstring works when allow_magic_methods=False."""
+        sys.sandbox.set_config(
+            allow_class_creation=True,
+            allow_magic_methods=False,
+        )
+        globs = self.run_scoped_code('''
+class Documented:
+    """This is a documented class."""
+
+    def method(self):
+        """This method does something."""
+        return 42
+
+result = Documented().method()
+''')
+        self.assertEqual(globs['result'], 42)
+
+    def test_annotations_work_without_magic_methods(self):
+        """Type annotations work when allow_magic_methods=False."""
+        sys.sandbox.set_config(
+            allow_class_creation=True,
+            allow_magic_methods=False,
+        )
+        globs = self.run_scoped_code("""
+class TypedClass:
+    x: int
+    y: str = "default"
+
+result = TypedClass.y
+""")
+        self.assertEqual(globs['result'], "default")
+
+    def test_get_config_includes_allow_magic_methods(self):
+        """get_config() should include allow_magic_methods."""
+        sys.sandbox.set_config(allow_magic_methods=False)
+        config = sys.sandbox.get_config()
+        self.assertIn('allow_magic_methods', config)
+        self.assertFalse(config['allow_magic_methods'])
+
+        sys.sandbox.set_config(allow_magic_methods=True)
+        config = sys.sandbox.get_config()
+        self.assertTrue(config['allow_magic_methods'])
+
+    def test_property_getter_setter(self):
+        """allow_magic_methods property should work."""
+        original = sys.sandbox.allow_magic_methods
+
+        sys.sandbox.allow_magic_methods = False
+        self.assertFalse(sys.sandbox.allow_magic_methods)
+
+        sys.sandbox.allow_magic_methods = True
+        self.assertTrue(sys.sandbox.allow_magic_methods)
+
+        # Restore
+        sys.sandbox.allow_magic_methods = original
+
+
+class AllowMagicMethodsSubprocessTests(unittest.TestCase):
+    """Subprocess tests for allow_magic_methods."""
+
+    def test_magic_methods_blocked_subprocess(self):
+        """Test magic methods blocked in subprocess."""
+        code = '''
+import sys
+sys.sandbox.set_config(
+    allow_dunder_access=False,
+    allow_class_creation=True,
+    allow_magic_methods=False,
+)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Foo:
+    def __init__(self):
+        pass
+""", "<sandbox>", "exec"))
+    sys.exit(1)  # Should not reach here
+except SandboxAttributeError:
+    sys.exit(0)  # Expected
+except Exception as e:
+    print(f"Unexpected: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(2)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Magic method should be blocked: {result.stderr}")
+
+    def test_basic_class_works_subprocess(self):
+        """Test basic class works without magic methods in subprocess."""
+        code = '''
+import sys
+sys.sandbox.set_config(
+    allow_dunder_access=False,
+    allow_class_creation=True,
+    allow_magic_methods=False,
+)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Point:
+    __slots__ = ('x', 'y')
+    x: int
+    y: int
+""", "<sandbox>", "exec"))
+    sys.exit(0)  # Should work
+except Exception as e:
+    print(f"Unexpected: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Basic class should work: {result.stderr}")
+
+
 if __name__ == '__main__':
     unittest.main()

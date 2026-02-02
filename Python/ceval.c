@@ -2898,9 +2898,12 @@ handle_eval_breaker:
             PyObject *v = POP();
 
             /* Sandbox check: block dunder stores outside class body.
-             * Use DUNDER_CLASS_ALL to allow ALL dunders in class body
-             * for magic method definitions like __init__, __str__, etc. */
-            if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_ALL) < 0) {
+             * Mode depends on allow_magic_methods config:
+             * - True: DUNDER_CLASS_ALL (allow all dunders in class body)
+             * - False: DUNDER_CLASS_WHITELIST (only whitelisted dunders) */
+            int mode = tstate->interp->sandbox.config.allow_magic_methods
+                       ? DUNDER_CLASS_ALL : DUNDER_CLASS_WHITELIST;
+            if (_PySandbox_CheckDunderAccess(name, mode) < 0) {
                 Py_DECREF(v);
                 goto error;
             }

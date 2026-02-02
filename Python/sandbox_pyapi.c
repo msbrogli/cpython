@@ -362,6 +362,7 @@ SANDBOX_BOOL_GETSET(import_allow_submodules, config.import_allow_submodules)
 SANDBOX_BOOL_GETSET(module_access_restrict_mode, config.module_access_restrict_mode)
 SANDBOX_BOOL_GETSET(allow_submodules, config.allow_submodules)
 SANDBOX_BOOL_GETSET(allow_class_creation, config.allow_class_creation)
+SANDBOX_BOOL_GETSET(allow_magic_methods, config.allow_magic_methods)
 
 /* opcode_restrict_mode needs special setter to update tracing state */
 static PyObject *
@@ -596,6 +597,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_allow_submodules, "Allow submodules when parent module is allowed (default True)", NULL},
     {"allow_class_creation", (getter)sandbox_get_allow_class_creation,
      (setter)sandbox_set_allow_class_creation, "Allow class creation with whitelisted dunders (default True)", NULL},
+    {"allow_magic_methods", (getter)sandbox_get_allow_magic_methods,
+     (setter)sandbox_set_allow_magic_methods, "Allow magic method definitions in class body (default True)", NULL},
     /* R/W special */
     {"banned_opcodes", (getter)sandbox_get_banned_opcodes,
      (setter)sandbox_set_banned_opcodes, "Banned opcodes (frozenset of ints)", NULL},
@@ -631,7 +634,8 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
         "allow_float", "allow_complex", "allow_dunder_access",
         "count_iterations_as_operations", "allow_unsafe", "allow_io",
         "import_restrict_mode", "import_allow_submodules",
-        "module_access_restrict_mode", "allow_submodules", "allow_class_creation", NULL
+        "module_access_restrict_mode", "allow_submodules", "allow_class_creation",
+        "allow_magic_methods", NULL
     };
 
     PyInterpreterState *interp = sandbox_get_interp();
@@ -661,8 +665,9 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     int module_access_restrict_mode = config->module_access_restrict_mode;
     int allow_submodules = config->allow_submodules;
     int allow_class_creation = config->allow_class_creation;
+    int allow_magic_methods = config->allow_magic_methods;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKppppppppppp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKpppppppppppp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
@@ -675,7 +680,7 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
                                      &allow_unsafe, &allow_io,
                                      &import_restrict_mode, &import_allow_submodules,
                                      &module_access_restrict_mode, &allow_submodules,
-                                     &allow_class_creation)) {
+                                     &allow_class_creation, &allow_magic_methods)) {
         return NULL;
     }
 
@@ -714,6 +719,7 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     config->module_access_restrict_mode = module_access_restrict_mode;
     config->allow_submodules = allow_submodules;
     config->allow_class_creation = allow_class_creation;
+    config->allow_magic_methods = allow_magic_methods;
 
     Py_RETURN_NONE;
 }
@@ -728,7 +734,7 @@ sandbox_get_config(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 
     return Py_BuildValue(
         "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, "
-        "s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O}",
+        "s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O}",
         "max_int_digits", config->max_int_digits,
         "max_str_length", config->max_str_length,
         "max_bytes_length", config->max_bytes_length,
@@ -749,7 +755,8 @@ sandbox_get_config(_PySandboxObject *self, PyObject *Py_UNUSED(args))
         "import_allow_submodules", config->import_allow_submodules ? Py_True : Py_False,
         "module_access_restrict_mode", config->module_access_restrict_mode ? Py_True : Py_False,
         "allow_submodules", config->allow_submodules ? Py_True : Py_False,
-        "allow_class_creation", config->allow_class_creation ? Py_True : Py_False);
+        "allow_class_creation", config->allow_class_creation ? Py_True : Py_False,
+        "allow_magic_methods", config->allow_magic_methods ? Py_True : Py_False);
 }
 
 static PyObject *

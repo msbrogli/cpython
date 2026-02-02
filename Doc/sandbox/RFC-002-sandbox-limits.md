@@ -199,6 +199,7 @@ typedef struct {
     int allow_complex;              /* 1 = allowed, 0 = forbidden */
     int allow_dunder_access;        /* 0 = blocked (default), 1 = allowed */
     int allow_class_creation;       /* 1 = allow class creation with whitelisted dunders (default) */
+    int allow_magic_methods;        /* 1 = allow magic method definitions in class body (default) */
     int allow_unsafe;               /* 1 = allowed, 0 = blocked */
     int allow_io;                   /* 1 = allowed, 0 = blocked (default) */
     int count_iterations_as_operations;  /* 1 = count iterations as ops */
@@ -454,7 +455,11 @@ This allows class definitions to work while still blocking introspection dunders
 
 ### All Dunders in Class Body (DUNDER_CLASS_ALL)
 
-The `STORE_NAME` opcode uses `DUNDER_CLASS_ALL` mode, which allows storing ALL dunders in a class body. This enables defining magic methods like `__init__`, `__str__`, `__add__`, etc.:
+The `STORE_NAME` opcode's behavior depends on the `allow_magic_methods` config:
+- When `allow_magic_methods=True` (default): Uses `DUNDER_CLASS_ALL` mode, allowing ALL dunders in class body
+- When `allow_magic_methods=False`: Uses `DUNDER_CLASS_WHITELIST` mode, only allowing whitelisted dunders
+
+This enables defining magic methods like `__init__`, `__str__`, `__add__`, etc. when `allow_magic_methods=True`:
 
 ```python
 class MyClass:
@@ -463,6 +468,18 @@ class MyClass:
 
     def __str__(self):   # STORE_NAME __str__ - allowed with DUNDER_CLASS_ALL
         return "MyClass"
+```
+
+When `allow_magic_methods=False`, only basic class definitions work:
+
+```python
+class Point:
+    __slots__ = ('x', 'y')  # STORE_NAME __slots__ - allowed (whitelisted)
+    x: int
+    y: int
+
+    def __init__(self):  # STORE_NAME __init__ - BLOCKED (not whitelisted)
+        pass
 ```
 
 **Limitation:** The whitelist only applies during class body execution. Method dunders like `__init__` accessed as attributes (e.g., `super().__init__()`) are blocked. Use `allow_dunder_access=True` if such patterns are needed.
@@ -568,6 +585,7 @@ Called from:
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | False | Allow `__dunder__` access |
 | `allow_class_creation` | bool | True | Allow class creation with whitelisted dunders |
+| `allow_magic_methods` | bool | True | Allow magic method definitions in class body |
 | `allow_unsafe` | bool | False | Allow unsafe operations |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterations as operations |

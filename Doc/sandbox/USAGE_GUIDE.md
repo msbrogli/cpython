@@ -707,6 +707,48 @@ exec(code)  # Works! Class creation with magic methods is allowed
 
 **Limitation:** The class body exception only applies during class body execution (when `CO_CLASS_BODY` flag is set). Method dunders like `__init__`, `__str__`, etc. are still blocked when accessed as attributes. For example, `super().__init__()` is blocked because it accesses `__init__` on the super() result. If you need to use `super().__init__()` or similar patterns, set `allow_dunder_access=True`.
 
+### Restricting Magic Method Definitions
+
+If you want to allow class creation but restrict the ability to define magic methods (`__init__`, `__str__`, etc.), use `allow_magic_methods=False`:
+
+```python
+# Restrict class creation to basic classes (no magic methods)
+sys.sandbox.set_config(
+    allow_class_creation=True,
+    allow_magic_methods=False
+)
+sys.sandbox.add_filename("<sandbox>")
+
+# This works - basic class with slots and annotations
+code = compile("""
+class Point:
+    '''A point in 2D space.'''
+    __slots__ = ('x', 'y')
+    x: int
+    y: int
+""", "<sandbox>", "exec")
+exec(code)  # OK
+
+# This is blocked - class with __init__
+code = compile("""
+class Foo:
+    def __init__(self):
+        pass
+""", "<sandbox>", "exec")
+try:
+    exec(code)
+except SandboxAttributeError:
+    print("Cannot define __init__ when allow_magic_methods=False")
+```
+
+When `allow_magic_methods=False`:
+- Basic class definitions work (with `__slots__`, `__doc__`, annotations, etc.)
+- Regular (non-dunder) methods work
+- Inheritance works
+- Magic method definitions (`__init__`, `__str__`, `__add__`, etc.) are blocked
+
+This is useful for creating data-only classes or simple containers without allowing potentially dangerous magic method overrides.
+
 ### Metaclass Security
 
 Sandbox code **cannot** create metaclasses (subclass `type`), but **can** use trusted metaclasses from outside the sandbox:
@@ -2339,6 +2381,7 @@ except SandboxError as e:
 | `allow_complex` | bool | True | Allow complex creation |
 | `allow_dunder_access` | bool | False | Allow `__dunder__` attributes |
 | `allow_class_creation` | bool | True | Allow class creation with whitelisted dunders |
+| `allow_magic_methods` | bool | True | Allow magic method definitions in class body |
 | `allow_unsafe` | bool | False | Allow unsafe operations (compile, gc introspection) |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterator yields toward `operation_count` |

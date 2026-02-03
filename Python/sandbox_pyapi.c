@@ -363,6 +363,7 @@ SANDBOX_BOOL_GETSET(allow_submodules, config.allow_submodules)
 SANDBOX_BOOL_GETSET(allow_class_creation, config.allow_class_creation)
 SANDBOX_BOOL_GETSET(allow_magic_methods, config.allow_magic_methods)
 SANDBOX_BOOL_GETSET(allow_metaclasses, config.allow_metaclasses)
+SANDBOX_BOOL_GETSET(allow_specialized_opcodes, allow_specialized_opcodes)
 
 /* opcode_restrict_mode needs special setter to update tracing state */
 static PyObject *
@@ -658,6 +659,8 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_allow_magic_methods, "Allow magic method definitions in class body (default True)", NULL},
     {"allow_metaclasses", (getter)sandbox_get_allow_metaclasses,
      (setter)sandbox_set_allow_metaclasses, "Allow metaclass creation and usage (default True)", NULL},
+    {"allow_specialized_opcodes", (getter)sandbox_get_allow_specialized_opcodes,
+     (setter)sandbox_set_allow_specialized_opcodes, "Allow specialized opcodes when opcode_restrict_mode=True (default False)", NULL},
     /* R/W special */
     {"allowed_opcodes", (getter)sandbox_get_allowed_opcodes,
      (setter)sandbox_set_allowed_opcodes, "Allowed opcodes (frozenset of ints)", NULL},

@@ -77,6 +77,58 @@ _PySandbox_CheckOpcode(int opcode)
     return -1;
 }
 
+/* _PySandbox_BlockSpecializedOpcode - Block a specialized opcode in sandbox scope
+ *
+ * Called when allow_specialized_opcodes is False and a specialized opcode is
+ * encountered. Unlike _PySandbox_CheckOpcode, this does NOT check the
+ * allowed_opcodes bitmap - specialized opcodes are blocked regardless of
+ * whether their numeric value happens to be in the allowed set.
+ *
+ * Returns: 0 if not in scope (allowed), -1 if in scope (error set)
+ */
+int
+_PySandbox_BlockSpecializedOpcode(int opcode)
+{
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        return 0;
+    }
+
+    PyInterpreterState *interp = tstate->interp;
+    if (interp == NULL) {
+        return 0;
+    }
+
+    _PySandboxState *sandbox = &interp->sandbox;
+
+    /* Fast exit: sandbox not enforced (disabled, suspended, or in error handling) */
+    if (!_PySandbox_IsEnforced(sandbox)) {
+        return 0;
+    }
+
+    /* Check if we're in sandbox scope */
+    if (sandbox->registered_filenames == NULL) {
+        return 0;
+    }
+
+    _PyInterpreterFrame *frame = get_current_iframe(tstate);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;
+    }
+    if (!in_scope) {
+        return 0;
+    }
+
+    /* Specialized opcode in sandbox scope - raise error */
+    sandbox->suppress_checks = 1;
+    PyErr_Format(PyExc_SandboxRuntimeError,
+                 "Specialized opcode %d is not allowed in sandbox scope "
+                 "(allow_specialized_opcodes is False)", opcode);
+    sandbox->suppress_checks = 0;
+    return -1;
+}
+
 /* ============ Opcode Restriction Mode Get/Set ============ */
 
 void

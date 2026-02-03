@@ -156,6 +156,7 @@ class OpcodeRestrictionEnforcementTests(unittest.TestCase):
 import sys
 sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.allow_specialized_opcodes = True  # Allow specialized so base opcode test works
 sys.sandbox.add_filename("<sandbox>")
 
 try:
@@ -189,6 +190,7 @@ except SandboxRuntimeError as e:
 import sys
 sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.allow_specialized_opcodes = True  # Allow specialized so base opcode test works
 sys.sandbox.add_filename("<sandbox>")
 
 try:
@@ -222,6 +224,7 @@ except SandboxRuntimeError as e:
 import sys
 sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.allow_specialized_opcodes = True  # Allow specialized so base opcode test works
 sys.sandbox.allow_dunder_access = True  # Required for class definitions
 sys.sandbox.enable()
 sys.sandbox.add_filename("<sandbox>")
@@ -488,6 +491,154 @@ sys.exit(0)
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
                         f"Allowed opcodes broken: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+
+class SpecializedOpcodeTests(unittest.TestCase):
+    """Test that specialized opcodes are blocked when allow_specialized_opcodes=False."""
+
+    def setUp(self):
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        sys.sandbox.opcode_restrict_mode = False
+        sys.sandbox.allowed_opcodes = None
+        sys.sandbox.allow_specialized_opcodes = False
+        while sys.sandbox.suspended:
+            sys.sandbox.resume()
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+        sys.sandbox.set_config(**self.original_limits)
+
+    def test_allow_specialized_opcodes_default(self):
+        """allow_specialized_opcodes should default to False."""
+        self.assertFalse(sys.sandbox.allow_specialized_opcodes)
+
+    def test_get_set_allow_specialized_opcodes(self):
+        """Setting and getting allow_specialized_opcodes should work."""
+        self.assertFalse(sys.sandbox.allow_specialized_opcodes)
+        sys.sandbox.allow_specialized_opcodes = True
+        self.assertTrue(sys.sandbox.allow_specialized_opcodes)
+        sys.sandbox.allow_specialized_opcodes = False
+        self.assertFalse(sys.sandbox.allow_specialized_opcodes)
+
+    def test_specialized_opcode_blocked_by_default(self):
+        """Specialized opcodes should be blocked when flag is False.
+
+        The function must be warmed up BEFORE sandbox is enabled (since enabling
+        sandbox prevents specialization). Then we enable sandbox with
+        opcode_restrict_mode and run the specialized code in scope.
+
+        We use a separate filename for the sandbox scope to avoid blocking
+        the test harness code.
+        """
+        import subprocess
+        # ALL_OPCODES should allow all base opcodes
+        allowed = _opcode_set_literal(ALL_OPCODES)
+        code = f'''
+import sys
+
+# Compile the test function with a specific filename
+func_code = compile("""
+def hot_add(a, b):
+    return a + b
+""", "<sandbox-test>", "exec")
+exec(func_code)
+
+# Warm up to trigger specialization
+for _ in range(100):
+    hot_add(1, 2)
+
+# Verify specialization happened
+adaptive = hot_add.__code__._co_code_adaptive
+if adaptive[6] == 122:
+    print("FAIL: function not specialized")
+    sys.exit(1)
+
+# Enable sandbox with ALL configuration
+sys.sandbox.enable()
+sys.sandbox.allowed_opcodes = {allowed}
+sys.sandbox.allow_specialized_opcodes = False  # Block specialized opcodes
+sys.sandbox.opcode_restrict_mode = True
+
+# Add the function's filename to scope (not <string>)
+sys.sandbox.add_filename("<sandbox-test>")
+
+# Run the specialized function - should be blocked
+try:
+    result = hot_add(1, 2)
+    # If we get here, no exception was raised - FAIL
+    print("FAIL: no exception")
+    sys.exit(1)
+except SandboxRuntimeError:
+    # We expect this error - specialized opcode blocked - PASS
+    print("PASS")
+    sys.exit(0)
+'''
+        # Run without preamble that enables sandbox
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Specialized opcode not blocked: stdout={result.stdout!r} stderr={result.stderr!r}")
+
+    def test_specialized_opcode_allowed_when_flag_true(self):
+        """Specialized opcodes should work when flag is True.
+
+        We use a separate filename for the sandbox scope to be consistent
+        with test_specialized_opcode_blocked_by_default.
+        """
+        import subprocess
+        # ALL_OPCODES should allow all base opcodes
+        allowed = _opcode_set_literal(ALL_OPCODES)
+        code = f'''
+import sys
+
+# Compile the test function with a specific filename
+func_code = compile("""
+def hot_add(a, b):
+    return a + b
+""", "<sandbox-test>", "exec")
+exec(func_code)
+
+# Warm up to trigger specialization
+for _ in range(100):
+    hot_add(1, 2)
+
+# Verify specialization happened
+adaptive = hot_add.__code__._co_code_adaptive
+if adaptive[6] == 122:
+    print("FAIL: function not specialized")
+    sys.exit(1)
+
+# Enable sandbox with ALL configuration, allowing specialized opcodes
+sys.sandbox.enable()
+sys.sandbox.allowed_opcodes = {allowed}
+sys.sandbox.allow_specialized_opcodes = True  # Allow specialized opcodes
+sys.sandbox.opcode_restrict_mode = True
+
+# Add the function's filename to scope
+sys.sandbox.add_filename("<sandbox-test>")
+
+# Run the specialized function - should work with flag=True
+result = hot_add(1, 2)
+assert result == 3, f"Expected 3, got {{result}}"
+print("PASS")
+sys.exit(0)
+'''
+        # Run without preamble that enables sandbox
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        self.assertEqual(result.returncode, 0,
+                        f"Specialized opcode should work when flag is True: stdout={result.stdout!r} stderr={result.stderr!r}")
 
 
 if __name__ == '__main__':

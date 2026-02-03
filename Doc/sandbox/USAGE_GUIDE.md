@@ -1353,6 +1353,34 @@ mode = sys.sandbox.opcode_restrict_mode
 print(f"Opcode restriction active: {mode}")
 ```
 
+### Blocking Specialized Opcodes
+
+CPython's adaptive interpreter creates specialized variants of opcodes for performance
+(e.g., `BINARY_OP_ADD_INT` instead of `BINARY_OP`). By default, when `opcode_restrict_mode=True`,
+specialized opcodes are blocked even if the base opcode is in `allowed_opcodes`.
+
+```python
+# Default behavior: block specialized opcodes
+sys.sandbox.allow_specialized_opcodes  # False by default
+
+# Allow specialized opcodes (less secure, but better performance)
+sys.sandbox.allow_specialized_opcodes = True
+```
+
+**When to allow specialized opcodes:**
+- When opcode restriction is for feature blocking, not security
+- When performance is critical and you trust the code
+- When you've verified specific specialized opcodes are safe
+
+**When to keep specialized opcodes blocked (default):**
+- For maximum security (defense-in-depth)
+- When running truly untrusted code
+- When code may have been pre-specialized before entering sandbox scope
+
+Note: Functions defined and warmed up (run multiple times) before sandbox is enabled
+may have specialized bytecode. Setting `allow_specialized_opcodes=False` blocks these
+specialized opcodes at runtime, providing defense against pre-specialized code.
+
 ---
 
 ## Object Creation Hooks
@@ -2458,6 +2486,8 @@ except SandboxError as e:
 |----------|-------------|
 | `sys.sandbox.opcode_restrict_mode = bool` | Enable/disable opcode checking |
 | `sys.sandbox.opcode_restrict_mode -> bool` | Check mode status |
+| `sys.sandbox.allow_specialized_opcodes = bool` | Allow/block specialized opcodes (default False) |
+| `sys.sandbox.allow_specialized_opcodes -> bool` | Check if specialized opcodes allowed |
 | `sys.sandbox.allowed_opcodes = set/None` | Set allowed opcodes |
 | `sys.sandbox.allowed_opcodes -> frozenset` | Get allowed opcodes |
 

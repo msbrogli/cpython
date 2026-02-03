@@ -1358,6 +1358,11 @@ _PySandbox_CheckOpcodeDispatch(int opcode, PyInterpreterState *interp)
     /* De-optimize specialized opcodes to base form for bitmap check */
     int deopt = _PyOpcode_Deopt[opcode];
 
+    /* Security: block specialized opcodes unless explicitly allowed */
+    if (!sandbox->allow_specialized_opcodes && opcode != deopt) {
+        return _PySandbox_BlockSpecializedOpcode(opcode);  /* Will raise error if in scope */
+    }
+
     /* Fast exit: opcode in allowed set */
     if (_PY_SANDBOX_LIKELY(_PySandbox_OpcodeSet_HAS(&sandbox->allowed_opcodes, deopt))) {
         return 0;

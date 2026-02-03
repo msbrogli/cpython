@@ -255,6 +255,7 @@ typedef struct {
     int frozen_mode;  /* 1 = global freeze active (block all attr mutations), 0 = normal */
     int auto_mutable;  /* 1 = auto-mark created objects as mutable within scope, 0 = off */
     int opcode_restrict_mode;            /* 1 = active, 0 = off */
+    int allow_specialized_opcodes;       /* 1 = allow specialized, 0 = block (default) */
     _PySandboxOpcodeSet allowed_opcodes;  /* bitmap of allowed opcodes */
 
     /* Sandbox scope tracking - Python set of registered filenames.
@@ -312,6 +313,7 @@ typedef struct {
     .frozen_mode = 0,                       \
     .auto_mutable = 0,                      \
     .opcode_restrict_mode = 0,              \
+    .allow_specialized_opcodes = 0,         \
     .allowed_opcodes = {{0}},                \
     .registered_filenames = NULL,           \
     .allowed_imports = NULL,                \
@@ -403,6 +405,11 @@ PyAPI_FUNC(void) _PySandbox_MaybeMarkMutable(PyObject *obj);
  * Returns 0 if opcode is allowed, -1 if banned (sets SandboxRuntimeError).
  * Fast exits: mode off, suspended, suppress_checks, not in scope, opcode not banned. */
 PyAPI_FUNC(int) _PySandbox_CheckOpcode(int opcode);
+
+/* Block a specialized opcode - called when allow_specialized_opcodes is False.
+ * Unlike _PySandbox_CheckOpcode, does NOT check the allowed_opcodes bitmap.
+ * Returns 0 if not in scope, -1 if in scope (sets SandboxRuntimeError). */
+PyAPI_FUNC(int) _PySandbox_BlockSpecializedOpcode(int opcode);
 
 /* Check if import is allowed. Returns 0 if allowed, -1 if blocked.
  * abs_name: fully resolved module name

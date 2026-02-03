@@ -170,6 +170,7 @@ typedef struct {
 typedef struct {
     /* ... other fields ... */
     int opcode_restrict_mode;            /* 1 = active, 0 = off */
+    int allow_specialized_opcodes;       /* 1 = allow specialized, 0 = block (default) */
     _PySandboxOpcodeSet allowed_opcodes;  /* Bitmap of allowed opcodes */
     /* ... */
 } _PySandboxState;
@@ -271,6 +272,7 @@ int _PySandbox_CheckOpcode(int opcode);
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `opcode_restrict_mode` | bool | False | Enable opcode checking |
+| `allow_specialized_opcodes` | bool | False | Allow specialized opcodes when opcode_restrict_mode=True |
 | `allowed_opcodes` | frozenset | empty | Set of allowed opcode integers |
 
 ### Setting Allowed Opcodes
@@ -424,6 +426,72 @@ The implemented approach (Option 3) provides:
 - **Future-proof**: New specialized opcodes are automatically handled
 - **No per-opcode overhead**: The check happens once at warmup, not on every execution
 - **Audit-friendly**: Easy to verify that sandboxed code uses generic opcodes
+
+### Runtime Specialized Opcode Blocking (`allow_specialized_opcodes`)
+
+In addition to disabling specialization at warmup time, the sandbox provides a runtime
+check via the `allow_specialized_opcodes` flag. When `opcode_restrict_mode=True` and
+`allow_specialized_opcodes=False` (the default), any specialized opcode that attempts
+to execute in sandbox scope will be blocked with `SandboxRuntimeError`.
+
+This provides defense-in-depth for scenarios where:
+1. Code was specialized before entering sandbox scope (warm functions)
+2. Code was imported from outside the sandbox with pre-specialized bytecode
+3. Future CPython changes modify when/how specialization occurs
+
+#### How It Works
+
+The `_PySandbox_CheckOpcodeDispatch()` function in `ceval.c` uses `_PyOpcode_Deopt[]`
+to detect specialized opcodes:
+
+```c
+int deopt = _PyOpcode_Deopt[opcode];
+
+/* Block specialized opcodes unless explicitly allowed */
+if (!sandbox->allow_specialized_opcodes && opcode != deopt) {
+    return _PySandbox_CheckOpcode(opcode);  /* Will raise error if in scope */
+}
+```
+
+If `opcode != deopt`, the opcode is specialized (e.g., `BINARY_OP_ADD_INT` vs `BINARY_OP`),
+and it will be rejected if `allow_specialized_opcodes=False`. The specialized opcode
+will not be in the `allowed_opcodes` bitmap (which only contains base opcodes), so
+`_PySandbox_CheckOpcode` will raise an error when in sandbox scope.
+
+#### Example
+
+```python
+import sys
+
+# Function gets specialized before sandbox is active
+def hot_add(a, b):
+    return a + b
+
+for _ in range(100):
+    hot_add(1, 2)  # Triggers specialization
+
+# Enable sandbox with opcode restriction
+sys.sandbox.enable()
+sys.sandbox.allowed_opcodes = set(range(256))  # Allow all base opcodes
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.allow_specialized_opcodes = False  # Block specialized (default)
+
+sys.sandbox.add_filename(hot_add.__code__.co_filename)
+
+try:
+    hot_add(1, 2)  # Uses BINARY_OP_ADD_INT (specialized)
+except SandboxRuntimeError as e:
+    print(e)  # "Specialized opcode 5 is not allowed in sandbox scope"
+```
+
+#### When to Allow Specialized Opcodes
+
+Set `allow_specialized_opcodes=True` if:
+- You trust that specialized opcodes don't bypass security checks (they may in some cases)
+- Performance is critical and you've verified the specific opcodes are safe
+- You're using opcode restriction primarily for feature blocking, not security
+
+Keep `allow_specialized_opcodes=False` (default) for maximum security.
 
 # Drawbacks
 [drawbacks]: #drawbacks

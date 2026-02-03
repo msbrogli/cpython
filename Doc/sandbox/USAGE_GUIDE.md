@@ -2177,6 +2177,9 @@ SAFE_BUILTINS = {...}  # Curated safe builtins only
 | Thread spawning | Remove `threading` from allowed modules |
 | Signal handlers | Remove `signal` from allowed modules |
 | Subprocess spawning | Remove `subprocess`, `os` from allowed modules |
+| Specialized opcodes skip security checks | Use `DEOPT_IF` pattern in ceval.c (see RFC-006) |
+
+**Note on Specialized Opcodes (P0 Critical):** CPython's adaptive interpreter (PEP 659) creates specialized variants of opcodes for performance (e.g., `LOAD_ATTR_INSTANCE_VALUE` for `LOAD_ATTR`). Security checks added to generic opcodes must also be added to their specialized variants, or specialized opcodes must deoptimize when sandbox restrictions are active. See [RFC-006-sandbox-opcodes.md](RFC-006-sandbox-opcodes.md#security-considerations) for details.
 
 ### Escape Vectors to Block
 
@@ -2193,6 +2196,7 @@ Common sandbox escape techniques and how to block them:
 | `ctypes.CDLL()` | Call arbitrary C code | Import restrictions |
 | `frame.f_back.f_locals` | Access parent frame | Frame access is blocked in scope |
 | `gen.gi_frame.f_locals` | Access generator frame | Frame access blocked |
+| Specialized opcode bypass (e.g., hot-loop `__class__` access) | PEP 659 specialized opcodes skip checks | `DEOPT_IF` in ceval.c (see RFC-006) |
 
 ### Recommended Minimal Configuration
 

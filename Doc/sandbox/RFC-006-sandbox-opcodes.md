@@ -321,6 +321,74 @@ Use `opcode.opmap` to get current Python version's opcode numbers.
 SandboxRuntimeError: Opcode 108 is not allowed in sandbox scope
 ```
 
+# Security Considerations
+[security-considerations]: #security-considerations
+
+## Specialized Opcode Mapping (P0 Critical)
+
+CPython's adaptive interpreter (PEP 659) creates specialized variants of opcodes
+for performance. Each generic opcode (e.g., `LOAD_ATTR`) has multiple specialized
+forms (e.g., `LOAD_ATTR_INSTANCE_VALUE`, `LOAD_ATTR_SLOT`).
+
+**Security Requirement:** Every security check added to a generic opcode MUST also
+be added to ALL its specialized variants, OR specialized opcodes must deoptimize
+when security checks are needed.
+
+### Affected Opcode Families
+
+| Generic Opcode | Specialized Variants |
+|----------------|---------------------|
+| `LOAD_ATTR` | 4 specialized variants: `LOAD_ATTR_INSTANCE_VALUE`, `LOAD_ATTR_MODULE`, `LOAD_ATTR_WITH_HINT`, `LOAD_ATTR_SLOT` |
+| `STORE_ATTR` | 3 specialized variants: `STORE_ATTR_INSTANCE_VALUE`, `STORE_ATTR_WITH_HINT`, `STORE_ATTR_SLOT` |
+| `LOAD_METHOD` | 5 specialized variants: `LOAD_METHOD_WITH_VALUES`, `LOAD_METHOD_WITH_DICT`, `LOAD_METHOD_NO_DICT`, `LOAD_METHOD_MODULE`, `LOAD_METHOD_CLASS` |
+| `BINARY_SUBSCR` | 4 specialized variants |
+| `STORE_SUBSCR` | 2 specialized variants |
+| `LOAD_GLOBAL` | 2 specialized variants |
+| `COMPARE_OP` | 3 specialized variants |
+| `CALL/PRECALL` | 13+ specialized variants |
+
+### Mapping Location
+
+`Python/specialize.c` line 20-32 defines `_PyOpcode_Adaptive[]` which maps generic
+opcodes to their adaptive entry points. The actual specialization functions are
+`_Py_Specialize_*()` in the same file.
+
+### Recommended Mitigation Pattern
+
+Use the `DEOPT_IF(sandbox_condition, GENERIC_OPCODE)` pattern at the start of each
+specialized opcode to automatically fall back to the protected generic implementation
+when sandbox restrictions are active:
+
+```c
+TARGET(LOAD_ATTR_INSTANCE_VALUE) {
+    assert(cframe.use_tracing == 0);
+    /* Deoptimize if sandbox dunder blocking is active */
+    DEOPT_IF(!tstate->interp->sandbox.config.allow_dunder_access ||
+             !tstate->interp->sandbox.config.allow_unsafe, LOAD_ATTR);
+    // ... existing specialized code (unchanged) ...
+}
+```
+
+This approach:
+- Ensures all security checks in the generic opcode are applied
+- Maintains full performance for non-sandboxed code
+- Provides a simple, auditable pattern (every specialized opcode starts with `DEOPT_IF`)
+- Automatically benefits from any future security fixes to generic opcodes
+
+### Why Deoptimization is Preferred
+
+**Option 1: Add security checks to each specialized opcode**
+- Pros: Fine-grained control
+- Cons: Must modify 15+ opcodes, easy to miss one during future updates, ongoing maintenance burden
+
+**Option 2: Deoptimize when sandbox is active (Recommended)**
+- Pros: Simple one-line addition, leverages existing security checks, easier to audit
+- Cons: Performance penalty when sandbox is active (acceptable trade-off for sandboxed code)
+
+**Option 3: Disable specialization entirely**
+- Pros: Single point of control
+- Cons: Significant performance penalty, hard to implement cleanly
+
 # Drawbacks
 [drawbacks]: #drawbacks
 

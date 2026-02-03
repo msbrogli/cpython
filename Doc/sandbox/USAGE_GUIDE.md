@@ -1264,21 +1264,22 @@ sys.sandbox.use_default_allowed_modules()
 
 ## Opcode Restrictions
 
-Ban specific bytecode opcodes from executing in sandbox scope. This provides fine-grained control over what operations sandboxed code can perform.
+Control which bytecode opcodes can execute in sandbox scope using an allowlist model. When opcode restriction mode is active, only opcodes in the `allowed_opcodes` set can execute; all others raise `SandboxRuntimeError`.
 
 ### Setting Up Opcode Restrictions
 
 ```python
 import dis
 
-# Ban import-related opcodes
-banned = {
+# Allow all opcodes EXCEPT import-related ones
+ALL_OPCODES = set(range(256))
+IMPORT_OPCODES = {
     dis.opmap['IMPORT_NAME'],
     dis.opmap['IMPORT_FROM'],
     dis.opmap['IMPORT_STAR'],
 }
 
-sys.sandbox.banned_opcodes = banned
+sys.sandbox.allowed_opcodes = ALL_OPCODES - IMPORT_OPCODES
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.add_filename("<sandbox>")
 
@@ -1292,40 +1293,45 @@ except SandboxRuntimeError as e:
     print(e)
 finally:
     sys.sandbox.opcode_restrict_mode = False
-    sys.sandbox.banned_opcodes = None  # Clear all banned opcodes
+    sys.sandbox.allowed_opcodes = None  # Clear all allowed opcodes
 ```
 
-### Common Opcode Sets to Ban
+### Common Opcode Sets to Block
 
 ```python
 import dis
 
-# Ban imports
+ALL_OPCODES = set(range(256))
+
+# Block imports
 IMPORT_OPCODES = {
     dis.opmap['IMPORT_NAME'],
     dis.opmap['IMPORT_FROM'],
     dis.opmap['IMPORT_STAR'],
 }
+sys.sandbox.allowed_opcodes = ALL_OPCODES - IMPORT_OPCODES
 
-# Ban global/nonlocal variable access
+# Block global/nonlocal variable access
 GLOBAL_OPCODES = {
     dis.opmap.get('STORE_GLOBAL'),
     dis.opmap.get('DELETE_GLOBAL'),
     dis.opmap.get('LOAD_GLOBAL'),  # Note: this also blocks function calls
 }
+sys.sandbox.allowed_opcodes = ALL_OPCODES - GLOBAL_OPCODES
 
-# Ban raise/exception manipulation
+# Block raise/exception manipulation
 EXCEPTION_OPCODES = {
     dis.opmap.get('RAISE_VARARGS'),
     dis.opmap.get('RERAISE'),
 }
+sys.sandbox.allowed_opcodes = ALL_OPCODES - EXCEPTION_OPCODES
 ```
 
-### Reading Current Banned Opcodes
+### Reading Current Allowed Opcodes
 
 ```python
-banned = sys.sandbox.banned_opcodes  # Returns frozenset of ints
-print(f"Banned opcodes: {banned}")
+allowed = sys.sandbox.allowed_opcodes  # Returns frozenset of ints
+print(f"Allowed opcodes: {allowed}")
 
 mode = sys.sandbox.opcode_restrict_mode
 print(f"Opcode restriction active: {mode}")
@@ -1754,13 +1760,14 @@ def eval_expression(expr):
             max_iterations=1000,
         )
 
-        # Ban imports
-        banned = {
+        # Allow all opcodes except imports
+        ALL_OPCODES = set(range(256))
+        IMPORT_OPCODES = {
             dis.opmap['IMPORT_NAME'],
             dis.opmap['IMPORT_FROM'],
             dis.opmap['IMPORT_STAR'],
         }
-        sys.sandbox.banned_opcodes = banned
+        sys.sandbox.allowed_opcodes = ALL_OPCODES - IMPORT_OPCODES
         sys.sandbox.opcode_restrict_mode = True
 
         # Enable sandbox
@@ -1781,7 +1788,7 @@ def eval_expression(expr):
     finally:
         sys.sandbox.disable()
         sys.sandbox.opcode_restrict_mode = False
-        sys.sandbox.banned_opcodes = None
+        sys.sandbox.allowed_opcodes = None
         sys.sandbox.clear_filenames()
         sys.sandbox.set_config(**original)
         sys.sandbox.reset_counts()
@@ -1914,7 +1921,7 @@ finally:
     sys.sandbox.auto_mutable = False
     sys.sandbox.frozen_mode = False
     sys.sandbox.opcode_restrict_mode = False
-    sys.sandbox.banned_opcodes = None
+    sys.sandbox.allowed_opcodes = None
     sys.sandbox.clear_filenames()
     sys.sandbox.set_config(**original)
     sys.sandbox.reset_counts()
@@ -1954,7 +1961,8 @@ sys.sandbox.set_config(
 sys.sandbox.frozen_mode = True
 
 # Plus opcode restrictions for import blocking
-sys.sandbox.banned_opcodes = {dis.opmap['IMPORT_NAME'], ...}
+ALL_OPCODES = set(range(256))
+sys.sandbox.allowed_opcodes = ALL_OPCODES - {dis.opmap['IMPORT_NAME'], ...}
 sys.sandbox.opcode_restrict_mode = True
 ```
 
@@ -2148,11 +2156,13 @@ sys.sandbox.module_access_restrict_mode = True
 sys.sandbox.allowed_modules = frozenset({"math", "json"})
 
 # Layer 4: Opcode restrictions (extra defense against imports)
-sys.sandbox.banned_opcodes = {
+ALL_OPCODES = set(range(256))
+IMPORT_OPCODES = {
     dis.opmap['IMPORT_NAME'],
     dis.opmap['IMPORT_FROM'],
     dis.opmap['IMPORT_STAR'],
 }
+sys.sandbox.allowed_opcodes = ALL_OPCODES - IMPORT_OPCODES
 sys.sandbox.opcode_restrict_mode = True
 
 # Layer 5: Frozen mode
@@ -2279,11 +2289,13 @@ def create_sandbox():
     sys.sandbox.allowed_modules = frozenset()  # No modules allowed
 
     # Block import opcodes as extra defense
-    sys.sandbox.banned_opcodes = {
+    ALL_OPCODES = set(range(256))
+    IMPORT_OPCODES = {
         dis.opmap['IMPORT_NAME'],
         dis.opmap['IMPORT_FROM'],
         dis.opmap['IMPORT_STAR'],
     }
+    sys.sandbox.allowed_opcodes = ALL_OPCODES - IMPORT_OPCODES
     sys.sandbox.opcode_restrict_mode = True
 
     # Enable frozen mode
@@ -2430,8 +2442,8 @@ except SandboxError as e:
 |----------|-------------|
 | `sys.sandbox.opcode_restrict_mode = bool` | Enable/disable opcode checking |
 | `sys.sandbox.opcode_restrict_mode -> bool` | Check mode status |
-| `sys.sandbox.banned_opcodes = set/None` | Set banned opcodes |
-| `sys.sandbox.banned_opcodes -> frozenset` | Get banned opcodes |
+| `sys.sandbox.allowed_opcodes = set/None` | Set allowed opcodes |
+| `sys.sandbox.allowed_opcodes -> frozenset` | Get allowed opcodes |
 
 ### Object Creation Hook
 

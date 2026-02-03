@@ -136,7 +136,7 @@ Exception
 | Mutable override | 003 | `set_mutable()` |
 | Import restriction | 005 | `import_restrict_mode`, `allowed_imports` |
 | Submodule imports | 005 | `import_allow_submodules` |
-| Opcode restriction | 006 | `opcode_restrict_mode`, `banned_opcodes` |
+| Opcode restriction | 006 | `opcode_restrict_mode`, `allowed_opcodes` |
 | Creation hook | 007 | `creation_hook` |
 | Scope management | 001 | `scope()`, `add_filename()`, etc. |
 | Suspend/resume | 001 | `suspend()`, `resume()`, `suspended_limits()` |

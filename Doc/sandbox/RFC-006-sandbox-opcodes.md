@@ -7,7 +7,7 @@
 # Summary
 [summary]: #summary
 
-The sandbox opcodes module provides bytecode-level operation restriction through a bitmap of banned opcodes. When enabled, any attempt to execute a banned opcode from sandbox scope raises `SandboxRuntimeError`. This allows fine-grained control over what operations sandboxed code can perform.
+The sandbox opcodes module provides bytecode-level operation restriction through a bitmap of allowed opcodes. When enabled, any attempt to execute an opcode not in the allowed set from sandbox scope raises `SandboxRuntimeError`. This allows fine-grained control over what operations sandboxed code can perform using an allowlist model.
 
 # Motivation
 [motivation]: #motivation
@@ -26,16 +26,21 @@ While other sandbox features (import restrictions, frozen mode) address some con
 
 ## Enabling Opcode Restrictions
 
+The opcode restriction system uses an allowlist model: you specify which opcodes ARE permitted, and any opcode not in the allowed set will raise an error when executed in sandbox scope.
+
 ```python
 import sys
 import opcode
 
-# Set banned opcodes (set of opcode integers)
-sys.sandbox.banned_opcodes = {
+# Set allowed opcodes (all opcodes 0-255 EXCEPT imports)
+ALL_OPCODES = set(range(256))
+IMPORT_OPCODES = {
     opcode.opmap['IMPORT_NAME'],
     opcode.opmap['IMPORT_FROM'],
     opcode.opmap['IMPORT_STAR'],
 }
+
+sys.sandbox.allowed_opcodes = ALL_OPCODES - IMPORT_OPCODES
 
 # Enable opcode restriction mode
 sys.sandbox.opcode_restrict_mode = True
@@ -57,30 +62,33 @@ except SandboxRuntimeError as e:
 ```python
 import opcode
 
+ALL_OPCODES = set(range(256))
 IMPORT_OPCODES = {
     opcode.opmap['IMPORT_NAME'],
     opcode.opmap['IMPORT_FROM'],
     opcode.opmap['IMPORT_STAR'],
 }
 
-sys.sandbox.banned_opcodes = IMPORT_OPCODES
+sys.sandbox.allowed_opcodes = ALL_OPCODES - IMPORT_OPCODES
 sys.sandbox.opcode_restrict_mode = True
 ```
 
 ### Block Attribute Mutation
 
 ```python
+ALL_OPCODES = set(range(256))
 ATTR_MUTATION_OPCODES = {
     opcode.opmap['STORE_ATTR'],
     opcode.opmap['DELETE_ATTR'],
 }
 
-sys.sandbox.banned_opcodes = ATTR_MUTATION_OPCODES
+sys.sandbox.allowed_opcodes = ALL_OPCODES - ATTR_MUTATION_OPCODES
 ```
 
 ### Block Global Mutation
 
 ```python
+ALL_OPCODES = set(range(256))
 GLOBAL_MUTATION_OPCODES = {
     opcode.opmap['STORE_GLOBAL'],
     opcode.opmap['DELETE_GLOBAL'],
@@ -88,15 +96,15 @@ GLOBAL_MUTATION_OPCODES = {
     opcode.opmap['DELETE_NAME'],
 }
 
-sys.sandbox.banned_opcodes = GLOBAL_MUTATION_OPCODES
+sys.sandbox.allowed_opcodes = ALL_OPCODES - GLOBAL_MUTATION_OPCODES
 ```
 
 ## Checking Current Configuration
 
 ```python
-# Get banned opcodes
-banned = sys.sandbox.banned_opcodes
-print(banned)  # frozenset({108, 109, 84})
+# Get allowed opcodes
+allowed = sys.sandbox.allowed_opcodes
+print(allowed)  # frozenset({0, 1, 2, ..., 255} - blocked opcodes)
 
 # Check if mode is active
 print(sys.sandbox.opcode_restrict_mode)  # True/False
@@ -110,13 +118,15 @@ Opcode restrictions work alongside other sandbox features:
 import sys
 import opcode
 
+ALL_OPCODES = set(range(256))
+
 # Multi-layered protection
 sys.sandbox.set_config(
     max_operations=10000,
     allow_dunder_access=False,
 )
 
-sys.sandbox.banned_opcodes = {opcode.opmap['IMPORT_NAME']}
+sys.sandbox.allowed_opcodes = ALL_OPCODES - {opcode.opmap['IMPORT_NAME']}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.frozen_mode = True
 
@@ -160,7 +170,7 @@ typedef struct {
 typedef struct {
     /* ... other fields ... */
     int opcode_restrict_mode;            /* 1 = active, 0 = off */
-    _PySandboxOpcodeSet banned_opcodes;  /* Bitmap of banned opcodes */
+    _PySandboxOpcodeSet allowed_opcodes;  /* Bitmap of allowed opcodes */
     /* ... */
 } _PySandboxState;
 ```
@@ -188,8 +198,8 @@ _PySandbox_CheckOpcode(int opcode)
         return 0;
     }
 
-    /* Fast exit: opcode not banned (bitmap check) */
-    if (!_PySandbox_OpcodeSet_HAS(&sandbox->banned_opcodes, opcode)) {
+    /* Fast exit: opcode is allowed (bitmap check) */
+    if (_PySandbox_OpcodeSet_HAS(&sandbox->allowed_opcodes, opcode)) {
         return 0;
     }
 
@@ -199,7 +209,7 @@ _PySandbox_CheckOpcode(int opcode)
         return 0;
     }
 
-    /* Banned opcode in sandbox scope - raise error */
+    /* Disallowed opcode in sandbox scope - raise error */
     sandbox->suppress_checks = 1;
     PyErr_Format(PyExc_SandboxRuntimeError,
                  "Opcode %d is not allowed in sandbox scope", opcode);
@@ -244,11 +254,11 @@ TARGET(IMPORT_NAME) {
 void PySandbox_SetOpcodeRestrictMode(int mode);
 int PySandbox_GetOpcodeRestrictMode(void);
 
-/* Set banned opcodes from Python set of integers (or NULL to clear) */
-int PySandbox_SetBannedOpcodes(PyObject *opcode_set);
+/* Set allowed opcodes from Python set of integers (or NULL to clear) */
+int PySandbox_SetAllowedOpcodes(PyObject *opcode_set);
 
-/* Get banned opcodes as frozenset */
-PyObject *PySandbox_GetBannedOpcodes(void);
+/* Get allowed opcodes as frozenset */
+PyObject *PySandbox_GetAllowedOpcodes(void);
 
 /* Check if opcode is allowed (called from ceval.c) */
 int _PySandbox_CheckOpcode(int opcode);
@@ -261,23 +271,23 @@ int _PySandbox_CheckOpcode(int opcode);
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `opcode_restrict_mode` | bool | False | Enable opcode checking |
-| `banned_opcodes` | frozenset | None | Set of banned opcode integers |
+| `allowed_opcodes` | frozenset | empty | Set of allowed opcode integers |
 
-### Setting Banned Opcodes
+### Setting Allowed Opcodes
 
 ```python
-# From list
-sys.sandbox.banned_opcodes = [108, 109, 84]
+# Allow all opcodes except specific ones
+ALL_OPCODES = set(range(256))
 
-# From set
-sys.sandbox.banned_opcodes = {108, 109, 84}
+# From set subtraction
+sys.sandbox.allowed_opcodes = ALL_OPCODES - {108, 109, 84}
 
 # From opcode module
 import opcode
-sys.sandbox.banned_opcodes = {opcode.opmap['IMPORT_NAME']}
+sys.sandbox.allowed_opcodes = ALL_OPCODES - {opcode.opmap['IMPORT_NAME']}
 
-# Clear (allow all opcodes)
-sys.sandbox.banned_opcodes = None
+# Clear (no opcodes allowed when mode is active)
+sys.sandbox.allowed_opcodes = None
 ```
 
 ## Performance
@@ -288,7 +298,7 @@ The check function has multiple fast exits to minimize overhead:
 
 1. **Mode off**: Single pointer dereference + comparison
 2. **Suspended**: Single comparison
-3. **Opcode not banned**: Single bitmap lookup (O(1))
+3. **Opcode is allowed**: Single bitmap lookup (O(1))
 4. **Out of scope**: Set lookup (O(1) average)
 
 ### Bitmap Efficiency
@@ -433,15 +443,15 @@ The implemented approach (Option 3) provides:
 
 **Set approach**:
 ```c
-PyObject *banned_opcodes;  /* Python set */
-int is_banned = PySet_Contains(banned_opcodes, PyLong_FromLong(opcode));
+PyObject *allowed_opcodes;  /* Python set */
+int is_allowed = PySet_Contains(allowed_opcodes, PyLong_FromLong(opcode));
 ```
 - Rejected: Memory allocation, hash computation, GIL considerations per check.
 
 **Bitmap approach** (chosen):
 ```c
 uint32_t bits[8];
-int is_banned = bits[op >> 5] & (1U << (op & 31));
+int is_allowed = bits[op >> 5] & (1U << (op & 31));
 ```
 - O(1) constant time
 - No memory allocation
@@ -458,10 +468,10 @@ Python opcodes are single bytes (0-255). 256 bits covers all possible opcodes wi
 if (!sandbox->opcode_restrict_mode) return 0;  /* Fast exit */
 ```
 
-Could check `banned_opcodes == empty`, but separate flag allows:
+Could check `allowed_opcodes == full`, but separate flag allows:
 - Faster check (no bitmap scan)
 - Clear enable/disable semantics
-- Prepare banned list before enabling
+- Prepare allowed list before enabling
 
 # Prior art
 [prior-art]: #prior-art

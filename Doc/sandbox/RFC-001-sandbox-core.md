@@ -130,7 +130,7 @@ typedef struct {
     int frozen_mode;                    /* Global attribute freeze */
     int auto_mutable;                   /* Auto-mark new objects as mutable */
     int opcode_restrict_mode;           /* Opcode restriction active */
-    _PySandboxOpcodeSet banned_opcodes; /* 256-bit opcode bitmap */
+    _PySandboxOpcodeSet allowed_opcodes; /* 256-bit opcode bitmap */
     PyObject *registered_filenames;     /* Python set of filenames */
     PyObject *allowed_imports;          /* Python set of (module, name) tuples */
     PyObject *allowed_modules;          /* Python frozenset of allowed module names */

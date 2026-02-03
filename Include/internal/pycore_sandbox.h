@@ -48,7 +48,7 @@ struct _frame;
 /* Forward declaration for interpreter frame */
 struct _PyInterpreterFrame;
 
-/* 256-bit bitmap for opcode restriction. Bit set = opcode banned. */
+/* 256-bit bitmap for opcode restriction. Bit set = opcode allowed. */
 typedef struct {
     uint32_t bits[8];  /* 8 * 32 = 256 bits */
 } _PySandboxOpcodeSet;
@@ -255,7 +255,7 @@ typedef struct {
     int frozen_mode;  /* 1 = global freeze active (block all attr mutations), 0 = normal */
     int auto_mutable;  /* 1 = auto-mark created objects as mutable within scope, 0 = off */
     int opcode_restrict_mode;            /* 1 = active, 0 = off */
-    _PySandboxOpcodeSet banned_opcodes;  /* bitmap of banned opcodes */
+    _PySandboxOpcodeSet allowed_opcodes;  /* bitmap of allowed opcodes */
 
     /* Sandbox scope tracking - Python set of registered filenames.
      * Code with a registered co_filename counts toward scope limits.
@@ -312,7 +312,7 @@ typedef struct {
     .frozen_mode = 0,                       \
     .auto_mutable = 0,                      \
     .opcode_restrict_mode = 0,              \
-    .banned_opcodes = {{0}},                \
+    .allowed_opcodes = {{0}},                \
     .registered_filenames = NULL,           \
     .allowed_imports = NULL,                \
     .allowed_ancestors = NULL,              \
@@ -549,11 +549,11 @@ PyAPI_FUNC(int) PySandbox_GetAutoMutableMode(void);
 PyAPI_FUNC(void) PySandbox_SetOpcodeRestrictMode(int mode);
 PyAPI_FUNC(int) PySandbox_GetOpcodeRestrictMode(void);
 
-/* Set/get the banned opcodes bitmap.
- * SetBannedOpcodes: accepts a Python set/frozenset of ints, or None to clear.
- * GetBannedOpcodes: returns a new frozenset of banned opcode ints. */
-PyAPI_FUNC(int) PySandbox_SetBannedOpcodes(PyObject *opcode_set);
-PyAPI_FUNC(PyObject *) PySandbox_GetBannedOpcodes(void);
+/* Set/get the allowed opcodes bitmap.
+ * SetAllowedOpcodes: accepts a Python set/frozenset of ints, or None to clear.
+ * GetAllowedOpcodes: returns a new frozenset of allowed opcode ints. */
+PyAPI_FUNC(int) PySandbox_SetAllowedOpcodes(PyObject *opcode_set);
+PyAPI_FUNC(PyObject *) PySandbox_GetAllowedOpcodes(void);
 
 /* ============ sys.sandbox namespace object ============ */
 

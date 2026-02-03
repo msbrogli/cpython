@@ -1,7 +1,7 @@
 """Tests for sandbox opcode restriction mode.
 
-When opcode restriction mode is active and a banned opcode is executed
-within sandbox scope, SandboxRuntimeError is raised.
+When opcode restriction mode is active and an opcode not in allowed_opcodes
+is executed within sandbox scope, SandboxRuntimeError is raised.
 """
 
 import opcode
@@ -61,11 +61,14 @@ IMPORT_STAR_OPCODES = {
     opcode.opmap['IMPORT_STAR'],
 }
 
-ALL_BANNED_OPCODES = (
+ALL_RESTRICTED_OPCODES = (
     YIELD_OPCODES | ASYNC_OPCODES | WITH_OPCODES |
     TRY_EXCEPT_OPCODES | GLOBAL_OPCODES | MATCH_OPCODES |
     IMPORT_STAR_OPCODES
 )
+
+# All opcodes 0..255
+ALL_OPCODES = set(range(256))
 
 
 def _opcode_set_literal(opcodes):
@@ -85,7 +88,7 @@ class OpcodeRestrictionAPITests(unittest.TestCase):
 
     def tearDown(self):
         sys.sandbox.opcode_restrict_mode = False
-        sys.sandbox.banned_opcodes = None
+        sys.sandbox.allowed_opcodes = None
         while sys.sandbox.suspended:
             sys.sandbox.resume()
         try:
@@ -102,46 +105,39 @@ class OpcodeRestrictionAPITests(unittest.TestCase):
         sys.sandbox.opcode_restrict_mode = False
         self.assertFalse(sys.sandbox.opcode_restrict_mode)
 
-    def test_get_set_banned_opcodes(self):
-        """Setting and getting banned opcodes should work."""
-        opcodes = sys.sandbox.banned_opcodes
+    def test_get_set_allowed_opcodes(self):
+        """Setting and getting allowed opcodes should work."""
+        opcodes = sys.sandbox.allowed_opcodes
         self.assertEqual(len(opcodes), 0)
 
-        sys.sandbox.banned_opcodes = YIELD_OPCODES
-        result = sys.sandbox.banned_opcodes
+        sys.sandbox.allowed_opcodes = YIELD_OPCODES
+        result = sys.sandbox.allowed_opcodes
         self.assertIsInstance(result, frozenset)
         self.assertEqual(result, frozenset(YIELD_OPCODES))
 
-    def test_clear_banned_opcodes_with_none(self):
-        """Passing None should clear all banned opcodes."""
-        sys.sandbox.banned_opcodes = YIELD_OPCODES
-        sys.sandbox.banned_opcodes = None
-        self.assertEqual(len(sys.sandbox.banned_opcodes), 0)
+    def test_clear_allowed_opcodes_with_none(self):
+        """Passing None should clear all allowed opcodes."""
+        sys.sandbox.allowed_opcodes = YIELD_OPCODES
+        sys.sandbox.allowed_opcodes = None
+        self.assertEqual(len(sys.sandbox.allowed_opcodes), 0)
 
-    def test_banned_opcodes_invalid_range(self):
+    def test_allowed_opcodes_invalid_range(self):
         """Opcode out of range 0..255 should raise ValueError."""
         with self.assertRaises(ValueError):
-            sys.sandbox.banned_opcodes = {300}
+            sys.sandbox.allowed_opcodes = {300}
         with self.assertRaises(ValueError):
-            sys.sandbox.banned_opcodes = {-1}
-
-    def test_set_all_banned_opcodes(self):
-        """Setting all banned opcodes should work."""
-        sys.sandbox.banned_opcodes = ALL_BANNED_OPCODES
-        result = sys.sandbox.banned_opcodes
-        self.assertEqual(result, frozenset(ALL_BANNED_OPCODES))
-        self.assertEqual(len(result), 25)
+            sys.sandbox.allowed_opcodes = {-1}
 
 
 class OpcodeRestrictionEnforcementTests(unittest.TestCase):
-    """Test that banned opcodes are blocked in sandbox scope."""
+    """Test that non-allowed opcodes are blocked in sandbox scope."""
 
     def setUp(self):
         self.original_limits = _get_settable_limits()
 
     def tearDown(self):
         sys.sandbox.opcode_restrict_mode = False
-        sys.sandbox.banned_opcodes = None
+        sys.sandbox.allowed_opcodes = None
         while sys.sandbox.suspended:
             sys.sandbox.resume()
         try:
@@ -153,11 +149,12 @@ class OpcodeRestrictionEnforcementTests(unittest.TestCase):
     # --- yield blocked ---
 
     def test_yield_blocked(self):
-        """yield should be blocked when its opcodes are banned."""
-        banned = _opcode_set_literal(YIELD_OPCODES)
+        """yield should be blocked when its opcodes are not allowed."""
+        # Allow all opcodes EXCEPT yield-related ones
+        allowed = _opcode_set_literal(ALL_OPCODES - YIELD_OPCODES)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.add_filename("<sandbox>")
 
@@ -184,14 +181,13 @@ except SandboxRuntimeError as e:
     # --- async/await blocked ---
 
     def test_async_blocked(self):
-        """async def should be blocked when its opcodes are banned."""
+        """async def should be blocked when its opcodes are not allowed."""
         # RETURN_GENERATOR is shared with yield group and needed for async
-        banned = _opcode_set_literal(
-            ASYNC_OPCODES | {opcode.opmap['RETURN_GENERATOR']}
-        )
+        disallowed = ASYNC_OPCODES | {opcode.opmap['RETURN_GENERATOR']}
+        allowed = _opcode_set_literal(ALL_OPCODES - disallowed)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.add_filename("<sandbox>")
 
@@ -220,11 +216,11 @@ except SandboxRuntimeError as e:
     # --- with statement blocked ---
 
     def test_with_statement_blocked(self):
-        """with statement should be blocked when its opcodes are banned."""
-        banned = _opcode_set_literal(WITH_OPCODES)
+        """with statement should be blocked when its opcodes are not allowed."""
+        allowed = _opcode_set_literal(ALL_OPCODES - WITH_OPCODES)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.allow_dunder_access = True  # Required for class definitions
 sys.sandbox.enable()
@@ -255,16 +251,16 @@ except SandboxRuntimeError as e:
     # --- try/except blocked ---
 
     def test_try_except_blocked(self):
-        """try/except should be blocked when its opcodes are banned.
+        """try/except should be blocked when its opcodes are not allowed.
 
         Note: PUSH_EXC_INFO only executes when an exception is actually
         caught, so we must raise inside the try block to trigger the
-        except handler where the banned opcodes live.
+        except handler where the disallowed opcodes live.
         """
-        banned = _opcode_set_literal(TRY_EXCEPT_OPCODES)
+        allowed = _opcode_set_literal(ALL_OPCODES - TRY_EXCEPT_OPCODES)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.add_filename("<sandbox>")
 
@@ -291,11 +287,11 @@ except SandboxRuntimeError as e:
     # --- global/nonlocal blocked ---
 
     def test_store_global_blocked(self):
-        """STORE_GLOBAL should be blocked when banned."""
-        banned = _opcode_set_literal(GLOBAL_OPCODES)
+        """STORE_GLOBAL should be blocked when not allowed."""
+        allowed = _opcode_set_literal(ALL_OPCODES - GLOBAL_OPCODES)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.add_filename("<sandbox>")
 
@@ -323,11 +319,11 @@ except SandboxRuntimeError as e:
     # --- import star blocked ---
 
     def test_import_star_blocked(self):
-        """IMPORT_STAR should be blocked when banned."""
-        banned = _opcode_set_literal(IMPORT_STAR_OPCODES)
+        """IMPORT_STAR should be blocked when not allowed."""
+        allowed = _opcode_set_literal(ALL_OPCODES - IMPORT_STAR_OPCODES)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.add_filename("<sandbox>")
 
@@ -351,11 +347,11 @@ except SandboxRuntimeError as e:
     # --- match/case blocked ---
 
     def test_match_case_blocked(self):
-        """match/case should be blocked when its opcodes are banned."""
-        banned = _opcode_set_literal(MATCH_OPCODES)
+        """match/case should be blocked when its opcodes are not allowed."""
+        allowed = _opcode_set_literal(ALL_OPCODES - MATCH_OPCODES)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.add_filename("<sandbox>")
 
@@ -388,7 +384,7 @@ class OpcodeRestrictionBypassTests(unittest.TestCase):
 
     def tearDown(self):
         sys.sandbox.opcode_restrict_mode = False
-        sys.sandbox.banned_opcodes = None
+        sys.sandbox.allowed_opcodes = None
         while sys.sandbox.suspended:
             sys.sandbox.resume()
         try:
@@ -398,11 +394,12 @@ class OpcodeRestrictionBypassTests(unittest.TestCase):
         sys.sandbox.set_config(**self.original_limits)
 
     def test_not_enforced_when_mode_off(self):
-        """Banned opcodes should NOT be enforced when mode is off."""
-        banned = _opcode_set_literal(YIELD_OPCODES)
+        """Opcode restrictions should NOT be enforced when mode is off."""
+        # Allow nothing but mode is off
+        allowed = _opcode_set_literal(set())  # Empty set
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 # Mode stays off
 sys.sandbox.add_filename("<sandbox>")
 
@@ -421,11 +418,12 @@ sys.exit(0)
                         f"Enforced when mode off: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_not_enforced_outside_scope(self):
-        """Banned opcodes should NOT be enforced outside sandbox scope."""
-        banned = _opcode_set_literal(YIELD_OPCODES)
+        """Opcode restrictions should NOT be enforced outside sandbox scope."""
+        # Allow only basic opcodes (not yield) but no scope registered
+        allowed = _opcode_set_literal(ALL_OPCODES - YIELD_OPCODES)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 # No scope registered
 
@@ -441,12 +439,13 @@ sys.exit(0)
         self.assertEqual(result.returncode, 0,
                         f"Enforced outside scope: stdout={result.stdout!r} stderr={result.stderr!r}")
 
-    def test_suspended_allows_banned_opcodes(self):
-        """Suspended sandbox should allow banned opcodes."""
-        banned = _opcode_set_literal(YIELD_OPCODES)
+    def test_suspended_allows_disallowed_opcodes(self):
+        """Suspended sandbox should allow disallowed opcodes."""
+        # Allow nothing except basic ops, but suspend the sandbox
+        allowed = _opcode_set_literal(ALL_OPCODES - YIELD_OPCODES)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.add_filename("<sandbox>")
 sys.sandbox.suspend()
@@ -467,11 +466,12 @@ sys.exit(0)
                         f"Not allowed when suspended: stdout={result.stdout!r} stderr={result.stderr!r}")
 
     def test_allowed_opcodes_still_work(self):
-        """Non-banned opcodes should continue to work in sandbox scope."""
-        banned = _opcode_set_literal(YIELD_OPCODES)
+        """Allowed opcodes should continue to work in sandbox scope."""
+        # Allow all opcodes except yield-related ones
+        allowed = _opcode_set_literal(ALL_OPCODES - YIELD_OPCODES)
         code = f'''
 import sys
-sys.sandbox.banned_opcodes = {banned}
+sys.sandbox.allowed_opcodes = {allowed}
 sys.sandbox.opcode_restrict_mode = True
 sys.sandbox.add_filename("<sandbox>")
 

@@ -1333,7 +1333,7 @@ eval_frame_handle_pending(PyThreadState *tstate)
 #endif
 
 /* Inline sandbox opcode restriction check for DISPATCH().
- * Returns 0 if allowed, -1 if banned (error already set).
+ * Returns 0 if allowed, -1 if not allowed (error already set).
  * Fast path: check enabled flag first (sandbox usually disabled). */
 static inline int
 _PySandbox_CheckOpcodeDispatch(int opcode, PyInterpreterState *interp)
@@ -1358,8 +1358,8 @@ _PySandbox_CheckOpcodeDispatch(int opcode, PyInterpreterState *interp)
     /* De-optimize specialized opcodes to base form for bitmap check */
     int deopt = _PyOpcode_Deopt[opcode];
 
-    /* Fast exit: opcode not in banned set */
-    if (_PY_SANDBOX_LIKELY(!_PySandbox_OpcodeSet_HAS(&sandbox->banned_opcodes, deopt))) {
+    /* Fast exit: opcode in allowed set */
+    if (_PY_SANDBOX_LIKELY(_PySandbox_OpcodeSet_HAS(&sandbox->allowed_opcodes, deopt))) {
         return 0;
     }
 

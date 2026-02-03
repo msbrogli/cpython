@@ -130,10 +130,10 @@ class SandboxConfigModificationBlockedTests(SandboxTestCase):
         with self.assertRaises(SandboxSecurityError):
             self._run_in_scope("sys.sandbox.opcode_restrict_mode = False")
 
-    def test_set_banned_opcodes_blocked_from_scope(self):
-        """Setting banned_opcodes from scope should raise SandboxSecurityError."""
+    def test_set_allowed_opcodes_blocked_from_scope(self):
+        """Setting allowed_opcodes from scope should raise SandboxSecurityError."""
         with self.assertRaises(SandboxSecurityError):
-            self._run_in_scope("sys.sandbox.banned_opcodes = set()")
+            self._run_in_scope("sys.sandbox.allowed_opcodes = set()")
 
     def test_set_creation_hook_blocked_from_scope(self):
         """Setting creation_hook from scope should raise SandboxSecurityError."""
@@ -316,9 +316,9 @@ class SandboxReadAllowedFromScopeTests(SandboxTestCase):
         result = self._run_in_scope("result = sys.sandbox.operation_count")
         self.assertIsInstance(result, int)
 
-    def test_read_banned_opcodes_allowed_from_scope(self):
-        """Reading banned_opcodes property should work from scope."""
-        result = self._run_in_scope("result = sys.sandbox.banned_opcodes")
+    def test_read_allowed_opcodes_allowed_from_scope(self):
+        """Reading allowed_opcodes property should work from scope."""
+        result = self._run_in_scope("result = sys.sandbox.allowed_opcodes")
         self.assertIsInstance(result, frozenset)
 
     def test_read_creation_hook_allowed_from_scope(self):

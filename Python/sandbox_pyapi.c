@@ -387,22 +387,22 @@ sandbox_set_opcode_restrict_mode(_PySandboxObject *self, PyObject *value, void *
     return 0;
 }
 
-/* banned_opcodes: frozenset getter / set|frozenset|None setter */
+/* allowed_opcodes: frozenset getter / set|frozenset|None setter */
 static PyObject *
-sandbox_get_banned_opcodes(_PySandboxObject *self, void *closure)
+sandbox_get_allowed_opcodes(_PySandboxObject *self, void *closure)
 {
-    return PySandbox_GetBannedOpcodes();
+    return PySandbox_GetAllowedOpcodes();
 }
 
 static int
-sandbox_set_banned_opcodes(_PySandboxObject *self, PyObject *value, void *closure)
+sandbox_set_allowed_opcodes(_PySandboxObject *self, PyObject *value, void *closure)
 {
     if (_PySandbox_CheckConfigModification() < 0) return -1;
     if (value == NULL) {
         PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");
         return -1;
     }
-    return PySandbox_SetBannedOpcodes(value);
+    return PySandbox_SetAllowedOpcodes(value);
 }
 
 /* creation_hook: callable|None getter/setter */
@@ -659,8 +659,8 @@ static PyGetSetDef sandbox_getsetters[] = {
     {"allow_metaclasses", (getter)sandbox_get_allow_metaclasses,
      (setter)sandbox_set_allow_metaclasses, "Allow metaclass creation and usage (default True)", NULL},
     /* R/W special */
-    {"banned_opcodes", (getter)sandbox_get_banned_opcodes,
-     (setter)sandbox_set_banned_opcodes, "Banned opcodes (frozenset of ints)", NULL},
+    {"allowed_opcodes", (getter)sandbox_get_allowed_opcodes,
+     (setter)sandbox_set_allowed_opcodes, "Allowed opcodes (frozenset of ints)", NULL},
     {"creation_hook", (getter)sandbox_get_creation_hook,
      (setter)sandbox_set_creation_hook, "Object creation hook (callable or None)", NULL},
     {"allowed_imports", (getter)sandbox_get_allowed_imports,

@@ -545,7 +545,7 @@ _PySandbox_Reset(PyInterpreterState *interp)
     sandbox->frozen_mode = 0;
     sandbox->auto_mutable = 0;
     sandbox->opcode_restrict_mode = 0;
-    _PySandbox_OpcodeSet_ZERO(&sandbox->banned_opcodes);
+    _PySandbox_OpcodeSet_ZERO(&sandbox->allowed_opcodes);
 
     /* Reset per-thread state and update tracing */
     PyThreadState *tstate = _PyThreadState_GET();

@@ -1,7 +1,7 @@
 /* Sandbox opcode restriction functionality
  *
- * This file contains functions for banning specific opcodes from executing
- * within sandbox scope.
+ * This file contains functions for allowing specific opcodes to execute
+ * within sandbox scope (allowlist model).
  */
 
 #include "Python.h"
@@ -12,18 +12,18 @@
 
 /* ============ Opcode Checking ============ */
 
-/* _PySandbox_CheckOpcode - Check if an opcode is banned in sandbox scope
+/* _PySandbox_CheckOpcode - Check if an opcode is allowed in sandbox scope
  *
  * Called from _PySandbox_CheckOpcodeDispatch() in ceval.c DISPATCH() macro
- * when the opcode is in the banned_opcodes bitmap.
+ * when the opcode is not in the allowed_opcodes bitmap.
  *
  * Fast exits:
  * - opcode_restrict_mode == 0 (not active)
  * - suspended or suppress_checks (recursion/error handling)
- * - opcode not in banned_opcodes bitmap
+ * - opcode in allowed_opcodes bitmap
  * - current frame not in sandbox scope
  *
- * Returns: 0 if opcode allowed, -1 if banned (SandboxRuntimeError set)
+ * Returns: 0 if opcode allowed, -1 if not allowed (SandboxRuntimeError set)
  */
 int
 _PySandbox_CheckOpcode(int opcode)
@@ -50,12 +50,12 @@ _PySandbox_CheckOpcode(int opcode)
         return 0;
     }
 
-    /* Fast exit: opcode not banned */
-    if (!_PySandbox_OpcodeSet_HAS(&sandbox->banned_opcodes, opcode)) {
+    /* Fast exit: opcode is allowed */
+    if (_PySandbox_OpcodeSet_HAS(&sandbox->allowed_opcodes, opcode)) {
         return 0;
     }
 
-    /* Opcode is banned - check if we're in sandbox scope */
+    /* Opcode is not allowed - check if we're in sandbox scope */
     if (sandbox->registered_filenames == NULL) {
         return 0;
     }
@@ -69,7 +69,7 @@ _PySandbox_CheckOpcode(int opcode)
         return 0;
     }
 
-    /* Banned opcode in sandbox scope - raise error */
+    /* Disallowed opcode in sandbox scope - raise error */
     sandbox->suppress_checks = 1;
     PyErr_Format(PyExc_SandboxRuntimeError,
                  "Opcode %d is not allowed in sandbox scope", opcode);
@@ -108,10 +108,10 @@ PySandbox_GetOpcodeRestrictMode(void)
     return interp->sandbox.opcode_restrict_mode;
 }
 
-/* ============ Banned Opcodes Get/Set ============ */
+/* ============ Allowed Opcodes Get/Set ============ */
 
 int
-PySandbox_SetBannedOpcodes(PyObject *opcode_set)
+PySandbox_SetAllowedOpcodes(PyObject *opcode_set)
 {
     /* Block from within sandbox scope. */
     if (_PySandbox_CheckConfigModification() < 0) {
@@ -124,11 +124,11 @@ PySandbox_SetBannedOpcodes(PyObject *opcode_set)
         return -1;
     }
 
-    _PySandboxOpcodeSet *banned = &interp->sandbox.banned_opcodes;
+    _PySandboxOpcodeSet *allowed = &interp->sandbox.allowed_opcodes;
 
     /* None or empty -> clear all */
     if (opcode_set == Py_None) {
-        _PySandbox_OpcodeSet_ZERO(banned);
+        _PySandbox_OpcodeSet_ZERO(allowed);
         return 0;
     }
 
@@ -138,7 +138,7 @@ PySandbox_SetBannedOpcodes(PyObject *opcode_set)
         return -1;
     }
 
-    _PySandbox_OpcodeSet_ZERO(banned);
+    _PySandbox_OpcodeSet_ZERO(allowed);
 
     PyObject *item;
     while ((item = PyIter_Next(iter)) != NULL) {
@@ -154,7 +154,7 @@ PySandbox_SetBannedOpcodes(PyObject *opcode_set)
             Py_DECREF(iter);
             return -1;
         }
-        _PySandbox_OpcodeSet_SET(banned, (int)op);
+        _PySandbox_OpcodeSet_SET(allowed, (int)op);
     }
     Py_DECREF(iter);
 
@@ -165,7 +165,7 @@ PySandbox_SetBannedOpcodes(PyObject *opcode_set)
 }
 
 PyObject *
-PySandbox_GetBannedOpcodes(void)
+PySandbox_GetAllowedOpcodes(void)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
     if (interp == NULL) {
@@ -173,7 +173,7 @@ PySandbox_GetBannedOpcodes(void)
         return NULL;
     }
 
-    _PySandboxOpcodeSet *banned = &interp->sandbox.banned_opcodes;
+    _PySandboxOpcodeSet *allowed = &interp->sandbox.allowed_opcodes;
 
     PyObject *result = PySet_New(NULL);
     if (result == NULL) {
@@ -181,7 +181,7 @@ PySandbox_GetBannedOpcodes(void)
     }
 
     for (int op = 0; op < 256; op++) {
-        if (_PySandbox_OpcodeSet_HAS(banned, op)) {
+        if (_PySandbox_OpcodeSet_HAS(allowed, op)) {
             PyObject *val = PyLong_FromLong(op);
             if (val == NULL) {
                 Py_DECREF(result);

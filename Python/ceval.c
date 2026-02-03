@@ -1347,6 +1347,33 @@ _PySandbox_CheckOpcodeDispatch(int opcode, PyInterpreterState *interp)
 }
 
 
+/* Check sandbox limits for constant values loaded from code object.
+ * Returns 0 if OK, -1 if limit exceeded (exception set). */
+static inline int
+_PySandbox_CheckLoadConst(PyObject *value)
+{
+    if (PyFloat_Check(value)) {
+        return _PySandbox_CheckTypeAllowed(&PyFloat_Type);
+    }
+    else if (PyComplex_Check(value)) {
+        return _PySandbox_CheckTypeAllowed(&PyComplex_Type);
+    }
+    else if (PyUnicode_Check(value)) {
+        return _PySandbox_CheckStrLength(PyUnicode_GET_LENGTH(value));
+    }
+    else if (PyBytes_Check(value)) {
+        return _PySandbox_CheckBytesLength(PyBytes_GET_SIZE(value));
+    }
+    else if (PyTuple_Check(value)) {
+        return _PySandbox_CheckTupleSize(PyTuple_GET_SIZE(value));
+    }
+    else if (PyLong_Check(value)) {
+        return _PySandbox_CheckIntSize(Py_ABS(Py_SIZE(value)));
+    }
+    return 0;
+}
+
+
 /* Do interpreter dispatch accounting for tracing and instrumentation */
 #define DISPATCH() \
     { \
@@ -1851,36 +1878,8 @@ handle_eval_breaker:
             PREDICTED(LOAD_CONST);
             PyObject *value = GETITEM(consts, oparg);
 
-            /* Sandbox checks for type restrictions and size limits on constants */
-            if (PyFloat_Check(value)) {
-                if (_PySandbox_CheckTypeAllowed(&PyFloat_Type) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyComplex_Check(value)) {
-                if (_PySandbox_CheckTypeAllowed(&PyComplex_Type) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyUnicode_Check(value)) {
-                if (_PySandbox_CheckStrLength(PyUnicode_GET_LENGTH(value)) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyBytes_Check(value)) {
-                if (_PySandbox_CheckBytesLength(PyBytes_GET_SIZE(value)) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyTuple_Check(value)) {
-                if (_PySandbox_CheckTupleSize(PyTuple_GET_SIZE(value)) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyLong_Check(value)) {
-                if (_PySandbox_CheckIntSize(Py_ABS(Py_SIZE(value))) < 0) {
-                    goto error;
-                }
+            if (_PySandbox_CheckLoadConst(value) < 0) {
+                goto error;
             }
 
             Py_INCREF(value);
@@ -1924,36 +1923,8 @@ handle_eval_breaker:
             PUSH(value);
             value = GETITEM(consts, oparg);
 
-            /* Sandbox checks for type restrictions and size limits on constants */
-            if (PyFloat_Check(value)) {
-                if (_PySandbox_CheckTypeAllowed(&PyFloat_Type) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyComplex_Check(value)) {
-                if (_PySandbox_CheckTypeAllowed(&PyComplex_Type) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyUnicode_Check(value)) {
-                if (_PySandbox_CheckStrLength(PyUnicode_GET_LENGTH(value)) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyBytes_Check(value)) {
-                if (_PySandbox_CheckBytesLength(PyBytes_GET_SIZE(value)) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyTuple_Check(value)) {
-                if (_PySandbox_CheckTupleSize(PyTuple_GET_SIZE(value)) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyLong_Check(value)) {
-                if (_PySandbox_CheckIntSize(Py_ABS(Py_SIZE(value))) < 0) {
-                    goto error;
-                }
+            if (_PySandbox_CheckLoadConst(value) < 0) {
+                goto error;
             }
 
             Py_INCREF(value);
@@ -1988,36 +1959,8 @@ handle_eval_breaker:
         TARGET(LOAD_CONST__LOAD_FAST) {
             PyObject *value = GETITEM(consts, oparg);
 
-            /* Sandbox checks for type restrictions and size limits on constants */
-            if (PyFloat_Check(value)) {
-                if (_PySandbox_CheckTypeAllowed(&PyFloat_Type) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyComplex_Check(value)) {
-                if (_PySandbox_CheckTypeAllowed(&PyComplex_Type) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyUnicode_Check(value)) {
-                if (_PySandbox_CheckStrLength(PyUnicode_GET_LENGTH(value)) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyBytes_Check(value)) {
-                if (_PySandbox_CheckBytesLength(PyBytes_GET_SIZE(value)) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyTuple_Check(value)) {
-                if (_PySandbox_CheckTupleSize(PyTuple_GET_SIZE(value)) < 0) {
-                    goto error;
-                }
-            }
-            else if (PyLong_Check(value)) {
-                if (_PySandbox_CheckIntSize(Py_ABS(Py_SIZE(value))) < 0) {
-                    goto error;
-                }
+            if (_PySandbox_CheckLoadConst(value) < 0) {
+                goto error;
             }
 
             NEXTOPARG();
@@ -3794,6 +3737,10 @@ handle_eval_breaker:
         TARGET(STORE_ATTR_INSTANCE_VALUE) {
             assert(cframe.use_tracing == 0);
             PyObject *owner = TOP();
+            /* Check sandbox frozen state - must deopt if frozen to allow error */
+            if (_PySandbox_CheckFrozen(owner) < 0) {
+                goto error;
+            }
             PyTypeObject *tp = Py_TYPE(owner);
             _PyAttrCache *cache = (_PyAttrCache *)next_instr;
             uint32_t type_version = read_u32(cache->version);
@@ -3822,6 +3769,10 @@ handle_eval_breaker:
         TARGET(STORE_ATTR_WITH_HINT) {
             assert(cframe.use_tracing == 0);
             PyObject *owner = TOP();
+            /* Check sandbox frozen state - must deopt if frozen to allow error */
+            if (_PySandbox_CheckFrozen(owner) < 0) {
+                goto error;
+            }
             PyTypeObject *tp = Py_TYPE(owner);
             _PyAttrCache *cache = (_PyAttrCache *)next_instr;
             uint32_t type_version = read_u32(cache->version);
@@ -3869,6 +3820,10 @@ handle_eval_breaker:
         TARGET(STORE_ATTR_SLOT) {
             assert(cframe.use_tracing == 0);
             PyObject *owner = TOP();
+            /* Check sandbox frozen state - must deopt if frozen to allow error */
+            if (_PySandbox_CheckFrozen(owner) < 0) {
+                goto error;
+            }
             PyTypeObject *tp = Py_TYPE(owner);
             _PyAttrCache *cache = (_PyAttrCache *)next_instr;
             uint32_t type_version = read_u32(cache->version);

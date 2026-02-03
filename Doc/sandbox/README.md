@@ -31,7 +31,7 @@ sys.sandbox.set_config(
     max_operations=100_000,  # AST-level operation counting
     allow_dunder_access=False,
     # allow_io=False,     # Default: blocks file/socket/fd operations
-    # allow_unsafe=False, # Default: blocks compile(), gc introspection
+    # allow_unsafe=False, # Default: blocks compile(), exec(), eval(), gc introspection
 )
 
 # Register sandbox scope

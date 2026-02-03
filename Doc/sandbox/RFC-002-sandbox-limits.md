@@ -689,7 +689,7 @@ Called from:
 | `allow_class_creation` | bool | True | Allow class creation with whitelisted dunders |
 | `allow_magic_methods` | bool | True | Allow magic method definitions in class body |
 | `allow_metaclasses` | bool | True | Allow metaclass creation and usage |
-| `allow_unsafe` | bool | False | Allow unsafe operations |
+| `allow_unsafe` | bool | False | Allow unsafe operations (compile, exec, eval, gc) |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterations as operations |
 

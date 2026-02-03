@@ -968,9 +968,13 @@ When `allow_unsafe=False` (default), these operations are blocked in sandbox sco
 | Operation | Risk | Description |
 |-----------|------|-------------|
 | `compile()` | Code injection | Sandboxed code cannot compile new code objects |
-| `__iter__` access | Iterator abuse | Blocks direct `__iter__` attribute access |
+| `exec()` | Code execution | Blocks all exec calls (strings AND code objects) |
+| `eval()` | Code evaluation | Blocks all eval calls (strings AND code objects) |
 | `gc` module introspection | Object discovery | Blocks `gc.get_objects()`, `gc.get_referrers()`, etc. |
 | `frame.f_code` | Code inspection | Blocks access to frame code objects |
+| `__iter__` access | Iterator abuse | Blocks direct `__iter__` attribute access |
+
+**Note:** Both `eval()` and `exec()` are blocked even with pre-compiled code objects to prevent scope escape attacks where code compiled with an unregistered filename could bypass sandbox limits.
 
 ### Enabling Unsafe Operations
 
@@ -980,14 +984,15 @@ Only enable if you trust the code or have other mitigations:
 sys.sandbox.set_config(allow_unsafe=True)
 sys.sandbox.add_filename("<sandbox>")
 
-# Now compile() works
-code = compile("result = compile('1+1', '<x>', 'eval')", "<sandbox>", "exec")
+# Now compile(), exec(), eval() work inside sandbox
+code = compile("result = eval('1+1')", "<sandbox>", "exec")
 exec(code)  # Works
 ```
 
 ### Why Block These?
 
 - **`compile()`**: Allows generating code that bypasses sandbox restrictions or constructs escape payloads dynamically
+- **`exec()`/`eval()`**: Even with pre-compiled code, allows executing code objects that may have been compiled outside sandbox scope, bypassing filename-based restrictions
 - **`gc` introspection**: `gc.get_objects()` can find references to sensitive objects (modules, frames, etc.)
 - **`frame.f_code`**: Allows inspecting local variables and code structure of calling frames
 - **`__iter__`**: Can be used in complex sandbox escape chains
@@ -2021,7 +2026,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 | **Always clean up in finally** | Ensures sandbox state is restored on exceptions |
 | **Use multiple limit types** | Statements, iterations, operations, and allocations each catch different attacks |
 | **Set `allow_dunder_access=False`** | Prevents `__class__.__subclasses__()` escape chains |
-| **Set `allow_unsafe=False`** (default) | Blocks `compile()`, gc introspection |
+| **Set `allow_unsafe=False`** (default) | Blocks `compile()`, `exec()`, `eval()`, gc introspection |
 | **Use frozen mode + auto_mutable** | Protects shared state while allowing sandboxed code to create its own objects |
 | **Use context managers** | `scope()` and `suspended_limits()` are cleaner and exception-safe |
 | **Mark output objects as mutable** | `set_mutable(output)` allows writing results in frozen mode |
@@ -2034,7 +2039,7 @@ The sandbox limits are designed for resource protection, not as a complete secur
 |-------|-----|
 | **Don't forget scope registration** | Without it, no scoped limits are enforced |
 | **Don't use `allow_io=True`** | Enables file/socket access - major security hole |
-| **Don't use `allow_unsafe=True`** | Enables `compile()` and gc introspection |
+| **Don't use `allow_unsafe=True`** | Enables `compile()`, `exec()`, `eval()`, gc introspection |
 | **Don't pass dangerous modules** | Even with import restrictions, passed modules can be used if `module_access_restrict_mode` is off |
 | **Don't trust `__builtins__` as-is** | Contains `eval`, `exec`, `compile`, `open`, etc. |
 | **Don't rely on a single limit** | Attackers find ways around individual limits |
@@ -2132,7 +2137,7 @@ sys.sandbox.set_config(
     allow_float=True,
     allow_complex=False,
     allow_dunder_access=False,
-    allow_unsafe=False,  # Blocks compile(), gc introspection
+    allow_unsafe=False,  # Blocks compile(), exec(), eval(), gc introspection
     allow_io=False,      # Blocks file, socket, fd operations
 )
 
@@ -2180,7 +2185,7 @@ Common sandbox escape techniques and how to block them:
 | Escape Vector | How It Works | Blocking Method |
 |---------------|--------------|-----------------|
 | `().__class__.__bases__[0].__subclasses__()` | Type introspection | `allow_dunder_access=False` |
-| `eval(compile(...))` | Dynamic code generation | `allow_unsafe=False` |
+| `compile()`, `exec()`, `eval()` | Dynamic code execution | `allow_unsafe=False` |
 | `gc.get_objects()` | Find sensitive objects | `allow_unsafe=False` |
 | `import os; os.system()` | Import dangerous module | Import restrictions |
 | `open('/etc/passwd')` | File access | `allow_io=False` |
@@ -2496,7 +2501,7 @@ except SandboxError as e:
 | `allow_class_creation` | bool | True | Allow class creation with whitelisted dunders |
 | `allow_magic_methods` | bool | True | Allow magic method definitions in class body |
 | `allow_metaclasses` | bool | True | Allow metaclass creation and usage |
-| `allow_unsafe` | bool | False | Allow unsafe operations (compile, gc introspection) |
+| `allow_unsafe` | bool | False | Allow unsafe operations (compile, exec, eval, gc introspection) |
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterator yields toward `operation_count` |
 | `import_restrict_mode` | bool | True | Enforce import allowlist |

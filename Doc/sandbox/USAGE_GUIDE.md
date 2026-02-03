@@ -347,6 +347,42 @@ Reset all counters to 0 before each execution:
 sys.sandbox.reset_counts()
 ```
 
+### Adding to Counters Programmatically
+
+You can increment counters by specified amounts using `add_counts()`. This is useful for:
+- Pre-charging operations before executing untrusted code
+- Accounting for external work (API calls, I/O) in the operation budget
+- Testing limit enforcement
+
+```python
+sys.sandbox.enable()
+sys.sandbox.reset_counts()
+
+# Add to counters
+sys.sandbox.add_counts(operation_count=100, iteration_count=50)
+
+counts = sys.sandbox.get_counts()
+print(f"Operations: {counts['operation_count']}")  # 100
+print(f"Iterations: {counts['iteration_count']}")  # 50
+```
+
+**Important behaviors:**
+- Requires sandbox to be enabled (raises `RuntimeError` if disabled)
+- Only accepts non-negative values (raises `ValueError` for negative)
+- Checks limits AFTER incrementing (raises `SandboxOverflowError` if exceeded)
+- Both arguments are optional and default to 0
+
+```python
+# Pre-charge for external API calls
+sys.sandbox.add_counts(operation_count=1000)
+
+# Execute untrusted code with remaining budget
+try:
+    exec(sandboxed_code)
+except SandboxRuntimeError:
+    print("Combined limit exceeded")
+```
+
 ---
 
 ## Operation Counting
@@ -2352,6 +2388,7 @@ except SandboxError as e:
 | `sys.sandbox.get_config() -> dict` | Get current limits |
 | `sys.sandbox.get_counts() -> dict` | Get current counters |
 | `sys.sandbox.reset_counts()` | Reset all counters to 0 |
+| `sys.sandbox.add_counts(operation_count=0, iteration_count=0)` | Increment counters by specified amounts |
 
 ### Scope Management
 

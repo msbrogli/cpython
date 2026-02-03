@@ -849,6 +849,57 @@ sandbox_reset_counts(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 }
 
 static PyObject *
+sandbox_add_counts(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = {"operation_count", "iteration_count", NULL};
+
+    long long operation_count = 0;
+    long long iteration_count = 0;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|LL:add_counts", kwlist,
+                                     &operation_count, &iteration_count)) {
+        return NULL;
+    }
+
+    /* Validate: only non-negative values allowed */
+    if (operation_count < 0 || iteration_count < 0) {
+        PyErr_SetString(PyExc_ValueError, "count values must be non-negative");
+        return NULL;
+    }
+
+    /* Get interpreter state */
+    PyInterpreterState *interp = sandbox_get_interp();
+    if (interp == NULL) return NULL;
+    _PySandboxState *sandbox = &interp->sandbox;
+
+    /* Fail if sandbox is disabled */
+    if (!sandbox->enabled) {
+        PyErr_SetString(PyExc_RuntimeError, "sandbox is disabled");
+        return NULL;
+    }
+
+    _PySandboxConfig *config = &sandbox->config;
+
+    /* Safe add to operation_count */
+    if (_PySandbox_CounterSafeAdd(&sandbox->counters.operation_count,
+                                  (uint64_t)operation_count,
+                                  config->max_operations,
+                                  "operation_count") < 0) {
+        return NULL;
+    }
+
+    /* Safe add to iteration_count */
+    if (_PySandbox_CounterSafeAdd(&sandbox->counters.iteration_count,
+                                  (uint64_t)iteration_count,
+                                  config->max_iterations,
+                                  "iteration_count") < 0) {
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+
+static PyObject *
 sandbox_reset(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 {
     if (_PySandbox_CheckConfigModification() < 0) return NULL;
@@ -1105,6 +1156,9 @@ static PyMethodDef sandbox_methods[] = {
      "get_counts() -> dict -- Return all counter values."},
     {"reset_counts", (PyCFunction)sandbox_reset_counts, METH_NOARGS,
      "reset_counts() -- Reset all counters to 0."},
+    {"add_counts", _PyCFunction_CAST(sandbox_add_counts),
+     METH_VARARGS | METH_KEYWORDS,
+     "add_counts(*, operation_count=0, iteration_count=0) -- Increment counters by specified amounts."},
     {"reset", (PyCFunction)sandbox_reset, METH_NOARGS,
      "reset() -- Reset all sandbox state to defaults."},
     {"use_default_allowed_modules", (PyCFunction)sandbox_use_default_allowed_modules, METH_NOARGS,

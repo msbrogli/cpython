@@ -122,6 +122,50 @@ sys.sandbox.set_config(
 
 This provides a unified "cost" budget.
 
+## Manual Counter Manipulation with add_counts()
+
+Use `add_counts()` to programmatically increment the operation counter:
+
+```python
+sys.sandbox.enable()
+sys.sandbox.reset_counts()
+
+# Pre-charge for external work (API calls, I/O, etc.)
+sys.sandbox.add_counts(operation_count=1000)
+
+# Execute sandboxed code with remaining budget
+sys.sandbox.max_operations = 5000
+code = compile(source, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
+
+try:
+    exec(code)
+except SandboxRuntimeError:
+    print("Combined limit exceeded")
+```
+
+**Use cases:**
+- **Pre-charging**: Reserve operation budget before executing untrusted code
+- **External cost accounting**: Add operations for API calls or I/O performed on behalf of sandboxed code
+- **Testing**: Verify limit enforcement behavior
+- **Budget management**: Implement tiered execution limits
+
+**Example: Tiered execution**
+
+```python
+def run_with_tier(source, tier="basic"):
+    base_budget = {"basic": 10000, "premium": 100000}
+
+    sys.sandbox.max_operations = base_budget[tier]
+    sys.sandbox.enable()
+    sys.sandbox.reset_counts()
+
+    # Charge for compilation overhead
+    sys.sandbox.add_counts(operation_count=100)
+
+    code = compile(source, "<sandbox>", "exec", flags=PyCF_SANDBOX_COUNT)
+    exec(code)
+```
+
 ## Zero Overhead When Disabled
 
 Code compiled **without** `PyCF_SANDBOX_COUNT` has no `SANDBOX_COUNT` opcodes, so there's zero runtime overhead:
@@ -318,6 +362,26 @@ int _PySandbox_CheckScopeOperation(void);
 | `max_operations` | int | 0 | Max operation count (0 = no limit) |
 | `operation_count` | int (read-only) | 0 | Current operation count |
 | `count_iterations_as_operations` | bool | False | Count iterations as operations |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `reset_counts()` | Reset operation_count (and iteration_count) to 0 |
+| `get_counts()` | Return dict with current counter values |
+| `add_counts(operation_count=0, iteration_count=0)` | Increment counters by specified amounts |
+
+### add_counts() Behavior
+
+```python
+sys.sandbox.add_counts(operation_count=0, iteration_count=0)
+```
+
+- **Requires enabled sandbox**: Raises `RuntimeError` if sandbox is disabled
+- **Non-negative values only**: Raises `ValueError` for negative values
+- **Overflow protection**: Raises `SandboxOverflowError` if addition would exceed `UINT64_MAX`
+- **Limit enforcement**: Raises `SandboxOverflowError` if counter exceeds limit after addition
+- **Thread-safe**: Uses atomic operations in free-threading builds
 
 ### Compile Flag
 

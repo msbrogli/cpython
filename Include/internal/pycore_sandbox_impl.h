@@ -63,6 +63,42 @@ extern "C" {
 #define _PySandbox_CounterLoad(counter) (counter)
 #endif
 
+/* Safe counter addition with overflow and limit checks.
+ * Returns: 0 on success, -1 on error (exception set)
+ *
+ * Checks:
+ * 1. Overflow: would adding `amount` exceed UINT64_MAX?
+ * 2. Limit: after adding, does counter exceed max_limit? (if max_limit > 0)
+ */
+static inline int
+_PySandbox_CounterSafeAdd(uint64_t *counter, uint64_t amount,
+                          uint64_t max_limit, const char *counter_name)
+{
+    if (amount == 0) {
+        return 0;
+    }
+
+    uint64_t old_val = _PySandbox_CounterLoad(*counter);
+
+    /* Overflow check before adding */
+    if (amount > UINT64_MAX - old_val) {
+        PyErr_Format(PyExc_SandboxOverflowError,
+                     "%s would overflow", counter_name);
+        return -1;
+    }
+
+    _PySandbox_CounterAdd(*counter, amount);
+
+    /* Check against limit AFTER incrementing */
+    if (max_limit > 0 && _PySandbox_CounterLoad(*counter) > max_limit) {
+        PyErr_Format(PyExc_SandboxOverflowError,
+                     "%s exceeds sandbox limit", counter_name);
+        return -1;
+    }
+
+    return 0;
+}
+
 /* Maximum allowed value for uint64_t limits to prevent overflow when doing
  * comparisons like `count == max + 1`. We use UINT64_MAX - 1000 as the safe maximum. */
 #define SANDBOX_MAX_LIMIT (UINT64_MAX - 1000)

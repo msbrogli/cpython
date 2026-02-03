@@ -110,6 +110,42 @@ print(f"Iterations: {counts['iteration_count']}")
 print(f"Operations: {counts['operation_count']}")
 ```
 
+## Adding to Counters Programmatically
+
+Increment counters by specified amounts:
+
+```python
+sys.sandbox.enable()
+sys.sandbox.reset_counts()
+
+# Add to counters
+sys.sandbox.add_counts(operation_count=100, iteration_count=50)
+
+counts = sys.sandbox.get_counts()
+print(f"Operations: {counts['operation_count']}")  # 100
+print(f"Iterations: {counts['iteration_count']}")  # 50
+```
+
+**Behaviors:**
+- Requires sandbox to be enabled (raises `RuntimeError` if disabled)
+- Rejects negative values (raises `ValueError`)
+- Checks limits AFTER incrementing (raises `SandboxOverflowError` if exceeded)
+- Handles overflow: raises `SandboxOverflowError` if addition would exceed `UINT64_MAX`
+
+```python
+# Example: Pre-charge for external API calls
+sys.sandbox.max_operations = 10000
+sys.sandbox.add_counts(operation_count=1000)  # Reserve budget
+
+# Example: Limit check
+sys.sandbox.max_operations = 100
+sys.sandbox.reset_counts()
+try:
+    sys.sandbox.add_counts(operation_count=200)  # Exceeds limit
+except SandboxOverflowError as e:
+    print(e)  # "operation_count exceeds sandbox limit"
+```
+
 ## Dunder Access Control
 
 Block `__dunder__` attribute access to prevent introspection escapes:
@@ -673,6 +709,7 @@ Called from:
 | `get_config()` | Return dict of all limits |
 | `get_counts()` | Return dict of all counters |
 | `reset_counts()` | Reset counters to 0 |
+| `add_counts(operation_count=0, iteration_count=0)` | Increment counters by specified amounts |
 
 ## Integration Points
 
@@ -727,6 +764,96 @@ except SandboxRuntimeError:
     log_error()
     cleanup()
 ```
+
+## Programmatic Counter Addition
+
+The `add_counts()` method allows incrementing counters from Python code:
+
+```c
+static PyObject *
+sandbox_add_counts(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
+{
+    static char *kwlist[] = {"operation_count", "iteration_count", NULL};
+
+    long long operation_count = 0;
+    long long iteration_count = 0;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|LL:add_counts", kwlist,
+                                     &operation_count, &iteration_count)) {
+        return NULL;
+    }
+
+    /* Validate: only non-negative values allowed */
+    if (operation_count < 0 || iteration_count < 0) {
+        PyErr_SetString(PyExc_ValueError, "count values must be non-negative");
+        return NULL;
+    }
+
+    /* Fail if sandbox is disabled */
+    if (!sandbox->enabled) {
+        PyErr_SetString(PyExc_RuntimeError, "sandbox is disabled");
+        return NULL;
+    }
+
+    /* Safe add with overflow and limit checks */
+    if (_PySandbox_CounterSafeAdd(&sandbox->counters.operation_count,
+                                  (uint64_t)operation_count,
+                                  config->max_operations,
+                                  "operation_count") < 0) {
+        return NULL;
+    }
+
+    if (_PySandbox_CounterSafeAdd(&sandbox->counters.iteration_count,
+                                  (uint64_t)iteration_count,
+                                  config->max_iterations,
+                                  "iteration_count") < 0) {
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+```
+
+### `_PySandbox_CounterSafeAdd` Helper
+
+Safe counter addition with overflow and limit checks:
+
+```c
+static inline int
+_PySandbox_CounterSafeAdd(uint64_t *counter, uint64_t amount,
+                          uint64_t max_limit, const char *counter_name)
+{
+    if (amount == 0) {
+        return 0;
+    }
+
+    uint64_t old_val = _PySandbox_CounterLoad(*counter);
+
+    /* Overflow check before adding */
+    if (amount > UINT64_MAX - old_val) {
+        PyErr_Format(PyExc_SandboxOverflowError,
+                     "%s would overflow", counter_name);
+        return -1;
+    }
+
+    _PySandbox_CounterAdd(*counter, amount);
+
+    /* Check against limit AFTER incrementing */
+    if (max_limit > 0 && _PySandbox_CounterLoad(*counter) > max_limit) {
+        PyErr_Format(PyExc_SandboxOverflowError,
+                     "%s exceeds sandbox limit", counter_name);
+        return -1;
+    }
+
+    return 0;
+}
+```
+
+**Design Notes:**
+- Uses thread-safe `_PySandbox_CounterAdd` macro (atomic in free-threading builds)
+- Overflow check prevents wraparound before adding
+- Limit check happens AFTER incrementing (consistent with natural counting)
+- Returns `SandboxOverflowError` (not `SandboxRuntimeError`) for limit violations
 
 # Drawbacks
 [drawbacks]: #drawbacks

@@ -210,11 +210,7 @@ import sys
 
 # Layer 1: Block new imports (allowlist)
 sys.sandbox.import_restrict_mode = True
-sys.sandbox.allowed_imports = frozenset([
-    ('json', ''),
-    ('math', ''),
-    ('re', ''),
-])
+sys.sandbox.allowed_imports = {"json", "math", "re"}
 
 # Layer 2: Block module usage even if reference exists (allowlist)
 sys.sandbox.allowed_modules = {'json', 'math', 're'}

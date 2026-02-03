@@ -1107,21 +1107,19 @@ except SandboxImportError as e:
 Use the `allowed_imports` property to specify which imports are permitted:
 
 ```python
-# Allow specific imports
+# Allow specific modules (set of module path strings)
 sys.sandbox.allowed_imports = {
-    ("json", ""),           # Allow: import json, from json import *
-    ("json", "loads"),      # Allow: from json import loads
-    ("json", "dumps"),      # Allow: from json import dumps
-    ("math", ""),           # Allow: import math, from math import *
-    ("datetime", "date"),   # Allow: from datetime import date
+    "json",           # Allow: import json, from json import *, json.decoder, etc.
+    "math",           # Allow: import math, from math import sqrt, etc.
+    "datetime",       # Allow: import datetime, from datetime import date, etc.
 }
 
 sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
-import json           # OK - ("json", "") allows it
-from json import loads  # OK - ("json", "loads") allows it
-from math import sqrt   # OK - ("math", "") allows all from math
+import json           # OK - "json" allows it
+from json import loads  # OK - "json" allows all from-imports
+from math import sqrt   # OK - "math" allows all from math
 import os              # SandboxImportError - not in allowlist
 """, "<sandbox>", "exec")
 ```
@@ -2151,7 +2149,7 @@ sys.sandbox.set_config(
 
 # Layer 3: Import and module restrictions
 sys.sandbox.import_restrict_mode = True
-sys.sandbox.allowed_imports = {("math", ""), ("json", "")}
+sys.sandbox.allowed_imports = {"math", "json"}
 sys.sandbox.module_access_restrict_mode = True
 sys.sandbox.allowed_modules = frozenset({"math", "json"})
 

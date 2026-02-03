@@ -132,7 +132,7 @@ typedef struct {
     int opcode_restrict_mode;           /* Opcode restriction active */
     _PySandboxOpcodeSet allowed_opcodes; /* 256-bit opcode bitmap */
     PyObject *registered_filenames;     /* Python set of filenames */
-    PyObject *allowed_imports;          /* Python set of (module, name) tuples */
+    PyObject *allowed_imports;          /* Python set of module path strings */
     PyObject *allowed_modules;          /* Python frozenset of allowed module names */
     PyObject *mutable_objects;          /* Objects allowed mutation in frozen mode */
     PyObject *frozen_objects;           /* Individually frozen objects */

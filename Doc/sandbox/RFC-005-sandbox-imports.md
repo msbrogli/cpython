@@ -57,55 +57,81 @@ except SandboxImportError as e:
 
 ## Allowlist Format
 
-The allowlist is a set of module path strings:
+The allowlist is a set of **module path strings**. Paths can be as broad or as restrictive as needed - from top-level modules like `"json"` to deeply nested paths like `"mypackage.submodule.specific.component"`.
 
 ```python
 sys.sandbox.allowed_imports = {
-    # Allow module and all submodules
+    # Broad: allow entire module and ALL submodules
     "json",              # import json; import json.decoder; import json.encoder
-    "math",              # import math
 
-    # Allow specific submodule (and its children)
+    # Restrictive: allow only specific submodule (and its children)
     "xml.etree",         # import xml.etree; import xml.etree.ElementTree
                          # Also allows: import xml (as dependency)
                          # Does NOT allow: import xml.dom (sibling)
+
+    # Very restrictive: allow only a specific deeply-nested path
+    "myapp.utils.safe",  # Only myapp.utils.safe and myapp.utils.safe.*
+                         # Does NOT allow: myapp.utils.dangerous
 }
 ```
+
+### Granular Control
+
+The string format supports **arbitrary nesting depth**, allowing fine-grained control:
+
+| Entry | Restrictiveness | What It Allows |
+|-------|-----------------|----------------|
+| `"json"` | Broad | All of json: `json`, `json.decoder`, `json.encoder`, etc. |
+| `"json.decoder"` | Moderate | Only `json.decoder` and `json` (parent), NOT `json.encoder` |
+| `"urllib.parse"` | Moderate | Only `urllib.parse` and `urllib`, NOT `urllib.request` |
+| `"a.b.c.d.e"` | Very restrictive | Only `a.b.c.d.e`, `a.b.c.d.e.*`, and parents `a`, `a.b`, `a.b.c`, `a.b.c.d` |
 
 ### Entry Semantics
 
 Each entry `"X"` in the allowlist:
 
 1. **Allows X itself**: `import X` is allowed
-2. **Allows all submodules**: `import X.Y`, `import X.Y.Z`, etc. are allowed
-3. **Computes parent dependencies**: Parent modules are auto-allowed as dependencies
+2. **Allows all submodules of X**: `import X.Y`, `import X.Y.Z`, etc. are allowed
+3. **Auto-computes parent dependencies**: Parent modules are allowed as needed for Python's import system
 
 ### Examples
 
 ```python
-# Entry: "json"
+# Entry: "json" (BROAD - allows everything under json)
 # Allows:
 #   import json           (exact match)
 #   import json.decoder   (submodule)
 #   import json.encoder   (submodule)
 #   from json import loads, dumps  (from-import)
 
-# Entry: "xml.etree.ElementTree"
+# Entry: "json.decoder" (RESTRICTIVE - only decoder, not encoder)
+# Allows:
+#   import json.decoder           (exact match)
+#   import json                   (parent dependency)
+# Does NOT allow:
+#   import json.encoder           (sibling - NOT allowed)
+#   from json import encoder      (sibling via from-import - NOT allowed)
+
+# Entry: "xml.etree.ElementTree" (RESTRICTIVE - only ElementTree)
 # Allows:
 #   import xml.etree.ElementTree  (exact match)
 #   import xml.etree              (parent dependency)
 #   import xml                    (grandparent dependency)
 # Does NOT allow:
-#   import xml.dom                (sibling of xml.etree)
-#   from xml import dom           (sibling via from-import)
+#   import xml.dom                (sibling of xml.etree - NOT allowed)
+#   import xml.sax                (sibling of xml.etree - NOT allowed)
 
-# Entry: "json.decoder"
+# Entry: "myapp.plugins.safe.validator" (VERY RESTRICTIVE)
 # Allows:
-#   import json.decoder           (exact match)
-#   import json                   (parent dependency)
+#   import myapp.plugins.safe.validator       (exact match)
+#   import myapp.plugins.safe.validator.core  (child - allowed)
+#   import myapp.plugins.safe                 (parent dependency)
+#   import myapp.plugins                      (grandparent dependency)
+#   import myapp                              (great-grandparent dependency)
 # Does NOT allow:
-#   import json.encoder           (sibling)
-#   from json import encoder      (sibling via from-import)
+#   import myapp.plugins.safe.executor        (sibling - NOT allowed)
+#   import myapp.plugins.dangerous            (uncle - NOT allowed)
+#   import myapp.core                         (unrelated - NOT allowed)
 ```
 
 ## Checking Current Configuration

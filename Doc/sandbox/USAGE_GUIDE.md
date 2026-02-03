@@ -1104,51 +1104,69 @@ except SandboxImportError as e:
 
 ### Setting Up an Import Allowlist
 
-Use the `allowed_imports` property to specify which imports are permitted:
+Use the `allowed_imports` property to specify which imports are permitted. Paths can be **as broad or as restrictive as needed** - from top-level modules to deeply nested paths:
 
 ```python
 # Allow specific modules (set of module path strings)
 sys.sandbox.allowed_imports = {
-    "json",           # Allow: import json, from json import *, json.decoder, etc.
-    "math",           # Allow: import math, from math import sqrt, etc.
-    "datetime",       # Allow: import datetime, from datetime import date, etc.
+    "json",           # BROAD: allows json, json.decoder, json.encoder, etc.
+    "math",           # BROAD: allows all of math
+    "xml.etree",      # RESTRICTIVE: allows xml.etree.* but NOT xml.dom
+    "urllib.parse",   # RESTRICTIVE: allows urllib.parse but NOT urllib.request
 }
 
 sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
-import json           # OK - "json" allows it
-from json import loads  # OK - "json" allows all from-imports
-from math import sqrt   # OK - "math" allows all from math
-import os              # SandboxImportError - not in allowlist
+import json              # OK - "json" allows it
+from json import loads   # OK - "json" allows all from-imports
+import json.decoder      # OK - "json" allows all submodules
+import xml.etree.ElementTree  # OK - "xml.etree" allows it
+import xml.dom           # SandboxImportError - "xml.etree" doesn't allow siblings
+import urllib.request    # SandboxImportError - only "urllib.parse" is allowed
+import os                # SandboxImportError - not in allowlist
 """, "<sandbox>", "exec")
 ```
 
-### Allowlist Format
+### Granular Path Control
 
-The allowlist is a set of module path strings:
+The allowlist supports **arbitrary nesting depth** for fine-grained control:
 
-| Entry | What It Allows |
-|-------|----------------|
-| `"json"` | `import json`, `from json import loads`, and all submodules `json.*` |
-| `"json.decoder"` | `import json.decoder`, `import json` (as dependency), but NOT `json.encoder` |
-| `"xml.etree"` | `import xml.etree`, `import xml.etree.ElementTree`, but NOT `import xml.dom` |
+| Entry | Restrictiveness | What It Allows |
+|-------|-----------------|----------------|
+| `"json"` | Broad | All of json: `json`, `json.decoder`, `json.encoder`, etc. |
+| `"json.decoder"` | Moderate | Only `json.decoder` + parent `json`, NOT `json.encoder` |
+| `"xml.etree"` | Moderate | Only `xml.etree.*` + parent `xml`, NOT `xml.dom` or `xml.sax` |
+| `"urllib.parse"` | Moderate | Only `urllib.parse` + parent `urllib`, NOT `urllib.request` |
+| `"myapp.utils.safe"` | Restrictive | Only `myapp.utils.safe.*`, NOT `myapp.utils.dangerous` |
+| `"a.b.c.d.e"` | Very restrictive | Only `a.b.c.d.e.*` and required parents |
 
 ### Entry Semantics
 
 Each entry `"X"` in the allowlist:
 1. **Allows X itself**: `import X` works
-2. **Allows all submodules**: `import X.Y`, `import X.Y.Z`, etc. all work
+2. **Allows all children of X**: `import X.Y`, `import X.Y.Z`, etc. all work
 3. **Auto-computes parent dependencies**: Parent modules are allowed as needed
+4. **Does NOT allow siblings**: Other modules at the same level are blocked
 
 ```python
-# Entry: "json.decoder"
+# Entry: "json.decoder" (RESTRICTIVE)
 # Allows:
 #   import json.decoder     (exact match)
 #   import json             (parent dependency, auto-computed)
 # Does NOT allow:
-#   import json.encoder     (sibling - not in allowlist)
+#   import json.encoder     (sibling - NOT in allowlist)
 #   from json import encoder  (sibling via from-import)
+
+# Entry: "myapp.plugins.safe" (VERY RESTRICTIVE)
+# Allows:
+#   import myapp.plugins.safe           (exact match)
+#   import myapp.plugins.safe.validator (child)
+#   import myapp.plugins                (parent dependency)
+#   import myapp                        (grandparent dependency)
+# Does NOT allow:
+#   import myapp.plugins.dangerous      (sibling - NOT allowed)
+#   import myapp.core                   (unrelated - NOT allowed)
 ```
 
 ### Using Default Safe Modules

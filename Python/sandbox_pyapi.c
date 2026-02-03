@@ -358,7 +358,6 @@ SANDBOX_BOOL_GETSET(allow_io, config.allow_io)
 SANDBOX_BOOL_GETSET(frozen_mode, frozen_mode)
 SANDBOX_BOOL_GETSET(auto_mutable, auto_mutable)
 SANDBOX_BOOL_GETSET(import_restrict_mode, config.import_restrict_mode)
-SANDBOX_BOOL_GETSET(import_allow_submodules, config.import_allow_submodules)
 SANDBOX_BOOL_GETSET(module_access_restrict_mode, config.module_access_restrict_mode)
 SANDBOX_BOOL_GETSET(allow_submodules, config.allow_submodules)
 SANDBOX_BOOL_GETSET(allow_class_creation, config.allow_class_creation)
@@ -649,8 +648,6 @@ static PyGetSetDef sandbox_getsetters[] = {
      (setter)sandbox_set_opcode_restrict_mode, "Opcode restriction mode", NULL},
     {"import_restrict_mode", (getter)sandbox_get_import_restrict_mode,
      (setter)sandbox_set_import_restrict_mode, "Import restriction mode (True by default)", NULL},
-    {"import_allow_submodules", (getter)sandbox_get_import_allow_submodules,
-     (setter)sandbox_set_import_allow_submodules, "Allow submodules of allowed modules", NULL},
     {"module_access_restrict_mode", (getter)sandbox_get_module_access_restrict_mode,
      (setter)sandbox_set_module_access_restrict_mode, "Module access restriction mode (default False)", NULL},
     {"allow_submodules", (getter)sandbox_get_allow_submodules,
@@ -697,7 +694,7 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
         "max_iterations", "max_operations", "max_recursion_depth",
         "allow_float", "allow_complex", "allow_dunder_access",
         "count_iterations_as_operations", "allow_unsafe", "allow_io",
-        "import_restrict_mode", "import_allow_submodules",
+        "import_restrict_mode",
         "module_access_restrict_mode", "allow_submodules", "allow_class_creation",
         "allow_magic_methods", "allow_metaclasses", NULL
     };
@@ -725,14 +722,13 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     int allow_unsafe = config->allow_unsafe;
     int allow_io = config->allow_io;
     int import_restrict_mode = config->import_restrict_mode;
-    int import_allow_submodules = config->import_allow_submodules;
     int module_access_restrict_mode = config->module_access_restrict_mode;
     int allow_submodules = config->allow_submodules;
     int allow_class_creation = config->allow_class_creation;
     int allow_magic_methods = config->allow_magic_methods;
     int allow_metaclasses = config->allow_metaclasses;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKppppppppppppp", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|nnnnnnnKKKpppppppppppp", kwlist,
                                      &max_int_digits, &max_str_length,
                                      &max_bytes_length, &max_list_size,
                                      &max_dict_size, &max_set_size,
@@ -743,7 +739,7 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
                                      &allow_dunder_access,
                                      &count_iterations_as_operations,
                                      &allow_unsafe, &allow_io,
-                                     &import_restrict_mode, &import_allow_submodules,
+                                     &import_restrict_mode,
                                      &module_access_restrict_mode, &allow_submodules,
                                      &allow_class_creation, &allow_magic_methods,
                                      &allow_metaclasses)) {
@@ -781,7 +777,6 @@ sandbox_set_config(_PySandboxObject *self, PyObject *args, PyObject *kwargs)
     config->allow_unsafe = allow_unsafe;
     config->allow_io = allow_io;
     config->import_restrict_mode = import_restrict_mode;
-    config->import_allow_submodules = import_allow_submodules;
     config->module_access_restrict_mode = module_access_restrict_mode;
     config->allow_submodules = allow_submodules;
     config->allow_class_creation = allow_class_creation;
@@ -801,7 +796,7 @@ sandbox_get_config(_PySandboxObject *self, PyObject *Py_UNUSED(args))
 
     return Py_BuildValue(
         "{s:n, s:n, s:n, s:n, s:n, s:n, s:n, s:K, s:K, s:K, "
-        "s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O}",
+        "s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O, s:O}",
         "max_int_digits", config->max_int_digits,
         "max_str_length", config->max_str_length,
         "max_bytes_length", config->max_bytes_length,
@@ -819,7 +814,6 @@ sandbox_get_config(_PySandboxObject *self, PyObject *Py_UNUSED(args))
         "allow_unsafe", config->allow_unsafe ? Py_True : Py_False,
         "allow_io", config->allow_io ? Py_True : Py_False,
         "import_restrict_mode", config->import_restrict_mode ? Py_True : Py_False,
-        "import_allow_submodules", config->import_allow_submodules ? Py_True : Py_False,
         "module_access_restrict_mode", config->module_access_restrict_mode ? Py_True : Py_False,
         "allow_submodules", config->allow_submodules ? Py_True : Py_False,
         "allow_class_creation", config->allow_class_creation ? Py_True : Py_False,

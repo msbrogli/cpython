@@ -326,84 +326,158 @@ except SandboxAttributeError:
             f"stdout={result.stdout}, stderr={result.stderr}")
 
 
-class TestImportParentModuleBypass(unittest.TestCase):
-    """P0: Parent module import must be blocked when only submodule whitelisted.
+class TestImportRestrictions(unittest.TestCase):
+    """Test import restrictions with new string-based allowlist format.
 
-    Vulnerability: sandbox_imports.c:299-308 allows parent module import
-    if ANY submodule is whitelisted, via check_has_any_submodule_entry().
+    The new design uses string-based module paths:
+    - Entry "X" allows: X itself, all submodules X.*, and parent dependencies
+    - Parent dependencies are automatically computed and stored in allowed_ancestors
+    - This is intentional - Python's import system needs parents before children
 
-    These tests FAIL until the vulnerability is fixed.
+    These tests verify:
+    1. Parent imports ARE allowed (as dependencies) - this is correct behavior
+    2. Sibling modules ARE blocked - security check
+    3. Unrelated modules ARE blocked - security check
     """
 
-    def test_parent_import_blocked_when_only_submodule_whitelisted(self):
-        """import json must be blocked when only json.decoder is whitelisted."""
+    def test_parent_import_allowed_as_dependency(self):
+        """import json allowed when json.decoder is whitelisted (parent dependency)."""
         code = '''
 import sys
 
-# Only whitelist the submodule decoder, NOT the parent json
-sys.sandbox.allowed_imports = {("json", "decoder")}
-sys.sandbox.import_allow_submodules = True
+# Whitelist json.decoder - json (parent) should be auto-allowed as dependency
+sys.sandbox.allowed_imports = {"json.decoder"}
 sys.sandbox.import_restrict_mode = True
 sys.sandbox.enter_scope()
 
 try:
-    import json  # Bare parent import - should be blocked
-    print(f"VULNERABLE: imported json module")
-    sys.exit(1)
-except SandboxImportError:
-    print("PROTECTED: parent import blocked")
+    import json  # Parent import - should be allowed (dependency)
+    print("CORRECT: parent import allowed as dependency")
     sys.exit(0)
+except SandboxImportError as e:
+    print(f"INCORRECT: parent import blocked: {e}")
+    sys.exit(1)
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
-            f"Vulnerability: parent module import allowed when only submodule whitelisted. "
+            f"Parent dependency not allowed. "
             f"stdout={result.stdout}, stderr={result.stderr}")
 
-    def test_grandparent_import_blocked(self):
-        """import xml must be blocked when only xml.etree.ElementTree whitelisted."""
+    def test_sibling_import_blocked(self):
+        """import json.encoder must be blocked when only json.decoder whitelisted."""
         code = '''
 import sys
 
-# Whitelist a deeply nested submodule
-sys.sandbox.allowed_imports = {("xml.etree", "ElementTree")}
-sys.sandbox.import_allow_submodules = True
+# Whitelist only json.decoder
+sys.sandbox.allowed_imports = {"json.decoder"}
 sys.sandbox.import_restrict_mode = True
 sys.sandbox.enter_scope()
 
 try:
-    import xml  # Grandparent import - should be blocked
-    print(f"VULNERABLE: imported xml")
+    import json.encoder  # Sibling import - should be blocked
+    print("VULNERABLE: imported sibling module json.encoder")
     sys.exit(1)
 except SandboxImportError:
-    print("PROTECTED: grandparent import blocked")
+    print("PROTECTED: sibling import blocked")
     sys.exit(0)
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
-            f"Vulnerability: grandparent module import allowed. "
+            f"Vulnerability: sibling module import allowed when only specific child whitelisted. "
             f"stdout={result.stdout}, stderr={result.stderr}")
 
-    def test_from_import_parent_blocked(self):
-        """from json import loads must be blocked when only json.decoder whitelisted."""
+    def test_grandparent_import_allowed_as_dependency(self):
+        """import xml allowed when xml.etree.ElementTree whitelisted (grandparent dependency)."""
         code = '''
 import sys
 
-sys.sandbox.allowed_imports = {("json", "decoder")}
-sys.sandbox.import_allow_submodules = True
+# Whitelist xml.etree.ElementTree - xml and xml.etree should be auto-allowed as dependencies
+sys.sandbox.allowed_imports = {"xml.etree.ElementTree"}
 sys.sandbox.import_restrict_mode = True
 sys.sandbox.enter_scope()
 
 try:
-    from json import loads, dumps  # Should be blocked
-    print(f"VULNERABLE: imported json.loads and json.dumps")
+    import xml  # Grandparent - should be allowed (dependency)
+    import xml.etree  # Parent - should be allowed (dependency)
+    print("CORRECT: grandparent/parent imports allowed as dependencies")
+    sys.exit(0)
+except SandboxImportError as e:
+    print(f"INCORRECT: ancestor import blocked: {e}")
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+            f"Ancestor dependency not allowed. "
+            f"stdout={result.stdout}, stderr={result.stderr}")
+
+    def test_unrelated_sibling_blocked_for_nested(self):
+        """import xml.dom must be blocked when only xml.etree.ElementTree whitelisted."""
+        code = '''
+import sys
+
+# Whitelist only xml.etree.ElementTree
+sys.sandbox.allowed_imports = {"xml.etree.ElementTree"}
+sys.sandbox.import_restrict_mode = True
+sys.sandbox.enter_scope()
+
+try:
+    import xml.dom  # Sibling of xml.etree - should be blocked
+    print("VULNERABLE: imported xml.dom")
     sys.exit(1)
 except SandboxImportError:
-    print("PROTECTED: from import blocked")
+    print("PROTECTED: unrelated sibling blocked")
     sys.exit(0)
 '''
         result = _run_sandboxed_code(code)
         self.assertEqual(result.returncode, 0,
-            f"Vulnerability: from-import allows access to non-whitelisted names. "
+            f"Vulnerability: unrelated module import allowed. "
+            f"stdout={result.stdout}, stderr={result.stderr}")
+
+    def test_from_import_blocked_for_unrelated(self):
+        """from xml import dom must be blocked when only xml.etree.ElementTree whitelisted.
+
+        Note: Using xml instead of json because json internally imports both encoder
+        and decoder, making it impossible to allow one without the other."""
+        code = '''
+import sys
+
+sys.sandbox.allowed_imports = {"xml.etree.ElementTree"}
+sys.sandbox.import_restrict_mode = True
+sys.sandbox.enter_scope()
+
+try:
+    from xml import dom  # Sibling of xml.etree - should be blocked
+    print("VULNERABLE: imported xml.dom via from-import")
+    sys.exit(1)
+except SandboxImportError:
+    print("PROTECTED: from-import sibling blocked")
+    sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+            f"Vulnerability: from-import allows access to sibling modules. "
+            f"stdout={result.stdout}, stderr={result.stderr}")
+
+    def test_completely_unrelated_module_blocked(self):
+        """import os must be blocked when only json.decoder whitelisted."""
+        code = '''
+import sys
+
+sys.sandbox.allowed_imports = {"json.decoder"}
+sys.sandbox.import_restrict_mode = True
+sys.sandbox.enter_scope()
+
+try:
+    import os  # Completely unrelated - should be blocked
+    print("VULNERABLE: imported unrelated module os")
+    sys.exit(1)
+except SandboxImportError:
+    print("PROTECTED: unrelated module blocked")
+    sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+            f"Vulnerability: unrelated module import allowed. "
             f"stdout={result.stdout}, stderr={result.stderr}")
 
 

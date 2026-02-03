@@ -1123,29 +1123,30 @@ import os              # SandboxImportError - not in allowlist
 
 ### Allowlist Format
 
-The allowlist is a set of `(module_name, import_name)` tuples:
+The allowlist is a set of module path strings:
 
 | Entry | What It Allows |
 |-------|----------------|
-| `("json", "")` | `import json` and `from json import *` (any name) |
-| `("json", "loads")` | Only `from json import loads` |
-| `("json", "*")` | `from json import *` |
-| `("os.path", "")` | `import os.path` and `from os.path import *` |
+| `"json"` | `import json`, `from json import loads`, and all submodules `json.*` |
+| `"json.decoder"` | `import json.decoder`, `import json` (as dependency), but NOT `json.encoder` |
+| `"xml.etree"` | `import xml.etree`, `import xml.etree.ElementTree`, but NOT `import xml.dom` |
 
-### Submodule Access
+### Entry Semantics
 
-Control whether importing a parent allows access to submodules:
+Each entry `"X"` in the allowlist:
+1. **Allows X itself**: `import X` works
+2. **Allows all submodules**: `import X.Y`, `import X.Y.Z`, etc. all work
+3. **Auto-computes parent dependencies**: Parent modules are allowed as needed
 
 ```python
-# Allow submodule access (parent import grants child access)
-sys.sandbox.import_allow_submodules = True
-sys.sandbox.allowed_imports = {("os", "")}
-
-# Now "import os.path" works because "os" is allowed
-# and submodules are permitted
+# Entry: "json.decoder"
+# Allows:
+#   import json.decoder     (exact match)
+#   import json             (parent dependency, auto-computed)
+# Does NOT allow:
+#   import json.encoder     (sibling - not in allowlist)
+#   from json import encoder  (sibling via from-import)
 ```
-
-By default, `import_allow_submodules=False`, requiring explicit allowlist entries for each submodule.
 
 ### Using Default Safe Modules
 
@@ -1182,8 +1183,7 @@ sys.sandbox.import_restrict_mode = False
 
 ```python
 print(sys.sandbox.import_restrict_mode)       # True/False
-print(sys.sandbox.import_allow_submodules)    # True/False
-print(sys.sandbox.allowed_imports)            # Set of (module, name) tuples
+print(sys.sandbox.allowed_imports)            # frozenset of module path strings
 ```
 
 ---
@@ -1239,7 +1239,7 @@ For maximum security, use both:
 ```python
 # Block imports
 sys.sandbox.import_restrict_mode = True
-sys.sandbox.allowed_imports = {("json", "")}
+sys.sandbox.allowed_imports = {"json"}
 
 # Block module usage even if passed in
 sys.sandbox.module_access_restrict_mode = True
@@ -2446,10 +2446,8 @@ except SandboxError as e:
 |----------|-------------|
 | `sys.sandbox.import_restrict_mode = bool` | Enable/disable import allowlist |
 | `sys.sandbox.import_restrict_mode -> bool` | Check import restriction status |
-| `sys.sandbox.import_allow_submodules = bool` | Allow submodule imports |
-| `sys.sandbox.import_allow_submodules -> bool` | Check submodule setting |
-| `sys.sandbox.allowed_imports = set` | Set allowed (module, name) tuples |
-| `sys.sandbox.allowed_imports -> set` | Get allowed imports |
+| `sys.sandbox.allowed_imports = set` | Set allowed module path strings |
+| `sys.sandbox.allowed_imports -> frozenset` | Get allowed imports |
 
 ### Module Access Restrictions
 
@@ -2502,6 +2500,5 @@ except SandboxError as e:
 | `allow_io` | bool | False | Allow I/O operations (file, socket, fd) |
 | `count_iterations_as_operations` | bool | False | Count iterator yields toward `operation_count` |
 | `import_restrict_mode` | bool | True | Enforce import allowlist |
-| `import_allow_submodules` | bool | False | Allow submodule imports when parent allowed |
 | `module_access_restrict_mode` | bool | False | Enforce module access allowlist |
 | `allow_submodules` | bool | True | Allow submodule access when parent allowed |

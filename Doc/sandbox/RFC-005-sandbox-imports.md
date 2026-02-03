@@ -7,7 +7,7 @@
 # Summary
 [summary]: #summary
 
-The sandbox imports module provides import restriction through an allowlist mechanism. When enabled, only explicitly allowed modules and names can be imported from sandbox scope. This prevents sandboxed code from accessing dangerous modules like `os`, `subprocess`, `socket`, etc.
+The sandbox imports module provides import restriction through an allowlist mechanism. When enabled, only explicitly allowed modules can be imported from sandbox scope. This prevents sandboxed code from accessing dangerous modules like `os`, `subprocess`, `socket`, etc.
 
 # Motivation
 [motivation]: #motivation
@@ -25,7 +25,7 @@ Restricting imports is essential for sandboxing. The allowlist approach is safer
 
 1. **Default deny**: New dangerous modules are blocked by default
 2. **Explicit intent**: Only specifically allowed modules are accessible
-3. **Fine-grained control**: Can allow specific names from a module
+3. **Submodule control**: Entry "X" allows X and X.*, entry "X.Y" only allows X.Y and X.Y.*
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
@@ -35,16 +35,13 @@ Restricting imports is essential for sandboxing. The allowlist approach is safer
 ```python
 import sys
 
-# Enable import restriction mode
+# Enable import restriction mode (enabled by default)
 sys.sandbox.import_restrict_mode = True
 
-# Set allowed imports (list of (module, name) tuples)
-sys.sandbox.allowed_imports = [
-    ("json", ""),       # Allow 'import json' and all 'from json import X'
-    ("math", ""),       # Allow 'import math' and all 'from math import X'
-    ("re", ""),         # Allow 'import re' and all 'from re import X'
-]
+# Set allowed imports (set of module path strings)
+sys.sandbox.allowed_imports = {"json", "math", "re"}
 
+sys.sandbox.enable()
 sys.sandbox.add_filename("<sandbox>")
 
 code = compile("""
@@ -55,79 +52,60 @@ import os      # Raises SandboxImportError
 try:
     exec(code)
 except SandboxImportError as e:
-    print(e)  # "Import of 'os' is not allowed in sandbox"
+    print(e)  # "Import of 'os' is not allowed in sandbox scope"
 ```
 
 ## Allowlist Format
 
-The allowlist is a set of `(module_name, import_name)` tuples:
+The allowlist is a set of module path strings:
 
 ```python
-sys.sandbox.allowed_imports = [
-    # Allow entire module
-    ("json", ""),           # import json; from json import X
+sys.sandbox.allowed_imports = {
+    # Allow module and all submodules
+    "json",              # import json; import json.decoder; import json.encoder
+    "math",              # import math
 
-    # Allow specific name only
-    ("json", "loads"),      # from json import loads
-    ("json", "dumps"),      # from json import dumps
-
-    # Allow star import
-    ("constants", "*"),     # from constants import *
-]
+    # Allow specific submodule (and its children)
+    "xml.etree",         # import xml.etree; import xml.etree.ElementTree
+                         # Also allows: import xml (as dependency)
+                         # Does NOT allow: import xml.dom (sibling)
+}
 ```
 
-### Module-Level Allow (`name=""`)
+### Entry Semantics
+
+Each entry `"X"` in the allowlist:
+
+1. **Allows X itself**: `import X` is allowed
+2. **Allows all submodules**: `import X.Y`, `import X.Y.Z`, etc. are allowed
+3. **Computes parent dependencies**: Parent modules are auto-allowed as dependencies
+
+### Examples
 
 ```python
-("json", "")  # Allows:
-              #   import json
-              #   from json import loads
-              #   from json import dumps, loads
-              #   from json import *
-```
+# Entry: "json"
+# Allows:
+#   import json           (exact match)
+#   import json.decoder   (submodule)
+#   import json.encoder   (submodule)
+#   from json import loads, dumps  (from-import)
 
-### Name-Specific Allow
+# Entry: "xml.etree.ElementTree"
+# Allows:
+#   import xml.etree.ElementTree  (exact match)
+#   import xml.etree              (parent dependency)
+#   import xml                    (grandparent dependency)
+# Does NOT allow:
+#   import xml.dom                (sibling of xml.etree)
+#   from xml import dom           (sibling via from-import)
 
-```python
-("json", "loads")  # Allows ONLY:
-                   #   from json import loads
-                   # Does NOT allow:
-                   #   import json
-                   #   from json import dumps
-```
-
-### Star Import Allow
-
-```python
-("mymodule", "*")  # Allows:
-                   #   from mymodule import *
-                   # Does NOT allow:
-                   #   import mymodule
-                   #   from mymodule import specific_name
-```
-
-## Submodule Support
-
-By default, submodule imports are checked against the parent:
-
-```python
-sys.sandbox.allowed_imports = [("json", "")]
-sys.sandbox.import_allow_submodules = True  # Default
-
-# This works because 'json' is allowed:
-import json.decoder  # Allowed (submodule of allowed 'json')
-```
-
-Disable submodule allowance:
-
-```python
-sys.sandbox.import_allow_submodules = False
-
-# Now submodules must be explicitly listed:
-sys.sandbox.allowed_imports = [
-    ("json", ""),
-    ("json.decoder", ""),  # Must explicitly allow
-]
+# Entry: "json.decoder"
+# Allows:
+#   import json.decoder           (exact match)
+#   import json                   (parent dependency)
+# Does NOT allow:
+#   import json.encoder           (sibling)
+#   from json import encoder      (sibling via from-import)
 ```
 
 ## Checking Current Configuration
@@ -135,11 +113,10 @@ sys.sandbox.allowed_imports = [
 ```python
 # Get current allowlist
 allowed = sys.sandbox.allowed_imports
-print(allowed)  # frozenset({('json', ''), ('math', '')})
+print(allowed)  # frozenset({'json', 'math', 're'})
 
 # Check mode
 print(sys.sandbox.import_restrict_mode)  # True/False
-print(sys.sandbox.import_allow_submodules)  # True/False
 ```
 
 # Reference-level explanation
@@ -147,135 +124,120 @@ print(sys.sandbox.import_allow_submodules)  # True/False
 
 ## Data Structures
 
-The allowlist is stored as a Python `set` of tuples:
+The allowlist is stored as a Python `frozenset` of strings, with a pre-computed `allowed_ancestors` set:
 
 ```c
 typedef struct {
     /* ... other fields ... */
-    PyObject *allowed_imports;  /* Python set of (module, name) tuples */
-    /* ... */
+
+    /* Import allowlist - Python frozenset of module path strings.
+     * Entry "X" allows: X itself, all submodules X.*, and parent dependencies. */
+    PyObject *allowed_imports;
+
+    /* Pre-computed ancestors of allowed_imports entries.
+     * Used for O(1) dependency checks. Auto-computed when allowed_imports changes.
+     * Example: if allowed_imports={"json.decoder"}, then allowed_ancestors={"json"} */
+    PyObject *allowed_ancestors;
 } _PySandboxState;
 ```
 
-## Import Check Function
+## Import Check Algorithm
+
+The check runs in O(p) time where p = number of parts in the module path:
 
 ```c
-int
-_PySandbox_CheckImport(PyObject *abs_name, PyObject *fromlist)
+static int
+is_module_allowed(_PySandboxState *sandbox, const char *module_str)
 {
-    PyInterpreterState *interp = _PyInterpreterState_GET();
-    if (interp == NULL) {
-        return 0;
-    }
-
-    _PySandboxState *sandbox = &interp->sandbox;
-
-    /* Fast exit if not in restrict mode */
-    if (!sandbox->config.import_restrict_mode) {
-        return 0;
-    }
-
-    if (sandbox->suppress_checks || sandbox->suspend_depth) {
-        return 0;
-    }
-
-    /* Check if in sandbox scope */
-    _PyInterpreterFrame *frame = get_current_interpreter_frame();
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
-        return 0;
-    }
-
-    /* No allowlist means nothing is allowed */
     if (sandbox->allowed_imports == NULL) {
-        PyErr_Format(PyExc_SandboxImportError,
-                     "Import of '%U' is not allowed in sandbox", abs_name);
-        return -1;
+        return 0;
     }
 
-    /* Check if import is allowed */
-    if (!import_is_allowed(sandbox, abs_name, fromlist)) {
-        PyErr_Format(PyExc_SandboxImportError,
-                     "Import of '%U' is not allowed in sandbox", abs_name);
-        return -1;
+    size_t module_len = strlen(module_str);
+
+    /* Check each prefix of the module (including the full module) */
+    for (size_t i = 0; i <= module_len; i++) {
+        if (i == module_len || module_str[i] == '.') {
+            /* Build prefix string */
+            PyObject *prefix = PyUnicode_FromStringAndSize(module_str, i);
+            if (prefix == NULL) {
+                return -1;
+            }
+
+            /* Check if prefix is in allowed_imports */
+            int result = PySet_Contains(sandbox->allowed_imports, prefix);
+            Py_DECREF(prefix);
+
+            if (result < 0) {
+                return -1;
+            }
+            if (result) {
+                return 1;  /* Found: module or ancestor is directly allowed */
+            }
+        }
     }
 
-    return 0;
+    /* Check if module is a required dependency (in allowed_ancestors) */
+    if (sandbox->allowed_ancestors != NULL) {
+        PyObject *module_obj = PyUnicode_FromString(module_str);
+        if (module_obj == NULL) {
+            return -1;
+        }
+
+        int result = PySet_Contains(sandbox->allowed_ancestors, module_obj);
+        Py_DECREF(module_obj);
+
+        if (result < 0) {
+            return -1;
+        }
+        if (result) {
+            return 1;  /* Module is a required dependency */
+        }
+    }
+
+    return 0;  /* Not allowed */
 }
 ```
 
-## Allowlist Checking Logic
+## Ancestor Computation
+
+When `allowed_imports` is set, ancestors are computed automatically:
 
 ```c
+/* For each entry in allowed_imports, add all its parent prefixes to allowed_ancestors.
+ * Example: "json.decoder.JSONDecoder" adds "json" and "json.decoder" to ancestors. */
 static int
-import_is_allowed(_PySandboxState *sandbox, PyObject *abs_name, PyObject *fromlist)
+compute_ancestors(_PySandboxState *sandbox)
 {
-    PyObject *empty_str = PyUnicode_FromString("");
+    /* Clear existing ancestors */
+    Py_CLEAR(sandbox->allowed_ancestors);
 
-    /* Check if module-level import is allowed: (module, "") */
-    PyObject *module_key = PyTuple_Pack(2, abs_name, empty_str);
-    int allowed = PySet_Contains(sandbox->allowed_imports, module_key);
-    Py_DECREF(module_key);
-
-    if (allowed > 0) {
-        Py_DECREF(empty_str);
-        return 1;  /* Module-level allow covers all imports */
+    if (sandbox->allowed_imports == NULL) {
+        return 0;
     }
 
-    /* Check submodule allowance */
-    if (sandbox->config.import_allow_submodules) {
-        if (check_parent_module_allowed(sandbox, abs_name)) {
-            Py_DECREF(empty_str);
-            return 1;
-        }
-    }
+    /* Create new ancestors set */
+    PyObject *ancestors = PySet_New(NULL);
 
-    /* Check specific names in fromlist */
-    if (fromlist != NULL && PySequence_Check(fromlist)) {
-        Py_ssize_t n = PySequence_Length(fromlist);
-        for (Py_ssize_t i = 0; i < n; i++) {
-            PyObject *name = PySequence_GetItem(fromlist, i);
-            PyObject *name_key = PyTuple_Pack(2, abs_name, name);
-            allowed = PySet_Contains(sandbox->allowed_imports, name_key);
-            Py_DECREF(name_key);
-            Py_DECREF(name);
+    /* For each entry, add all parent prefixes */
+    PyObject *iter = PyObject_GetIter(sandbox->allowed_imports);
+    PyObject *entry;
+    while ((entry = PyIter_Next(iter)) != NULL) {
+        const char *entry_str = PyUnicode_AsUTF8(entry);
+        size_t len = strlen(entry_str);
 
-            if (allowed <= 0) {
-                Py_DECREF(empty_str);
-                return 0;  /* At least one name not allowed */
+        for (size_t i = 0; i < len; i++) {
+            if (entry_str[i] == '.') {
+                PyObject *prefix = PyUnicode_FromStringAndSize(entry_str, i);
+                PySet_Add(ancestors, prefix);
+                Py_DECREF(prefix);
             }
         }
-        Py_DECREF(empty_str);
-        return 1;  /* All names in fromlist are allowed */
+        Py_DECREF(entry);
     }
+    Py_DECREF(iter);
 
-    Py_DECREF(empty_str);
-    return 0;  /* Not allowed */
-}
-
-static int
-check_parent_module_allowed(_PySandboxState *sandbox, PyObject *module_name)
-{
-    /* Check if any parent module is allowed */
-    /* e.g., for "json.decoder", check if "json" is allowed */
-    const char *name = PyUnicode_AsUTF8(module_name);
-    char *dot = strrchr(name, '.');
-
-    while (dot != NULL) {
-        PyObject *parent = PyUnicode_FromStringAndSize(name, dot - name);
-        PyObject *key = PyTuple_Pack(2, parent, empty_string);
-        int allowed = PySet_Contains(sandbox->allowed_imports, key);
-        Py_DECREF(key);
-        Py_DECREF(parent);
-
-        if (allowed > 0) {
-            return 1;
-        }
-
-        /* Check next parent level */
-        *dot = '\0';
-        dot = strrchr(name, '.');
-    }
-
+    sandbox->allowed_ancestors = ancestors;
     return 0;
 }
 ```
@@ -283,7 +245,7 @@ check_parent_module_allowed(_PySandboxState *sandbox, PyObject *module_name)
 ## C API
 
 ```c
-/* Set allowed imports (set of (module, name) tuples, or NULL to clear) */
+/* Set allowed imports (set of module path strings, or None to clear) */
 int PySandbox_SetAllowedImports(PyObject *modules);
 
 /* Get current allowed imports (returns new reference to frozenset) */
@@ -296,18 +258,17 @@ PyObject *PySandbox_GetAllowedImports(void);
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `import_restrict_mode` | bool | False | Enable import restrictions |
-| `import_allow_submodules` | bool | True | Allow submodules of allowed modules |
-| `allowed_imports` | frozenset | None | Set of `(module, name)` tuples |
+| `import_restrict_mode` | bool | True | Enable import restrictions |
+| `allowed_imports` | frozenset | empty | Set of module path strings |
 
 ### Setting Allowed Imports
 
 ```python
-# From list of tuples
-sys.sandbox.allowed_imports = [("json", ""), ("math", "")]
+# From list of strings
+sys.sandbox.allowed_imports = ["json", "math", "xml.etree.ElementTree"]
 
 # From set
-sys.sandbox.allowed_imports = {("json", ""), ("math", "")}
+sys.sandbox.allowed_imports = {"json", "math"}
 
 # Clear (disallow all imports)
 sys.sandbox.allowed_imports = None
@@ -339,7 +300,7 @@ PyImport_ImportModuleLevelObject(PyObject *name, PyObject *globals,
 `SandboxImportError` is raised for blocked imports:
 
 ```
-SandboxImportError: Import of 'os' is not allowed in sandbox
+SandboxImportError: Import of 'os' is not allowed in sandbox scope
 ```
 
 # Drawbacks
@@ -347,7 +308,7 @@ SandboxImportError: Import of 'os' is not allowed in sandbox
 
 1. **Allowlist Maintenance**: Must explicitly list all allowed modules; easy to miss legitimate needs.
 
-2. **Transitive Imports**: If allowed module `A` imports blocked module `B`, the import may fail unexpectedly.
+2. **Transitive Imports**: If allowed module `A` internally imports blocked module `B`, the import may fail unexpectedly.
 
 3. **Dynamic Imports**: `importlib.import_module()` and `__import__()` are also restricted, which may break some patterns.
 
@@ -366,29 +327,43 @@ blocked_imports = {"os", "subprocess", "socket", ...}
 
 **Allowlist approach** (chosen):
 ```python
-allowed_imports = {("json", ""), ("math", "")}
+allowed_imports = {"json", "math"}
 ```
 - Default-deny: only explicitly allowed modules work
 - Safer against unknown threats
 - Clear intent
 
-## Why Tuple Format `(module, name)`?
+## Why String Format vs. Tuple Format?
 
-Allows fine-grained control:
+**Old tuple format** (rejected):
+```python
+allowed_imports = {("json", ""), ("json", "loads")}
+```
+- Complex semantics for `("module", "")` vs `("module", "name")`
+- Submodule handling was complex and error-prone
+
+**New string format** (chosen):
+```python
+allowed_imports = {"json", "json.decoder"}
+```
+- Simple: entry "X" allows X and X.*
+- Parent dependencies computed automatically
+- O(p) check where p = number of path parts
+
+## Why Auto-Compute Ancestors?
+
+When you allow `"json.decoder"`, you need `import json` to work (Python requires loading parent modules first). Rather than forcing users to list all parents, ancestors are computed automatically:
 
 ```python
-# Module-level: allow all from json
-("json", "")
+# User writes:
+allowed_imports = {"json.decoder"}
 
-# Name-specific: only allow json.loads
-("json", "loads")
+# System computes:
+allowed_ancestors = {"json"}
+
+# Result: both 'import json' and 'import json.decoder' work
+# But 'import json.encoder' is blocked (sibling, not ancestor)
 ```
-
-Alternative single-string format couldn't express both use cases cleanly.
-
-## Why Default `import_allow_submodules=True`?
-
-Pragmatic choice: most users expect `import json` to also allow `import json.decoder`. Requiring explicit submodule listing would be tedious.
 
 # Prior art
 [prior-art]: #prior-art

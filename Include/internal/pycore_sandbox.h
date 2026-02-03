@@ -109,7 +109,6 @@ typedef struct {
 
     /* Import restrictions */
     int import_restrict_mode;     /* 0 = off, 1 = enforce allowed_imports (default) */
-    int import_allow_submodules;  /* 1 = allow submodules, 0 = deny (default) */
 
     /* Module access restriction mode.
      * When module_access_restrict_mode=1, only modules in allowed_modules can be accessed.
@@ -166,7 +165,6 @@ typedef struct {
     .allow_unsafe = 0,              \
     .allow_io = 0,                  \
     .import_restrict_mode = 1,      \
-    .import_allow_submodules = 0,   \
     .module_access_restrict_mode = 1, \
     .allow_submodules = 1,          \
     .allow_class_creation = 1,      \
@@ -266,10 +264,18 @@ typedef struct {
      * NULL when no filenames are registered (lazy-initialized). */
     PyObject *registered_filenames;
 
-    /* Import allowlist - Python set of tuples (module_name, import_name).
+    /* Import allowlist - Python set of module path strings.
+     * Entry "X" allows: X itself, all submodules X.*, and parent dependencies.
+     * Example: {"json.decoder"} allows json.decoder, json.decoder.*, and json
      * Only checked when import_restrict_mode=1 and in sandbox scope.
      * NULL or empty set means no imports allowed when mode is active. */
     PyObject *allowed_imports;
+
+    /* Pre-computed ancestors of allowed_imports entries.
+     * Used for O(1) dependency checks. Auto-computed when allowed_imports changes.
+     * Example: if allowed_imports={"json.decoder"}, then allowed_ancestors={"json"}
+     * NULL when allowed_imports is NULL or empty. */
+    PyObject *allowed_ancestors;
 
     /* Allowed modules - Python frozenset of module names (strings).
      * When set (non-NULL), only modules in this set can be accessed in sandbox scope.
@@ -309,6 +315,7 @@ typedef struct {
     .banned_opcodes = {{0}},                \
     .registered_filenames = NULL,           \
     .allowed_imports = NULL,                \
+    .allowed_ancestors = NULL,              \
     .allowed_modules = NULL,                \
     .allowed_metaclasses = NULL,            \
     .mutable_objects = NULL,                \

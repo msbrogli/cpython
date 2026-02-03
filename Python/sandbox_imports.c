@@ -4,10 +4,14 @@
  * When import_restrict_mode is enabled and code is executing in sandbox scope,
  * only imports matching entries in the allowed_imports set are permitted.
  *
- * Allowlist format: set of tuples (module_name, import_name)
- * - ("json", "") allows `import json` and all `from json import X`
- * - ("json", "loads") allows only `from json import loads`
- * - ("json", "*") allows `from json import *`
+ * Allowlist format: set of module path strings
+ * - "json" allows `import json` and all submodules like `import json.decoder`
+ * - "json.decoder" allows `import json.decoder` and `import json` (as dependency)
+ *   but NOT `import json.encoder`
+ *
+ * Check algorithm (O(p) where p = number of parts in module path):
+ * 1. Check each prefix of the module against allowed_imports
+ * 2. If no prefix match, check exact module against allowed_ancestors
  */
 
 #include "Python.h"
@@ -16,216 +20,69 @@
 #include "pycore_sandbox.h"
 #include "pycore_sandbox_impl.h"
 
-/* Pre-allocated empty string for building keys */
-static PyObject *_empty_str = NULL;
+#include <string.h>
 
-/* Ensure the empty string is initialized */
-static PyObject *
-get_empty_str(void)
-{
-    if (_empty_str == NULL) {
-        _empty_str = PyUnicode_InternFromString("");
-        if (_empty_str == NULL) {
-            return NULL;
-        }
-    }
-    return _empty_str;
-}
+/* Forward declaration */
+static int compute_ancestors(_PySandboxState *sandbox);
 
-/* Check if a specific (module, name) pair is allowed.
+/* Check if a module path is allowed.
+ * Algorithm:
+ * 1. Check if module or any of its prefixes is in allowed_imports
+ *    (this handles: exact match and "module is submodule of allowed entry")
+ * 2. Check if module is in allowed_ancestors
+ *    (this handles: "module is a required dependency of an allowed entry")
+ *
  * Returns: 1 if allowed, 0 if not allowed, -1 on error */
 static int
-check_import_allowed(_PySandboxState *sandbox, PyObject *module_name, PyObject *import_name)
+is_module_allowed(_PySandboxState *sandbox, const char *module_str)
 {
     if (sandbox->allowed_imports == NULL) {
         return 0;
     }
 
-    PyObject *key = PyTuple_Pack(2, module_name, import_name);
-    if (key == NULL) {
-        return -1;
-    }
+    size_t module_len = strlen(module_str);
 
-    int result = PySet_Contains(sandbox->allowed_imports, key);
-    Py_DECREF(key);
-    return result;
-}
+    /* Check each prefix of the module (including the full module) */
+    for (size_t i = 0; i <= module_len; i++) {
+        if (i == module_len || module_str[i] == '.') {
+            /* Build prefix string */
+            PyObject *prefix = PyUnicode_FromStringAndSize(module_str, i);
+            if (prefix == NULL) {
+                return -1;
+            }
 
-/* Check if module-wide access is allowed (module, "").
- * This allows both `import module` and all `from module import X` forms.
- * Returns: 1 if allowed, 0 if not allowed, -1 on error */
-static int
-check_module_wide_allowed(_PySandboxState *sandbox, PyObject *module_name)
-{
-    PyObject *empty = get_empty_str();
-    if (empty == NULL) {
-        return -1;
-    }
-    return check_import_allowed(sandbox, module_name, empty);
-}
+            /* Check if prefix is in allowed_imports */
+            int result = PySet_Contains(sandbox->allowed_imports, prefix);
+            Py_DECREF(prefix);
 
-/* Check if any submodule entry exists for a module.
- * This checks if there's ANY:
- *   - ("module", X) where X is non-empty, OR
- *   - ("module.Y", X) for any Y (indicating a nested submodule)
- * Used to allow parent imports when a specific submodule is allowed.
- * Returns: 1 if any entry exists, 0 if none, -1 on error */
-static int
-check_has_any_submodule_entry(_PySandboxState *sandbox, PyObject *module_name)
-{
-    if (sandbox->allowed_imports == NULL) {
-        return 0;
-    }
-
-    if (!sandbox->config.import_allow_submodules) {
-        return 0;
-    }
-
-    const char *module_str = PyUnicode_AsUTF8(module_name);
-    if (module_str == NULL) {
-        return -1;
-    }
-    Py_ssize_t module_len = (Py_ssize_t)strlen(module_str);
-
-    /* Iterate through allowed_imports */
-    PyObject *iter = PyObject_GetIter(sandbox->allowed_imports);
-    if (iter == NULL) {
-        return -1;
-    }
-
-    PyObject *item;
-    while ((item = PyIter_Next(iter)) != NULL) {
-        if (!PyTuple_Check(item) || PyTuple_GET_SIZE(item) != 2) {
-            Py_DECREF(item);
-            continue;
-        }
-
-        PyObject *mod = PyTuple_GET_ITEM(item, 0);
-        PyObject *name = PyTuple_GET_ITEM(item, 1);
-
-        if (!PyUnicode_Check(mod)) {
-            Py_DECREF(item);
-            continue;
-        }
-
-        const char *mod_str = PyUnicode_AsUTF8(mod);
-        if (mod_str == NULL) {
-            Py_DECREF(item);
-            Py_DECREF(iter);
-            return -1;
-        }
-        Py_ssize_t mod_len = (Py_ssize_t)strlen(mod_str);
-
-        /* Check if module matches exactly and name is non-empty */
-        if (mod_len == module_len && memcmp(mod_str, module_str, module_len) == 0) {
-            if (PyUnicode_Check(name) && PyUnicode_GET_LENGTH(name) > 0) {
-                /* Found ("module", "submodule") entry */
-                Py_DECREF(item);
-                Py_DECREF(iter);
-                return 1;
+            if (result < 0) {
+                return -1;
+            }
+            if (result) {
+                return 1;  /* Found: module or ancestor is directly allowed */
             }
         }
-
-        /* Check if mod starts with "module." (nested submodule) */
-        if (mod_len > module_len + 1 &&
-            memcmp(mod_str, module_str, module_len) == 0 &&
-            mod_str[module_len] == '.') {
-            /* Found ("module.something", X) entry */
-            Py_DECREF(item);
-            Py_DECREF(iter);
-            return 1;
-        }
-
-        Py_DECREF(item);
-    }
-    Py_DECREF(iter);
-
-    if (PyErr_Occurred()) {
-        return -1;
     }
 
-    return 0;
-}
-
-/* Check if any ancestor allows this submodule import.
- * For "a.b.c", checks in order:
- *   ("a.b", "c"), ("a.b", ""), ("a", "b"), ("a", "")
- * Returns: 1 if any ancestor allowed, 0 if none allowed, -1 on error */
-static int
-check_submodule_allowed(_PySandboxState *sandbox, PyObject *abs_name)
-{
-    if (!sandbox->config.import_allow_submodules) {
-        return 0;
-    }
-
-    const char *name_str = PyUnicode_AsUTF8(abs_name);
-    if (name_str == NULL) {
-        return -1;
-    }
-
-    Py_ssize_t name_len = (Py_ssize_t)strlen(name_str);
-
-    /* Find the last dot - if none, not a submodule */
-    Py_ssize_t dot_pos = name_len - 1;
-    while (dot_pos >= 0 && name_str[dot_pos] != '.') {
-        dot_pos--;
-    }
-    if (dot_pos < 0) {
-        return 0;
-    }
-
-    /* Walk up the module hierarchy checking each level */
-    while (dot_pos >= 0) {
-        Py_ssize_t parent_len = dot_pos;
-        const char *child_start = name_str + dot_pos + 1;
-
-        /* Find end of child component (next dot or end of string) */
-        const char *child_end = strchr(child_start, '.');
-        Py_ssize_t child_len = child_end ? (child_end - child_start) : (Py_ssize_t)strlen(child_start);
-
-        PyObject *parent_name = PyUnicode_FromStringAndSize(name_str, parent_len);
-        if (parent_name == NULL) {
+    /* Check if module is a required dependency (in allowed_ancestors) */
+    if (sandbox->allowed_ancestors != NULL) {
+        PyObject *module_obj = PyUnicode_FromString(module_str);
+        if (module_obj == NULL) {
             return -1;
         }
 
-        PyObject *child_name = PyUnicode_FromStringAndSize(child_start, child_len);
-        if (child_name == NULL) {
-            Py_DECREF(parent_name);
-            return -1;
-        }
-
-        /* Check ("parent", "child") - specific submodule access */
-        int result = check_import_allowed(sandbox, parent_name, child_name);
-        Py_DECREF(child_name);
-
-        if (result < 0) {
-            Py_DECREF(parent_name);
-            return -1;
-        }
-        if (result) {
-            Py_DECREF(parent_name);
-            return 1;  /* Specific submodule access allowed */
-        }
-
-        /* Check ("parent", "") - module-wide access */
-        result = check_module_wide_allowed(sandbox, parent_name);
-        Py_DECREF(parent_name);
+        int result = PySet_Contains(sandbox->allowed_ancestors, module_obj);
+        Py_DECREF(module_obj);
 
         if (result < 0) {
             return -1;
         }
         if (result) {
-            return 1;  /* Module-wide access allowed */
-        }
-
-        /* Move to next ancestor: find previous dot */
-        dot_pos--;
-        while (dot_pos >= 0 && name_str[dot_pos] != '.') {
-            dot_pos--;
+            return 1;  /* Module is a required dependency */
         }
     }
 
-    return 0;  /* No ancestor allowed */
+    return 0;  /* Not allowed */
 }
 
 /* Main import check function.
@@ -271,84 +128,107 @@ _PySandbox_CheckImport(PyObject *abs_name, PyObject *fromlist)
         goto blocked;
     }
 
-    int allowed;
-
-    /* For bare import (fromlist is NULL or empty):
-     * Check ("module", "") */
-    if (fromlist == NULL || fromlist == Py_None ||
-        (PyTuple_Check(fromlist) && PyTuple_GET_SIZE(fromlist) == 0)) {
-
-        /* Check exact module-wide match */
-        allowed = check_module_wide_allowed(sandbox, abs_name);
-        if (allowed < 0) {
-            return -1;
-        }
-        if (allowed) {
-            return 0;
-        }
-
-        /* Check submodule allowance */
-        allowed = check_submodule_allowed(sandbox, abs_name);
-        if (allowed < 0) {
-            return -1;
-        }
-        if (allowed) {
-            return 0;
-        }
-
-        /* Check if this module has any allowed submodule entries.
-         * This allows importing parent modules as dependencies, e.g.,
-         * ("json", "decoder") allows `import json` as part of `import json.decoder` */
-        allowed = check_has_any_submodule_entry(sandbox, abs_name);
-        if (allowed < 0) {
-            return -1;
-        }
-        if (allowed) {
-            return 0;
-        }
-
-        goto blocked;
-    }
-
-    /* For "from X import a, b, c":
-     * First check if ("module", "") allows everything */
-    allowed = check_module_wide_allowed(sandbox, abs_name);
-    if (allowed < 0) {
+    const char *abs_str = PyUnicode_AsUTF8(abs_name);
+    if (abs_str == NULL) {
         return -1;
     }
-    if (allowed) {
-        return 0;  /* Module-wide allow covers all from imports */
-    }
 
-    /* Check submodule allowance (for from a.b import c) */
-    allowed = check_submodule_allowed(sandbox, abs_name);
-    if (allowed < 0) {
+    /* Check if base module is allowed */
+    int base_allowed = is_module_allowed(sandbox, abs_str);
+    if (base_allowed < 0) {
         return -1;
     }
-    if (allowed) {
-        return 0;  /* Ancestor module allows this submodule */
-    }
 
-    /* Check each item in fromlist */
-    if (!PyTuple_Check(fromlist)) {
-        /* Unexpected fromlist type, be conservative and block */
-        goto blocked;
-    }
+    /* For "from X import a, b, c", we need to check each potential submodule.
+     * Even if X is allowed (e.g., as an ancestor), we must verify that each
+     * X.item is also allowed, since items might be submodules that bypass
+     * the import check (e.g., 'from json import encoder' when only
+     * 'json.decoder' is whitelisted should block json.encoder).
+     *
+     * However, items could also be functions/classes (e.g., 'from json import loads'),
+     * so we only block if X.item looks like it would be blocked as a module import
+     * AND the item appears to be a submodule (has a corresponding entry or prefix). */
+    if (fromlist != NULL && fromlist != Py_None && PyTuple_Check(fromlist)) {
+        Py_ssize_t n = PyTuple_GET_SIZE(fromlist);
+        for (Py_ssize_t i = 0; i < n; i++) {
+            PyObject *item = PyTuple_GET_ITEM(fromlist, i);
+            if (!PyUnicode_Check(item)) {
+                continue;
+            }
 
-    Py_ssize_t n = PyTuple_GET_SIZE(fromlist);
-    for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *item = PyTuple_GET_ITEM(fromlist, i);
+            /* Skip wildcard imports - they import everything from __all__ */
+            const char *item_str = PyUnicode_AsUTF8(item);
+            if (item_str == NULL) {
+                return -1;
+            }
+            if (strcmp(item_str, "*") == 0) {
+                continue;
+            }
 
-        allowed = check_import_allowed(sandbox, abs_name, item);
-        if (allowed < 0) {
-            return -1;
+            /* Build full path: abs_name.item */
+            PyObject *full_path = PyUnicode_FromFormat("%s.%U", abs_str, item);
+            if (full_path == NULL) {
+                return -1;
+            }
+
+            const char *full_str = PyUnicode_AsUTF8(full_path);
+            if (full_str == NULL) {
+                Py_DECREF(full_path);
+                return -1;
+            }
+
+            /* Check if this full path is allowed.
+             * If not allowed, this from-import should be blocked. */
+            int item_allowed = is_module_allowed(sandbox, full_str);
+
+            if (item_allowed < 0) {
+                Py_DECREF(full_path);
+                return -1;
+            }
+
+            /* If item is not allowed and base was allowed only as ancestor,
+             * block the import. This prevents accessing sibling submodules
+             * like 'from json import encoder' when only 'json.decoder' is allowed.
+             * Note: If base is directly allowed (e.g., {"json"} in allowlist),
+             * then all submodules are implicitly allowed. */
+            if (!item_allowed) {
+                /* Check if base is directly in allowed_imports (not just as ancestor) */
+                PyObject *base_obj = PyUnicode_FromString(abs_str);
+                if (base_obj == NULL) {
+                    Py_DECREF(full_path);
+                    return -1;
+                }
+                int base_direct = PySet_Contains(sandbox->allowed_imports, base_obj);
+                Py_DECREF(base_obj);
+
+                if (base_direct < 0) {
+                    Py_DECREF(full_path);
+                    return -1;
+                }
+
+                /* If base is not directly allowed, block this submodule access */
+                if (!base_direct) {
+                    sandbox->suppress_checks = 1;
+                    PyErr_Format(PyExc_SandboxImportError,
+                                 "Import of '%U' is not allowed in sandbox scope",
+                                 full_path);
+                    sandbox->suppress_checks = 0;
+                    Py_DECREF(full_path);
+                    return -1;
+                }
+            }
+
+            Py_DECREF(full_path);
         }
-        if (!allowed) {
-            goto blocked;
-        }
     }
 
-    return 0;  /* All items in fromlist are allowed */
+    /* If we get here, either:
+     * 1. Base module is allowed (as direct entry or prefix of something allowed)
+     * 2. All fromlist items are allowed
+     * Either way, allow the import. */
+    if (base_allowed) {
+        return 0;
+    }
 
 blocked:
     sandbox->suppress_checks = 1;
@@ -358,10 +238,91 @@ blocked:
     return -1;
 }
 
+/* Compute allowed_ancestors from allowed_imports.
+ * For each entry in allowed_imports, add all its parent prefixes to allowed_ancestors.
+ * Example: "json.decoder.JSONDecoder" adds "json" and "json.decoder" to ancestors.
+ * Returns: 0 on success, -1 on error */
+static int
+compute_ancestors(_PySandboxState *sandbox)
+{
+    /* Clear existing ancestors */
+    Py_CLEAR(sandbox->allowed_ancestors);
+
+    if (sandbox->allowed_imports == NULL) {
+        return 0;
+    }
+
+    /* Create new ancestors set */
+    PyObject *ancestors = PySet_New(NULL);
+    if (ancestors == NULL) {
+        return -1;
+    }
+
+    /* Iterate through allowed_imports */
+    PyObject *iter = PyObject_GetIter(sandbox->allowed_imports);
+    if (iter == NULL) {
+        Py_DECREF(ancestors);
+        return -1;
+    }
+
+    PyObject *entry;
+    while ((entry = PyIter_Next(iter)) != NULL) {
+        const char *entry_str = PyUnicode_AsUTF8(entry);
+        if (entry_str == NULL) {
+            Py_DECREF(entry);
+            Py_DECREF(iter);
+            Py_DECREF(ancestors);
+            return -1;
+        }
+
+        /* Find each '.' and add the prefix as an ancestor */
+        size_t len = strlen(entry_str);
+        for (size_t i = 0; i < len; i++) {
+            if (entry_str[i] == '.') {
+                PyObject *prefix = PyUnicode_FromStringAndSize(entry_str, i);
+                if (prefix == NULL) {
+                    Py_DECREF(entry);
+                    Py_DECREF(iter);
+                    Py_DECREF(ancestors);
+                    return -1;
+                }
+
+                int result = PySet_Add(ancestors, prefix);
+                Py_DECREF(prefix);
+
+                if (result < 0) {
+                    Py_DECREF(entry);
+                    Py_DECREF(iter);
+                    Py_DECREF(ancestors);
+                    return -1;
+                }
+            }
+        }
+
+        Py_DECREF(entry);
+    }
+    Py_DECREF(iter);
+
+    if (PyErr_Occurred()) {
+        Py_DECREF(ancestors);
+        return -1;
+    }
+
+    /* Store the ancestors (or NULL if empty) */
+    if (PySet_GET_SIZE(ancestors) == 0) {
+        Py_DECREF(ancestors);
+        sandbox->allowed_ancestors = NULL;
+    } else {
+        sandbox->allowed_ancestors = ancestors;
+    }
+
+    return 0;
+}
+
 /* Set the import allowlist.
- * Accepts: set, frozenset, or any iterable of (module, name) tuples.
+ * Accepts: set, frozenset, or any iterable of module path strings.
  * Passing None clears the allowlist.
- * Internally stores a frozenset for O(1) getter and immutability. */
+ * Internally stores a frozenset for O(1) lookup and computes ancestors. */
 int
 PySandbox_SetAllowedImports(PyObject *modules)
 {
@@ -381,6 +342,7 @@ PySandbox_SetAllowedImports(PyObject *modules)
     /* None clears the allowlist */
     if (modules == Py_None) {
         Py_CLEAR(sandbox->allowed_imports);
+        Py_CLEAR(sandbox->allowed_ancestors);
         return 0;
     }
 
@@ -390,7 +352,7 @@ PySandbox_SetAllowedImports(PyObject *modules)
         return -1;
     }
 
-    /* Validate all items are 2-tuples of strings */
+    /* Validate all items are strings */
     PyObject *iter = PyObject_GetIter(temp_set);
     if (iter == NULL) {
         Py_DECREF(temp_set);
@@ -399,27 +361,14 @@ PySandbox_SetAllowedImports(PyObject *modules)
 
     PyObject *item;
     while ((item = PyIter_Next(iter)) != NULL) {
-        if (!PyTuple_Check(item) || PyTuple_GET_SIZE(item) != 2) {
+        if (!PyUnicode_Check(item)) {
             PyErr_SetString(PyExc_TypeError,
-                "allowed_imports must contain 2-tuples of (module_name, import_name)");
+                "allowed_imports must contain module path strings");
             Py_DECREF(item);
             Py_DECREF(iter);
             Py_DECREF(temp_set);
             return -1;
         }
-
-        PyObject *mod = PyTuple_GET_ITEM(item, 0);
-        PyObject *name = PyTuple_GET_ITEM(item, 1);
-
-        if (!PyUnicode_Check(mod) || !PyUnicode_Check(name)) {
-            PyErr_SetString(PyExc_TypeError,
-                "allowed_imports tuples must contain strings");
-            Py_DECREF(item);
-            Py_DECREF(iter);
-            Py_DECREF(temp_set);
-            return -1;
-        }
-
         Py_DECREF(item);
     }
     Py_DECREF(iter);
@@ -429,7 +378,7 @@ PySandbox_SetAllowedImports(PyObject *modules)
         return -1;
     }
 
-    /* Convert to frozenset for immutability and O(1) getter */
+    /* Convert to frozenset for immutability and O(1) lookup */
     PyObject *new_frozenset = PyFrozenSet_New(temp_set);
     Py_DECREF(temp_set);
     if (new_frozenset == NULL) {
@@ -439,6 +388,13 @@ PySandbox_SetAllowedImports(PyObject *modules)
     /* Replace the old frozenset */
     Py_XDECREF(sandbox->allowed_imports);
     sandbox->allowed_imports = new_frozenset;
+
+    /* Compute ancestors */
+    if (compute_ancestors(sandbox) < 0) {
+        Py_CLEAR(sandbox->allowed_imports);
+        return -1;
+    }
+
     return 0;
 }
 

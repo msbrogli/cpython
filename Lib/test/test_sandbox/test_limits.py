@@ -61,7 +61,7 @@ class SandboxLimitsTests(unittest.TestCase):
             'allow_float', 'allow_complex', 'allow_dunder_access',
             'allow_class_creation', 'allow_magic_methods', 'allow_metaclasses',
             'count_iterations_as_operations', 'allow_unsafe', 'allow_io',
-            'import_restrict_mode', 'import_allow_submodules',
+            'import_restrict_mode',
             'module_access_restrict_mode', 'allow_submodules',
         }
         self.assertEqual(set(limits.keys()), expected_keys)
@@ -882,18 +882,6 @@ class ConfigFieldsTests(unittest.TestCase):
         config = sys.sandbox.get_config()
         self.assertTrue(config['import_restrict_mode'])
 
-    def test_import_allow_submodules_in_config(self):
-        """import_allow_submodules should be in get_config and settable via set_config."""
-        # Set to True
-        sys.sandbox.set_config(import_allow_submodules=True)
-        config = sys.sandbox.get_config()
-        self.assertTrue(config['import_allow_submodules'])
-
-        # Set to False
-        sys.sandbox.set_config(import_allow_submodules=False)
-        config = sys.sandbox.get_config()
-        self.assertFalse(config['import_allow_submodules'])
-
     def test_module_access_restrict_mode_in_config(self):
         """module_access_restrict_mode should be in get_config and settable via set_config."""
         # Set to False
@@ -952,7 +940,7 @@ class ConfigFieldsTests(unittest.TestCase):
             'allow_class_creation', 'allow_magic_methods', 'allow_metaclasses',
             'count_iterations_as_operations', 'allow_unsafe', 'allow_io',
             # Import restrictions
-            'import_restrict_mode', 'import_allow_submodules',
+            'import_restrict_mode',
             'module_access_restrict_mode', 'allow_submodules',
         }
         self.assertEqual(set(config.keys()), expected_keys)

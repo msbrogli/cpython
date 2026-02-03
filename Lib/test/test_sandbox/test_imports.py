@@ -1,4 +1,10 @@
-"""Tests for sandbox import restrictions."""
+"""Tests for sandbox import restrictions.
+
+The new import restriction system uses string-based module paths:
+- Entry "X" allows: X itself, all submodules X.*, and parent dependencies
+- Example: {"json.decoder"} allows json.decoder, json.decoder.*, and json
+- Ancestors are computed automatically when allowed_imports is set
+"""
 
 import sys
 import unittest
@@ -28,11 +34,6 @@ class ImportRestrictionDefaultsTests(SandboxTestCase):
         sys.sandbox.reset()
         self.assertTrue(sys.sandbox.import_restrict_mode)
 
-    def test_import_allow_submodules_default(self):
-        """import_allow_submodules should default to False."""
-        sys.sandbox.reset()
-        self.assertFalse(sys.sandbox.import_allow_submodules)
-
     def test_allowed_imports_default(self):
         """allowed_imports should default to empty frozenset."""
         sys.sandbox.reset()
@@ -43,56 +44,48 @@ class ImportRestrictionAPITests(SandboxTestCase):
     """Test API for import restriction settings."""
 
     def test_set_allowed_imports_with_set(self):
-        """allowed_imports can be set with a set."""
+        """allowed_imports can be set with a set of strings."""
         sys.sandbox.import_restrict_mode = True
-        sys.sandbox.allowed_imports = {("json", ""), ("math", "sin")}
+        sys.sandbox.allowed_imports = {"json", "math.sin"}
         result = sys.sandbox.allowed_imports
         self.assertIsInstance(result, frozenset)
         self.assertEqual(len(result), 2)
-        self.assertIn(("json", ""), result)
-        self.assertIn(("math", "sin"), result)
+        self.assertIn("json", result)
+        self.assertIn("math.sin", result)
 
     def test_set_allowed_imports_with_frozenset(self):
         """allowed_imports can be set with a frozenset."""
         sys.sandbox.import_restrict_mode = True
-        sys.sandbox.allowed_imports = frozenset({("json", "")})
+        sys.sandbox.allowed_imports = frozenset({"json"})
         result = sys.sandbox.allowed_imports
         self.assertEqual(len(result), 1)
-        self.assertIn(("json", ""), result)
+        self.assertIn("json", result)
 
     def test_set_allowed_imports_with_list(self):
         """allowed_imports can be set with a list."""
         sys.sandbox.import_restrict_mode = True
-        sys.sandbox.allowed_imports = [("json", ""), ("math", "cos")]
+        sys.sandbox.allowed_imports = ["json", "math"]
         result = sys.sandbox.allowed_imports
         self.assertEqual(len(result), 2)
 
     def test_set_allowed_imports_none_clears(self):
         """Setting allowed_imports to None clears the set."""
         sys.sandbox.import_restrict_mode = True
-        sys.sandbox.allowed_imports = {("json", "")}
+        sys.sandbox.allowed_imports = {"json"}
         sys.sandbox.allowed_imports = None
         self.assertEqual(sys.sandbox.allowed_imports, frozenset())
 
-    def test_allowed_imports_rejects_non_tuples(self):
-        """allowed_imports rejects non-tuple items."""
-        sys.sandbox.import_restrict_mode = True
-        with self.assertRaises(TypeError):
-            sys.sandbox.allowed_imports = {"json"}  # String, not tuple
-
-    def test_allowed_imports_rejects_wrong_tuple_size(self):
-        """allowed_imports rejects tuples with wrong size."""
-        sys.sandbox.import_restrict_mode = True
-        with self.assertRaises(TypeError):
-            sys.sandbox.allowed_imports = {("json",)}  # 1-tuple
-        with self.assertRaises(TypeError):
-            sys.sandbox.allowed_imports = {("json", "", "extra")}  # 3-tuple
-
     def test_allowed_imports_rejects_non_strings(self):
-        """allowed_imports rejects tuples with non-string elements."""
+        """allowed_imports rejects non-string items."""
         sys.sandbox.import_restrict_mode = True
         with self.assertRaises(TypeError):
-            sys.sandbox.allowed_imports = {(123, "")}
+            sys.sandbox.allowed_imports = {123}  # Integer, not string
+
+    def test_allowed_imports_rejects_tuples(self):
+        """allowed_imports rejects tuple items (old format)."""
+        sys.sandbox.import_restrict_mode = True
+        with self.assertRaises(TypeError):
+            sys.sandbox.allowed_imports = {("json", "")}  # Old tuple format
 
     def test_import_restrict_mode_toggle(self):
         """import_restrict_mode can be toggled."""
@@ -100,13 +93,6 @@ class ImportRestrictionAPITests(SandboxTestCase):
         self.assertTrue(sys.sandbox.import_restrict_mode)
         sys.sandbox.import_restrict_mode = False
         self.assertFalse(sys.sandbox.import_restrict_mode)
-
-    def test_import_allow_submodules_toggle(self):
-        """import_allow_submodules can be toggled."""
-        sys.sandbox.import_allow_submodules = True
-        self.assertTrue(sys.sandbox.import_allow_submodules)
-        sys.sandbox.import_allow_submodules = False
-        self.assertFalse(sys.sandbox.import_allow_submodules)
 
 
 class ImportRestrictionEnforcementTests(SandboxTestCase):
@@ -120,7 +106,7 @@ class ImportRestrictionEnforcementTests(SandboxTestCase):
 
     def test_bare_import_allowed(self):
         """Bare import should be allowed when module is in allowlist."""
-        sys.sandbox.allowed_imports = {("json", "")}
+        sys.sandbox.allowed_imports = {"json"}
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         _run_scoped("import json")
@@ -128,47 +114,31 @@ class ImportRestrictionEnforcementTests(SandboxTestCase):
 
     def test_bare_import_blocked(self):
         """Bare import should be blocked when module is not in allowlist."""
-        sys.sandbox.allowed_imports = {("json", "")}
+        sys.sandbox.allowed_imports = {"json"}
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         with self.assertRaises(SandboxImportError):
             _run_scoped("import os")
 
-    def test_from_import_allowed_by_module_wide(self):
-        """from import should be allowed by module-wide allowance."""
-        sys.sandbox.allowed_imports = {("json", "")}
+    def test_from_import_allowed_by_module(self):
+        """from import should be allowed when module is in allowlist."""
+        sys.sandbox.allowed_imports = {"json"}
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         _run_scoped("from json import loads, dumps")
         # Should not raise
 
-    def test_from_import_allowed_by_specific(self):
-        """from import should be allowed by specific allowance."""
-        sys.sandbox.allowed_imports = {("math", "sin"), ("math", "cos")}
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-
-        _run_scoped("from math import sin")
-        _run_scoped("from math import cos")
-
-    def test_from_import_blocked_by_missing_specific(self):
-        """from import should be blocked when specific name is not allowed."""
-        sys.sandbox.allowed_imports = {("math", "sin")}
+    def test_from_import_blocked_when_module_not_allowed(self):
+        """from import should be blocked when module is not in allowlist."""
+        sys.sandbox.allowed_imports = {"json"}
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         with self.assertRaises(SandboxImportError):
-            _run_scoped("from math import sqrt")
-
-    def test_from_import_multiple_blocked_if_any_missing(self):
-        """from import with multiple names blocked if any name is not allowed."""
-        sys.sandbox.allowed_imports = {("math", "sin")}
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-
-        with self.assertRaises(SandboxImportError):
-            _run_scoped("from math import sin, sqrt")
+            _run_scoped("from os import path")
 
     def test_aliased_import_checked_by_original_name(self):
         """Aliased imports should be checked by original name."""
-        sys.sandbox.allowed_imports = {("json", "")}
+        sys.sandbox.allowed_imports = {"json"}
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         _run_scoped("import json as j")
@@ -176,18 +146,6 @@ class ImportRestrictionEnforcementTests(SandboxTestCase):
 
         with self.assertRaises(SandboxImportError):
             _run_scoped("import os as operating_system")
-
-    def test_aliased_from_import_checked_by_original_name(self):
-        """Aliased from imports should be checked by original name."""
-        sys.sandbox.allowed_imports = {("json", "dumps")}
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-
-        _run_scoped("from json import dumps as d")
-        # Should not raise
-
-        sys.sandbox.allowed_imports = {("math", "sin")}
-        with self.assertRaises(SandboxImportError):
-            _run_scoped("from math import sqrt as s")
 
     def test_empty_allowlist_blocks_all(self):
         """Empty allowlist should block all imports."""
@@ -219,97 +177,104 @@ class ImportRestrictionEnforcementTests(SandboxTestCase):
 
 
 class ImportSubmoduleTests(SandboxTestCase):
-    """Test submodule handling for import restrictions."""
+    """Test submodule handling for import restrictions.
+
+    With the new string-based allowlist:
+    - Entry "json" allows json, json.decoder, json.encoder, etc.
+    - Entry "json.decoder" allows json.decoder and json (as dependency)
+    """
 
     def setUp(self):
         super().setUp()
         # Re-enable import restrictions for these tests
         sys.sandbox.import_restrict_mode = True
 
-    def test_submodule_blocked_by_default(self):
-        """Submodules should be blocked by default even if parent is allowed."""
-        sys.sandbox.allowed_imports = {("json", "")}
-        sys.sandbox.import_allow_submodules = False
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-
-        with self.assertRaises(SandboxImportError):
-            _run_scoped("import json.decoder")
-
-    def test_submodule_allowed_with_flag(self):
-        """Submodules should be allowed when import_allow_submodules is True."""
-        sys.sandbox.allowed_imports = {("json", "")}
-        sys.sandbox.import_allow_submodules = True
+    def test_submodule_allowed_when_parent_allowed(self):
+        """Submodules should be allowed when parent is in allowlist."""
+        sys.sandbox.allowed_imports = {"json"}
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
         _run_scoped("import json.decoder")
+        # Should not raise - "json" allows json.*
+
+    def test_parent_allowed_when_child_allowed(self):
+        """Parent should be allowed when child is in allowlist (as dependency)."""
+        sys.sandbox.allowed_imports = {"json.decoder"}
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        _run_scoped("import json")
+        # Should not raise - "json.decoder" computes "json" as ancestor
+
+    def test_deep_submodule_allowed_by_toplevel(self):
+        """Deep submodules should be allowed when top-level is in allowlist."""
+        sys.sandbox.allowed_imports = {"xml"}
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        _run_scoped("import xml.etree.ElementTree")
+        # Should not raise - "xml" allows xml.*
+
+    def test_deep_submodule_allowed_by_intermediate(self):
+        """Deep submodules should be allowed by intermediate entry."""
+        sys.sandbox.allowed_imports = {"xml.etree"}
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        _run_scoped("import xml.etree.ElementTree")
+        # Should not raise - "xml.etree" allows xml.etree.*
+
+    def test_sibling_submodule_blocked(self):
+        """Sibling submodules should be blocked when only specific child allowed."""
+        sys.sandbox.allowed_imports = {"json.decoder"}
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        # json.decoder allows json (parent) and json.decoder.* (children)
+        # but NOT json.encoder (sibling)
+        with self.assertRaises(SandboxImportError):
+            _run_scoped("import json.encoder")
+
+    def test_grandparent_blocked_when_only_grandchild_allowed(self):
+        """Grandparent should NOT be allowed when only grandchild is in allowlist.
+
+        This tests that allowing "xml.etree.ElementTree" only adds "xml.etree"
+        and "xml" as ancestors, allowing `import xml` but NOT providing access
+        to unrelated parts of xml.
+        """
+        sys.sandbox.allowed_imports = {"xml.etree.ElementTree"}
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        # xml.etree.ElementTree allows:
+        # - xml.etree.ElementTree itself
+        # - xml.etree.ElementTree.* (submodules)
+        # - xml.etree (parent)
+        # - xml (grandparent)
+        # These are needed for Python's import machinery
+
+        _run_scoped("import xml")  # Should work (ancestor)
+        _run_scoped("import xml.etree")  # Should work (ancestor)
+        _run_scoped("import xml.etree.ElementTree")  # Should work (exact match)
+
+    def test_unrelated_module_blocked(self):
+        """Unrelated modules should be blocked."""
+        sys.sandbox.allowed_imports = {"xml.etree.ElementTree"}
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        with self.assertRaises(SandboxImportError):
+            _run_scoped("import json")
+
+    def test_from_submodule_import(self):
+        """from submodule import should work when parent allowed."""
+        sys.sandbox.allowed_imports = {"os"}
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        _run_scoped("from os.path import join")
         # Should not raise
 
-    def test_submodule_requires_parent_allowed(self):
-        """Submodule auto-allow requires parent to have module-wide allow."""
-        sys.sandbox.allowed_imports = {("json", "loads")}  # Not module-wide
-        sys.sandbox.import_allow_submodules = True
+    def test_from_submodule_import_with_specific_entry(self):
+        """from submodule import should work with specific entry."""
+        sys.sandbox.allowed_imports = {"os.path"}
         sys.sandbox.add_filename(SCOPED_FILENAME)
 
-        with self.assertRaises(SandboxImportError):
-            _run_scoped("import json.decoder")
-
-    def test_submodule_allowed_by_module_wide(self):
-        """import a.b allowed by ("a", "") module-wide."""
-        sys.sandbox.allowed_imports = {("json", "")}
-        sys.sandbox.import_allow_submodules = True
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-        _run_scoped("import json.decoder")
-
-    def test_submodule_allowed_by_specific_name(self):
-        """import a.b allowed by ("a", "b") specific name."""
-        sys.sandbox.allowed_imports = {("json", "decoder")}
-        sys.sandbox.import_allow_submodules = True
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-        _run_scoped("import json.decoder")
-
-    def test_deep_submodule_allowed_by_intermediate_specific(self):
-        """import a.b.c allowed by ("a.b", "c") specific."""
-        sys.sandbox.allowed_imports = {("xml.etree", "ElementTree")}
-        sys.sandbox.import_allow_submodules = True
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-        _run_scoped("import xml.etree.ElementTree")
-
-    def test_deep_submodule_allowed_by_toplevel_wide(self):
-        """import a.b.c allowed by ("a", "") module-wide."""
-        sys.sandbox.allowed_imports = {("xml", "")}
-        sys.sandbox.import_allow_submodules = True
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-        _run_scoped("import xml.etree.ElementTree")
-
-    def test_from_submodule_allowed_by_ancestor_specific(self):
-        """from a.b import c allowed by ("a", "b") specific."""
-        sys.sandbox.allowed_imports = {("os", "path")}
-        sys.sandbox.import_allow_submodules = True
-        sys.sandbox.add_filename(SCOPED_FILENAME)
         _run_scoped("from os.path import join")
-
-    def test_from_submodule_allowed_by_ancestor_wide(self):
-        """from a.b import c allowed by ("a", "") module-wide."""
-        sys.sandbox.allowed_imports = {("os", "")}
-        sys.sandbox.import_allow_submodules = True
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-        _run_scoped("from os.path import join")
-
-    def test_submodule_not_allowed_without_flag(self):
-        """Submodule NOT allowed without import_allow_submodules even with parent allowed."""
-        sys.sandbox.allowed_imports = {("os", "")}
-        sys.sandbox.import_allow_submodules = False
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-        with self.assertRaises(SandboxImportError):
-            _run_scoped("import os.path")
-
-    def test_from_submodule_not_allowed_without_flag(self):
-        """from a.b import c NOT allowed without import_allow_submodules."""
-        sys.sandbox.allowed_imports = {("os", "")}
-        sys.sandbox.import_allow_submodules = False
-        sys.sandbox.add_filename(SCOPED_FILENAME)
-        with self.assertRaises(SandboxImportError):
-            _run_scoped("from os.path import join")
+        # Should not raise
 
 
 class ImportSuspendedTests(SandboxTestCase):

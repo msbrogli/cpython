@@ -1323,25 +1323,46 @@ eval_frame_handle_pending(PyThreadState *tstate)
 #endif
 
 
+/* Branch prediction hints for sandbox checks (matches obmalloc.c pattern) */
+#if defined(__GNUC__) && (__GNUC__ > 2) && defined(__OPTIMIZE__)
+#  define _PY_SANDBOX_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#  define _PY_SANDBOX_LIKELY(x)   __builtin_expect(!!(x), 1)
+#else
+#  define _PY_SANDBOX_UNLIKELY(x) (x)
+#  define _PY_SANDBOX_LIKELY(x)   (x)
+#endif
+
 /* Inline sandbox opcode restriction check for DISPATCH().
  * Returns 0 if allowed, -1 if banned (error already set).
- * Fast path: single branch when opcode_restrict_mode == 0. */
+ * Fast path: check enabled flag first (sandbox usually disabled). */
 static inline int
 _PySandbox_CheckOpcodeDispatch(int opcode, PyInterpreterState *interp)
 {
     _PySandboxState *sandbox = &interp->sandbox;
-    /* Fast exit: mode not active (common case, single branch) */
-    if (!sandbox->opcode_restrict_mode) {
+
+    /* Fast exit: sandbox disabled (most common case) */
+    if (_PY_SANDBOX_LIKELY(!sandbox->enabled)) {
         return 0;
     }
-    if (sandbox->suspend_depth || sandbox->suppress_checks) {
+
+    /* Fast exit: opcode restriction mode not active */
+    if (_PY_SANDBOX_LIKELY(!sandbox->opcode_restrict_mode)) {
         return 0;
     }
+
+    /* Fast exit: sandbox suspended or in error handling */
+    if (_PY_SANDBOX_UNLIKELY(sandbox->suspend_depth || sandbox->suppress_checks)) {
+        return 0;
+    }
+
     /* De-optimize specialized opcodes to base form for bitmap check */
     int deopt = _PyOpcode_Deopt[opcode];
-    if (!_PySandbox_OpcodeSet_HAS(&sandbox->banned_opcodes, deopt)) {
+
+    /* Fast exit: opcode not in banned set */
+    if (_PY_SANDBOX_LIKELY(!_PySandbox_OpcodeSet_HAS(&sandbox->banned_opcodes, deopt))) {
         return 0;
     }
+
     /* Slow path: scope check + error */
     return _PySandbox_CheckOpcode(deopt);
 }

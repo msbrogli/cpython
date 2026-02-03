@@ -1829,6 +1829,15 @@ static PyObject *
 sys__getframe_impl(PyObject *module, int depth)
 /*[clinic end generated code: output=d438776c04d59804 input=c1be8a6464b11ee5]*/
 {
+    /* Block frame introspection from sandbox scope to prevent information leakage.
+     * Sandboxed code could walk the call stack via f_back to read f_locals/f_globals
+     * from trusted code frames, exposing credentials, API keys, etc. */
+    if (_PySandbox_IsInScope()) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "sys._getframe() is blocked in sandbox scope");
+        return NULL;
+    }
+
     PyThreadState *tstate = _PyThreadState_GET();
     _PyInterpreterFrame *frame = tstate->cframe->current_frame;
 
@@ -1870,6 +1879,13 @@ static PyObject *
 sys__current_frames_impl(PyObject *module)
 /*[clinic end generated code: output=d2a41ac0a0a3809a input=2a9049c5f5033691]*/
 {
+    /* Block access to all thread frames from sandbox scope to prevent information leakage.
+     * This is even more dangerous than sys._getframe() as it exposes frames from ALL threads. */
+    if (_PySandbox_IsInScope()) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "sys._current_frames() is blocked in sandbox scope");
+        return NULL;
+    }
     return _PyThread_CurrentFrames();
 }
 
@@ -1885,6 +1901,13 @@ static PyObject *
 sys__current_exceptions_impl(PyObject *module)
 /*[clinic end generated code: output=2ccfd838c746f0ba input=0e91818fbf2edc1f]*/
 {
+    /* Block access to exception info from sandbox scope to prevent information leakage.
+     * Exception info can include traceback objects which expose frame information. */
+    if (_PySandbox_IsInScope()) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "sys._current_exceptions() is blocked in sandbox scope");
+        return NULL;
+    }
     return _PyThread_CurrentExceptions();
 }
 

@@ -201,6 +201,14 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
     }
 
     assert(gen->gi_frame_state < FRAME_EXECUTING);
+
+    /* Check iteration limit for sandbox scope.
+     * This ensures generator.send() counts toward max_iterations,
+     * preventing bypass of iteration limits via direct send() calls. */
+    if (_PySandbox_CheckIteration() < 0) {
+        return PYGEN_ERROR;
+    }
+
     /* Push arg onto the frame's value stack */
     result = arg ? arg : Py_None;
     Py_INCREF(result);

@@ -356,6 +356,11 @@ extern int remove_filename_from_set(PyObject *set, PyObject *filename);
 extern void clear_filenames(PyObject *set);
 extern void free_filenames(PyObject **setp);
 
+/* Check if specialization should be disabled for a code object (defined in sandbox_core.c).
+ * Used by _PyCode_Warmup to disable specialization for sandboxed code.
+ * Returns 1 if specialization should be disabled, 0 otherwise. */
+extern int _PySandbox_ShouldDisableSpecialization(PyObject *filename);
+
 #ifdef __cplusplus
 }
 #endif

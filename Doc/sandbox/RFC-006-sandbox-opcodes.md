@@ -324,15 +324,63 @@ SandboxRuntimeError: Opcode 108 is not allowed in sandbox scope
 # Security Considerations
 [security-considerations]: #security-considerations
 
-## Specialized Opcode Mapping (P0 Critical)
+## Specialized Opcode Handling (P0 Critical)
 
 CPython's adaptive interpreter (PEP 659) creates specialized variants of opcodes
 for performance. Each generic opcode (e.g., `LOAD_ATTR`) has multiple specialized
 forms (e.g., `LOAD_ATTR_INSTANCE_VALUE`, `LOAD_ATTR_SLOT`).
 
-**Security Requirement:** Every security check added to a generic opcode MUST also
-be added to ALL its specialized variants, OR specialized opcodes must deoptimize
-when security checks are needed.
+**Security Requirement:** Specialized opcodes skip security checks present in
+generic opcodes. For example, `LOAD_ATTR_INSTANCE_VALUE` bypasses the dunder
+access check in `LOAD_ATTR`.
+
+### Solution: Disable Specialization at Warmup Time
+
+The sandbox disables specialization for sandboxed code by setting `co_warmup = 0`
+when a code object's filename is registered in sandbox scope.
+
+#### How Specialization Works in CPython
+
+1. Code object created → `co_warmup = -8` (QUICKENING_INITIAL_WARMUP_VALUE)
+2. Each execution → `_PyCode_Warmup()` increments counter
+3. After 8 executions → Counter reaches 0 → `_PyCode_Quicken()` called
+4. `_PyCode_Quicken()` converts adaptive opcodes to specialized forms
+
+**Key insight:** `_PyCode_Warmup()` checks `if (code->co_warmup != 0)` before
+incrementing. Setting `co_warmup = 0` permanently disables specialization.
+
+#### Implementation
+
+In `Include/internal/pycore_code.h`, `_PyCode_Warmup()` checks if specialization
+should be disabled for the code object:
+
+```c
+static inline void
+_PyCode_Warmup(PyCodeObject *code)
+{
+    if (code->co_warmup != 0) {
+        /* Skip warmup for sandboxed code - they use generic opcodes with security checks */
+        if (_PySandbox_ShouldDisableSpecialization(code->co_filename)) {
+            code->co_warmup = 0;  /* Permanently disable specialization */
+            return;
+        }
+        code->co_warmup++;
+        if (code->co_warmup == 0) {
+            _PyCode_Quicken(code);
+        }
+    }
+}
+```
+
+The helper function `_PySandbox_ShouldDisableSpecialization()` in `Python/sandbox_core.c`
+returns 1 (disable specialization) when:
+
+1. Sandbox is enforced (`_PySandbox_IsEnforced()` returns true: enabled, not suspended, not suppressed) AND
+2. Security-sensitive settings are active (`allow_dunder_access=0` or `allow_unsafe=0`) OR
+3. The filename is registered in sandbox scope
+
+Note: When sandbox is suspended (via `suspend()`/`resume()`) or suppressed (during error handling),
+specialization is allowed to proceed normally.
 
 ### Affected Opcode Families
 
@@ -353,41 +401,19 @@ when security checks are needed.
 opcodes to their adaptive entry points. The actual specialization functions are
 `_Py_Specialize_*()` in the same file.
 
-### Recommended Mitigation Pattern
+### Why Disable Specialization at Warmup Time
 
-Use the `DEOPT_IF(sandbox_condition, GENERIC_OPCODE)` pattern at the start of each
-specialized opcode to automatically fall back to the protected generic implementation
-when sandbox restrictions are active:
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Option 1:** Add security checks to each specialized opcode | Fine-grained control | Must modify 15+ opcodes, maintenance burden, easy to miss one |
+| **Option 2:** DEOPT_IF in each specialized opcode | Simple pattern | Still 15+ modifications, runtime check on every execution |
+| **Option 3:** Disable specialization at warmup (IMPLEMENTED) | Single point of control, future-proof, no runtime overhead per opcode | Performance penalty for sandboxed code (acceptable trade-off) |
 
-```c
-TARGET(LOAD_ATTR_INSTANCE_VALUE) {
-    assert(cframe.use_tracing == 0);
-    /* Deoptimize if sandbox dunder blocking is active */
-    DEOPT_IF(!tstate->interp->sandbox.config.allow_dunder_access ||
-             !tstate->interp->sandbox.config.allow_unsafe, LOAD_ATTR);
-    // ... existing specialized code (unchanged) ...
-}
-```
-
-This approach:
-- Ensures all security checks in the generic opcode are applied
-- Maintains full performance for non-sandboxed code
-- Provides a simple, auditable pattern (every specialized opcode starts with `DEOPT_IF`)
-- Automatically benefits from any future security fixes to generic opcodes
-
-### Why Deoptimization is Preferred
-
-**Option 1: Add security checks to each specialized opcode**
-- Pros: Fine-grained control
-- Cons: Must modify 15+ opcodes, easy to miss one during future updates, ongoing maintenance burden
-
-**Option 2: Deoptimize when sandbox is active (Recommended)**
-- Pros: Simple one-line addition, leverages existing security checks, easier to audit
-- Cons: Performance penalty when sandbox is active (acceptable trade-off for sandboxed code)
-
-**Option 3: Disable specialization entirely**
-- Pros: Single point of control
-- Cons: Significant performance penalty, hard to implement cleanly
+The implemented approach (Option 3) provides:
+- **Single point of control**: All security is enforced in one location (`_PyCode_Warmup`)
+- **Future-proof**: New specialized opcodes are automatically handled
+- **No per-opcode overhead**: The check happens once at warmup, not on every execution
+- **Audit-friendly**: Easy to verify that sandboxed code uses generic opcodes
 
 # Drawbacks
 [drawbacks]: #drawbacks

@@ -454,6 +454,58 @@ PySandbox_IsSuspended(void)
     return interp->sandbox.suspend_depth > 0;
 }
 
+/* ============ Specialization Control for Sandbox ============ */
+
+/* Check if specialization should be disabled for a code object.
+ * This is used by _PyCode_Warmup to prevent specialized opcodes from
+ * bypassing sandbox security checks.
+ *
+ * Specialization is disabled when:
+ * 1. Sandbox is enforced (enabled, not suspended, not suppressed) AND
+ * 2. (Filename is registered in scope OR security-sensitive settings are active)
+ *
+ * Security-sensitive settings that require generic opcodes:
+ * - allow_dunder_access=False: Generic LOAD_ATTR/STORE_ATTR check dunder access
+ * - allow_unsafe=False: Generic opcodes have unsafe operation checks
+ *
+ * Returns 1 if specialization should be disabled, 0 otherwise.
+ */
+int
+_PySandbox_ShouldDisableSpecialization(PyObject *filename)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return 0;
+    }
+    _PySandboxState *sandbox = &interp->sandbox;
+
+    /* Fast exit if sandbox is not enforced (disabled, suspended, or suppressed) */
+    if (!_PySandbox_IsEnforced(sandbox)) {
+        return 0;
+    }
+
+    /* Check if security-sensitive settings are active that require generic opcodes.
+     * If allow_dunder_access=False or allow_unsafe=False, specialized opcodes
+     * would bypass security checks in the generic opcodes.
+     * In this case, disable specialization for ALL code to be safe. */
+    if (!sandbox->config.allow_dunder_access || !sandbox->config.allow_unsafe) {
+        return 1;
+    }
+
+    /* If filename is explicitly registered in sandbox scope, disable specialization */
+    if (filename != NULL && sandbox->registered_filenames != NULL) {
+        int result = PySet_Contains(sandbox->registered_filenames, filename);
+        if (result > 0) {
+            return 1;
+        }
+        if (result < 0) {
+            PyErr_Clear();
+        }
+    }
+
+    return 0;
+}
+
 /* ============ Reset ============ */
 
 void

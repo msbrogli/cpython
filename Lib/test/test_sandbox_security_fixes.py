@@ -601,10 +601,10 @@ class MetaclassBlockingTest(unittest.TestCase):
     """Test that custom metaclasses are blocked in sandbox."""
 
     def test_custom_metaclass_blocked(self):
-        """Custom metaclasses should be blocked when allow_unsafe=0."""
+        """Custom metaclasses should be blocked when allow_metaclasses=0."""
         code = '''
 import sys
-sys.sandbox.allow_unsafe = 0
+sys.sandbox.allow_metaclasses = 0
 sys.sandbox.allow_dunder_access = 1  # Required for class definitions
 sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
@@ -624,7 +624,7 @@ except SandboxSecurityError:
         """Normal class definitions should work in sandbox."""
         code = '''
 import sys
-sys.sandbox.allow_unsafe = 0
+sys.sandbox.allow_metaclasses = 0
 sys.sandbox.allow_dunder_access = 1  # Required for class definitions
 sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
@@ -641,11 +641,11 @@ else:
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
-    def test_metaclass_allowed_with_allow_unsafe(self):
-        """Custom metaclasses should work when allow_unsafe=1."""
+    def test_metaclass_allowed_with_allow_metaclasses(self):
+        """Custom metaclasses should work when allow_metaclasses=1."""
         code = '''
 import sys
-sys.sandbox.allow_unsafe = 1
+sys.sandbox.allow_metaclasses = 1
 sys.sandbox.allow_dunder_access = 1  # Required for class definitions
 sys.sandbox.enable()
 sys.sandbox.add_filename('<string>')
@@ -970,6 +970,77 @@ except ZeroDivisionError:
         print("FAIL: accessed tb_frame via exc_info")
     except SandboxSecurityError:
         print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+
+class SpecializationDisablingTest(unittest.TestCase):
+    """Test that opcode specialization is disabled for sandboxed code.
+
+    CPython's adaptive interpreter (PEP 659) creates specialized variants of opcodes.
+    These specialized opcodes can bypass security checks in generic opcodes.
+    The sandbox disables specialization by setting co_warmup=0 when security
+    settings require generic opcode checks.
+    """
+
+    def test_dunder_access_uses_generic_opcodes(self):
+        """When allow_dunder_access=0, generic LOAD_ATTR should enforce dunder checks.
+
+        This test verifies that dunder attribute access is blocked even after
+        many executions (which would normally trigger specialization).
+        """
+        code = '''
+import sys
+sys.sandbox.allow_dunder_access = 0
+sys.sandbox.enable()
+sys.sandbox.add_filename('<string>')
+
+class Obj:
+    pass
+
+obj = Obj()
+# Run many times to attempt to trigger specialization
+# Without specialization disabling, LOAD_ATTR_INSTANCE_VALUE would bypass dunder check
+blocked_count = 0
+for _ in range(20):  # More than QUICKENING_WARMUP_DELAY (8)
+    try:
+        _ = obj.__class__
+    except SandboxAttributeError:
+        blocked_count += 1
+
+if blocked_count == 20:
+    print("PASS")
+else:
+    print(f"FAIL: only {blocked_count}/20 attempts blocked")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_specialization_disabled_for_security_settings(self):
+        """Specialization should be disabled when security-sensitive settings are active."""
+        code = '''
+import sys
+sys.sandbox.allow_unsafe = 0
+sys.sandbox.allow_dunder_access = 1
+sys.sandbox.enable()
+sys.sandbox.add_filename('<string>')
+
+# Compile and exec are blocked when allow_unsafe=0
+# This should remain blocked even after many executions
+blocked = True
+for _ in range(20):
+    try:
+        eval("1+1")
+        blocked = False
+        break
+    except SandboxSecurityError:
+        pass
+
+if blocked:
+    print("PASS")
+else:
+    print("FAIL: eval should remain blocked")
 '''
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")

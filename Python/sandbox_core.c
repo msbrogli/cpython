@@ -520,6 +520,7 @@ _PySandbox_Reset(PyInterpreterState *interp)
     Py_CLEAR(sandbox->registered_filenames);
     Py_CLEAR(sandbox->creation_hook.hook_callback);
     Py_CLEAR(sandbox->allowed_imports);
+    Py_CLEAR(sandbox->allowed_ancestors);
     Py_CLEAR(sandbox->allowed_modules);
     Py_CLEAR(sandbox->allowed_metaclasses);
 
@@ -545,6 +546,7 @@ _PySandbox_Reset(PyInterpreterState *interp)
     sandbox->frozen_mode = 0;
     sandbox->auto_mutable = 0;
     sandbox->opcode_restrict_mode = 0;
+    sandbox->allow_specialized_opcodes = 0;
     _PySandbox_OpcodeSet_ZERO(&sandbox->allowed_opcodes);
 
     /* Reset per-thread state and update tracing */

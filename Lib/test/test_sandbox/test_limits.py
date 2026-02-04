@@ -713,6 +713,13 @@ class ResetLimitsTests(unittest.TestCase):
         _run_scoped("_ = [1, 2, 3]")
         sys.sandbox.remove_filename(SCOPED_FILENAME)
 
+        # Set opcode/import modes after scoped code (opcode_restrict_mode
+        # would block opcodes used by the scoped code above)
+        sys.sandbox.opcode_restrict_mode = True
+        sys.sandbox.allow_specialized_opcodes = True
+        sys.sandbox.import_restrict_mode = True
+        sys.sandbox.allowed_imports = {"json.decoder"}
+
         # Reset
         sys.sandbox.reset()
 
@@ -729,6 +736,8 @@ class ResetLimitsTests(unittest.TestCase):
         # Verify modes cleared
         self.assertFalse(sys.sandbox.frozen_mode)
         self.assertFalse(sys.sandbox.auto_mutable)
+        self.assertFalse(sys.sandbox.allow_specialized_opcodes)
+        self.assertEqual(sys.sandbox.allowed_imports, frozenset())
 
     def test_reset_clears_registered_filenames(self):
         """reset() should clear registered_filenames to NULL, not just empty."""
@@ -777,6 +786,43 @@ class ResetLimitsTests(unittest.TestCase):
 
         # Verify allowed_modules is cleared (None)
         self.assertIsNone(sys.sandbox.allowed_modules)
+
+    def test_reset_clears_allow_specialized_opcodes(self):
+        """reset() should clear allow_specialized_opcodes to False."""
+        # Enable opcode restriction mode and specialized opcodes
+        sys.sandbox.opcode_restrict_mode = True
+        sys.sandbox.allow_specialized_opcodes = True
+        self.assertTrue(sys.sandbox.allow_specialized_opcodes)
+
+        # Reset
+        sys.sandbox.reset()
+
+        # Verify allow_specialized_opcodes is cleared
+        self.assertFalse(sys.sandbox.allow_specialized_opcodes)
+
+    def test_reset_clears_allowed_ancestors(self):
+        """reset() should clear allowed_ancestors (internal, derived from allowed_imports).
+
+        Setting allowed_imports with submodule entries causes allowed_ancestors
+        to be computed internally. After reset, allowed_imports should be cleared,
+        and a subsequent set should work correctly (proving ancestors were cleared).
+        """
+        # Set allowed_imports with a submodule entry to trigger ancestor computation
+        sys.sandbox.import_restrict_mode = True
+        sys.sandbox.allowed_imports = {"json.decoder"}
+        self.assertIn("json.decoder", sys.sandbox.allowed_imports)
+
+        # Reset
+        sys.sandbox.reset()
+
+        # Verify allowed_imports is cleared (ancestors are derived from this)
+        self.assertEqual(sys.sandbox.allowed_imports, frozenset())
+
+        # Verify we can set new imports cleanly (ancestors recomputed from scratch)
+        sys.sandbox.import_restrict_mode = True
+        sys.sandbox.allowed_imports = {"xml.etree.ElementTree"}
+        self.assertIn("xml.etree.ElementTree", sys.sandbox.allowed_imports)
+        self.assertNotIn("json.decoder", sys.sandbox.allowed_imports)
 
 
 class OutOfScopeLimitsTests(unittest.TestCase):

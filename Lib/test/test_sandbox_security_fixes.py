@@ -385,6 +385,78 @@ else:
         rc, out, err = run_sandbox_test(code)
         self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
 
+    def test_power_negative_exponent_blocked(self):
+        """Power operator with negative exponent should be blocked when allow_float=0."""
+        code = '''
+import sys
+sys.sandbox.allow_float = 0
+sys.sandbox.enable()
+sys.sandbox.add_filename('<string>')
+a = 2
+b = -1
+try:
+    x = a ** b  # Should raise SandboxTypeError
+    print(f"FAIL: created float {x}")
+except SandboxTypeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_pow_builtin_negative_exponent_blocked(self):
+        """pow() builtin with negative exponent should be blocked when allow_float=0."""
+        code = '''
+import sys
+sys.sandbox.allow_float = 0
+sys.sandbox.enable()
+sys.sandbox.add_filename('<string>')
+try:
+    x = pow(2, -1)  # Should raise SandboxTypeError
+    print(f"FAIL: created float {x}")
+except SandboxTypeError:
+    print("PASS")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_pow_with_modulus_allowed(self):
+        """Three-argument pow() with modulus should work (returns int)."""
+        code = '''
+import sys
+sys.sandbox.allow_float = 0
+sys.sandbox.enable()
+sys.sandbox.add_filename('<string>')
+x = pow(2, 10, 1000)  # Modular exponentiation returns int
+if x == 24:
+    print("PASS")
+else:
+    print(f"FAIL: {x}")
+'''
+        rc, out, err = run_sandbox_test(code)
+        self.assertIn("PASS", out, f"Output: {out}\nStderr: {err}")
+
+    def test_power_operations_blocked(self):
+        """Various power operations creating floats should be blocked."""
+        test_cases = [
+            "10 ** -2",      # Returns 0.01
+            "pow(10, -3)",   # Returns 0.001
+            "2 ** (-1)",     # Parenthesized negative
+        ]
+        for expr in test_cases:
+            code = f'''
+import sys
+sys.sandbox.allow_float = 0
+sys.sandbox.enable()
+sys.sandbox.add_filename('<string>')
+try:
+    x = {expr}
+    print(f"FAIL: {{x}}")
+except SandboxTypeError:
+    print("PASS")
+'''
+            rc, out, err = run_sandbox_test(code)
+            self.assertIn("PASS", out, f"Expression: {expr}\nOutput: {out}\nStderr: {err}")
+
 
 class ComplexTypeBlockingTest(unittest.TestCase):
     """Test that complex creation is blocked when allow_complex=0 (security fix)."""

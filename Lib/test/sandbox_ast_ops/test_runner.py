@@ -92,6 +92,9 @@ def run_test(test_file, generate=False):
         parts = line.split()
         if len(parts) >= 2:
             offset = int(parts[0].rstrip(':'))
+            # Skip code object separator lines (e.g., "0: --- Code: foo")
+            if parts[1] == '---':
+                continue
             # Check if parts[1] == 'L' (line info marker)
             if parts[1] == 'L':
                 # Format: offset: L <line> OPNAME arg
@@ -109,7 +112,10 @@ def run_test(test_file, generate=False):
             from bytecode_extract import OpcodeInfo
             expected_ops.append(OpcodeInfo(offset, opname, arg, None, None, None))
 
-    is_equal, message = compare_bytecode(expected_ops, ops)
+    # Filter out code object separator entries (opname='---') from actual ops
+    filtered_ops = [op for op in ops if op.opname != '---']
+
+    is_equal, message = compare_bytecode(expected_ops, filtered_ops)
 
     return is_equal, message, total_ops
 

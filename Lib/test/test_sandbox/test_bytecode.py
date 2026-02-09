@@ -379,6 +379,37 @@ class ExpressionSandboxCountTests(unittest.TestCase):
         code = _compile_sandboxed("{1, 2}", mode="eval")
         self.assertEqual(_count_sandbox_count(code), 1)
 
+    def test_lambda(self):
+        """Lambda: ``lambda: 1`` -> 1 (creates a function object,
+        consistent with FunctionDef)."""
+        code = _compile_sandboxed("lambda: 1", mode="eval")
+        self.assertEqual(_count_sandbox_count(code), 1)
+
+    def test_listcomp(self):
+        """ListComp: ``[x for x in a]`` -> 1 (creates a list object)."""
+        code = _compile_sandboxed("[x for x in a]", mode="eval")
+        self.assertEqual(_count_sandbox_count(code), 1)
+
+    def test_setcomp(self):
+        """SetComp: ``{x for x in a}`` -> 1 (creates a set object)."""
+        code = _compile_sandboxed("{x for x in a}", mode="eval")
+        self.assertEqual(_count_sandbox_count(code), 1)
+
+    def test_dictcomp(self):
+        """DictComp: ``{x: x for x in a}`` -> 1 (creates a dict object)."""
+        code = _compile_sandboxed("{x: x for x in a}", mode="eval")
+        self.assertEqual(_count_sandbox_count(code), 1)
+
+    def test_generatorexp(self):
+        """GeneratorExp: ``(x for x in a)`` -> 1 (creates a generator object)."""
+        code = _compile_sandboxed("(x for x in a)", mode="eval")
+        self.assertEqual(_count_sandbox_count(code), 1)
+
+    def test_slice(self):
+        """Slice: ``a[1:2]`` -> 2 (1 for Subscript + 1 for Slice)."""
+        code = _compile_sandboxed("a[1:2]", mode="eval")
+        self.assertEqual(_count_sandbox_count(code), 2)
+
 
 # ===================================================================
 # 5. Expressions that should NOT emit
@@ -405,12 +436,6 @@ class ExpressionNoSandboxCountTests(unittest.TestCase):
     def test_namedexpr(self):
         """NamedExpr: ``(x := 1)`` -> 0."""
         code = _compile_sandboxed("(x := 1)", mode="eval")
-        self.assertEqual(_count_sandbox_count(code), 0)
-
-    def test_lambda(self):
-        """Lambda: ``lambda: 1`` -> 0 (top-level code; the lambda body
-        is a separate code object)."""
-        code = _compile_sandboxed("lambda: 1", mode="eval")
         self.assertEqual(_count_sandbox_count(code), 0)
 
     def test_ifexp(self):

@@ -189,6 +189,12 @@ Some nodes don't count as operations:
 | Attribute | Attribute lookup |
 | Subscript | Index lookup |
 | Dict, Set, List, Tuple | Container construction |
+| ListComp | Comprehension creates a list object |
+| SetComp | Comprehension creates a set object |
+| DictComp | Comprehension creates a dict object |
+| GeneratorExp | Creates a generator object |
+| Lambda | Creates a function object (consistent with FunctionDef) |
+| Slice | Creates a PySliceObject |
 
 ### Expressions with `operations_count=0` (EXTRA)
 
@@ -196,13 +202,27 @@ Some nodes don't count as operations:
 |------------|---------------------|
 | Constant | Literal value, no computation |
 | Name | Variable lookup is cheap |
-| Lambda | Definition only, no invocation |
 | IfExp | Branches are handled separately |
-| Comprehensions | Iteration is handled by iterator limits |
 | Yield, YieldFrom, Await | Generator/async protocol |
-| Starred, Slice | Syntax constructs |
+| Starred | Syntax construct |
 | NamedExpr | Assignment target handles counting |
 | FormattedValue, JoinedStr | String parts counted individually |
+
+## Object Creation Protection
+
+The `max_operations` limit inherently protects against excessive object creation because every
+construction that produces a runtime object counts as an operation:
+
+- **Container construction**: `Dict`, `Set`, `List`, `Tuple` each count as 1 operation
+- **Comprehensions**: `ListComp`, `SetComp`, `DictComp` each count as 1 operation (in addition to iterator limits on their loops)
+- **Generator creation**: `GeneratorExp` counts as 1 operation
+- **Function/class definitions**: `FunctionDef`, `AsyncFunctionDef`, `Lambda`, `ClassDef` each count as 1 operation
+- **Slice objects**: `Slice` counts as 1 operation
+
+This means that code attempting to create many objects (e.g., nested comprehensions, many function
+definitions, or deep container nesting) will be bounded by `max_operations` even without dedicated
+per-type limits. The combination of `max_operations` (bounding total work) and `max_iterations`
+(bounding loop repetitions) provides comprehensive protection against resource exhaustion.
 
 ## Constant Folding Accumulation
 
@@ -459,11 +479,9 @@ Regenerate with: `make regen-ast`
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
-1. Should comprehensions have a non-zero `operations_count`? Currently they're 0 because iteration is handled separately.
+1. Should there be a way to configure weights per operation type (e.g., Call costs 10, BinOp costs 1)?
 
-2. Should there be a way to configure weights per operation type (e.g., Call costs 10, BinOp costs 1)?
-
-3. Should `operations_count` be exposed through a public Python API for introspection?
+2. Should `operations_count` be exposed through a public Python API for introspection?
 
 # Future possibilities
 [future-possibilities]: #future-possibilities

@@ -1,2 +1,4 @@
-   2: L   3 SANDBOX_COUNT        1
-  10: L   6 SANDBOX_COUNT        1
+   2: L   3 SANDBOX_COUNT 1
+   0:       ---           Code: foo
+   2: L   4 SANDBOX_COUNT 1
+  10: L   6 SANDBOX_COUNT 1

@@ -377,6 +377,12 @@ PyAPI_FUNC(int) _PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode
  * Unsafe operations include: compile(), __iter__() access, gc introspection. */
 PyAPI_FUNC(int) _PySandbox_CheckUnsafeBlocked(const char *operation);
 
+/* Unconditionally block an operation in sandbox scope.
+ * Unlike _PySandbox_CheckUnsafeBlocked, this ignores allow_unsafe.
+ * Used for operations that are ALWAYS dangerous (scope escape vectors).
+ * Returns 0 if not in scope, -1 if blocked (sets SandboxSecurityError). */
+PyAPI_FUNC(int) _PySandbox_CheckAlwaysBlocked(const char *operation);
+
 /* Check if metaclass creation/usage is allowed in sandbox scope.
  * Called from __build_class__ to prevent sandbox code from:
  * 1. Creating metaclasses (subclassing type)

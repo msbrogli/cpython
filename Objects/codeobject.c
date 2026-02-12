@@ -5,6 +5,7 @@
 #include "structmember.h"         // PyMemberDef
 #include "pycore_code.h"          // _PyCodeConstructor
 #include "pycore_interp.h"        // PyInterpreterState.co_extra_freefuncs
+#include "pycore_sandbox.h"       // _PySandbox_CheckUnsafeBlocked
 #include "pycore_opcode.h"        // _PyOpcode_Deopt
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
 #include "pycore_tuple.h"         // _PyTuple_ITEMS()
@@ -1534,6 +1535,10 @@ code_new_impl(PyTypeObject *type, int argcount, int posonlyargcount,
     PyObject *ourfreevars = NULL;
     PyObject *ourcellvars = NULL;
 
+    if (_PySandbox_CheckAlwaysBlocked("code.__new__") < 0) {
+        return NULL;
+    }
+
     if (PySys_Audit("code.__new__", "OOOiiiiii",
                     code, filename, name, argcount, posonlyargcount,
                     kwonlyargcount, nlocals, stacksize, flags) < 0) {
@@ -1913,6 +1918,10 @@ code_replace_impl(PyCodeObject *self, int co_argcount,
                   PyObject *co_exceptiontable)
 /*[clinic end generated code: output=e75c48a15def18b9 input=18e280e07846c122]*/
 {
+    if (_PySandbox_CheckAlwaysBlocked("code.replace") < 0) {
+        return NULL;
+    }
+
 #define CHECK_INT_ARG(ARG) \
         if (ARG < 0) { \
             PyErr_SetString(PyExc_ValueError, \

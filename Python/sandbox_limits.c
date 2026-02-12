@@ -377,11 +377,19 @@ _PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode)
     }
     _PySandboxConfig *config = &sandbox->config;
 
+    /* Always block __del__ definition in class body - finalizers run outside scope.
+     * This check must happen before the fast-path return below, because
+     * allow_dunder_access=1 would otherwise skip the class body checks entirely. */
+    int check_del = (class_body_mode == DUNDER_CLASS_ALL &&
+                     config->allow_class_creation &&
+                     is_dunder_name(name) &&
+                     _PyUnicode_EqualToASCIIString(name, "__del__"));
+
     /* Fast path: if both __iter__ and general dunder access are allowed, skip */
     int check_iter = !config->allow_unsafe && is_iter_dunder(name);
     int check_dunder = !config->allow_dunder_access && is_dunder_name(name);
 
-    if (!check_iter && !check_dunder) {
+    if (!check_iter && !check_dunder && !check_del) {
         return 0;
     }
 
@@ -400,6 +408,14 @@ _PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode)
     }
     if (!in_scope) {
         return 0;
+    }
+
+    /* Unconditionally block __del__ in class body (regardless of allow_unsafe/allow_dunder_access) */
+    if (check_del) {
+        if (frame->f_code != NULL &&
+            (frame->f_code->co_flags & CO_CLASS_BODY)) {
+            goto blocked;
+        }
     }
 
     /* Block __iter__ access unless allow_unsafe */
@@ -422,7 +438,12 @@ _PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode)
             (frame->f_code->co_flags & CO_CLASS_BODY)) {
 
             if (class_body_mode == DUNDER_CLASS_ALL) {
-                return 0;  /* Allow ALL dunders (STORE_NAME) */
+                /* Always block __del__ in class body - finalizers run outside scope
+                 * and cannot be made safe regardless of allow_unsafe */
+                if (_PyUnicode_EqualToASCIIString(name, "__del__")) {
+                    goto blocked;
+                }
+                return 0;  /* Allow all other dunders in class body */
             }
             if (class_body_mode == DUNDER_CLASS_WHITELIST) {
                 if (is_class_body_safe_dunder(name)) {
@@ -435,14 +456,17 @@ _PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode)
 
     /* Block general dunder access if allow_dunder_access=0 */
     if (check_dunder) {
-        sandbox->suppress_checks = 1;
-        PyErr_Format(PyExc_SandboxAttributeError,
-                     "dunder attribute access blocked in sandbox: '%U'", name);
-        sandbox->suppress_checks = 0;
-        return -1;
+        goto blocked;
     }
 
     return 0;
+
+blocked:
+    sandbox->suppress_checks = 1;
+    PyErr_Format(PyExc_SandboxAttributeError,
+                 "dunder attribute access blocked in sandbox: '%U'", name);
+    sandbox->suppress_checks = 0;
+    return -1;
 }
 
 /* ============ Metaclass Creation Checking ============ */
@@ -611,6 +635,43 @@ _PySandbox_CheckUnsafeBlocked(const char *operation)
     }
 
     /* Block the unsafe operation */
+    sandbox->suppress_checks = 1;
+    PyErr_Format(PyExc_SandboxSecurityError,
+                 "%s is not allowed in sandbox scope", operation);
+    sandbox->suppress_checks = 0;
+    return -1;
+}
+
+/* _PySandbox_CheckAlwaysBlocked - Unconditionally block an operation in sandbox scope
+ *
+ * Unlike _PySandbox_CheckUnsafeBlocked, this does NOT check allow_unsafe.
+ * Used for operations that are always dangerous scope escape vectors
+ * (code.replace(), code.__new__()) that cannot be made safe.
+ *
+ * Returns: 0 if not in scope, -1 if blocked (SandboxSecurityError set)
+ */
+int
+_PySandbox_CheckAlwaysBlocked(const char *operation)
+{
+    _PySandboxState *sandbox = get_sandbox_state();
+    if (sandbox == NULL || !_PySandbox_IsEnforced(sandbox)) {
+        return 0;
+    }
+    if (sandbox->registered_filenames == NULL) {
+        return 0;  /* No scope registered */
+    }
+
+    /* Check if currently in sandbox scope */
+    _PyInterpreterFrame *frame = get_current_iframe(NULL);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;  /* Error during scope check */
+    }
+    if (!in_scope) {
+        return 0;  /* Not in scope */
+    }
+
+    /* Block the operation unconditionally */
     sandbox->suppress_checks = 1;
     PyErr_Format(PyExc_SandboxSecurityError,
                  "%s is not allowed in sandbox scope", operation);

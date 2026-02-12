@@ -92,7 +92,23 @@ Each entry `"X"` in the allowlist:
 
 1. **Allows X itself**: `import X` is allowed
 2. **Allows all submodules of X**: `import X.Y`, `import X.Y.Z`, etc. are allowed
-3. **Auto-computes parent dependencies**: Parent modules are allowed as needed for Python's import system
+3. **Allows wildcard import**: `from X import *` is allowed
+4. **Auto-computes parent dependencies**: Parent modules are allowed as needed for Python's import system
+
+### Wildcard Import Restrictions (SA-2026-0002)
+
+`from X import *` is only allowed when `X` is **directly** in `allowed_imports`. If `X` is merely an ancestor (computed because a submodule like `X.Y` is in the allowlist), wildcard import is blocked:
+
+```python
+# Entry: "json" (direct)
+# from json import *  -> ALLOWED (json is directly in allowlist)
+
+# Entry: "json.decoder" (json is only an ancestor)
+# from json import *  -> BLOCKED (json is not directly in allowlist)
+# from json import decoder  -> ALLOWED (specific submodule check)
+```
+
+This prevents ancestor-only modules from exposing all their names via wildcard import, which could grant access to functions and classes that were not intended to be available.
 
 ### Examples
 

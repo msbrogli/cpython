@@ -733,6 +733,7 @@ exec(code)  # Works! Class creation with magic methods is allowed
 - `__init__`, `__str__`, `__repr__` - Method definitions
 - `__add__`, `__eq__`, `__hash__` - Operator overloading
 - Any custom dunder name - User-defined dunders
+- **Exception: `__del__` is always blocked** - Finalizers run outside scope via GC (SA-2026-0004)
 
 **Introspection dunders remain blocked (class_body_mode=0):**
 - `__class__` - Reading object's class
@@ -975,6 +976,16 @@ When `allow_unsafe=False` (default), these operations are blocked in sandbox sco
 | `__iter__` access | Iterator abuse | Blocks direct `__iter__` attribute access |
 
 **Note:** Both `eval()` and `exec()` are blocked even with pre-compiled code objects to prevent scope escape attacks where code compiled with an unregistered filename could bypass sandbox limits.
+
+**Unconditionally blocked** (regardless of `allow_unsafe`):
+
+| Operation | Risk | Description |
+|-----------|------|-------------|
+| `code.replace()` | Scope escape | Creates code with spoofed `co_filename` to escape scope |
+| `types.CodeType()` | Scope escape | Creates arbitrary code objects outside scope tracking |
+| `__del__` definition | Finalizer escape | Finalizers execute outside scope via GC |
+
+These operations are scope escape vectors that cannot be made safe. They are blocked even when `allow_unsafe=True`.
 
 ### Enabling Unsafe Operations
 
@@ -2225,6 +2236,8 @@ SAFE_BUILTINS = {...}  # Curated safe builtins only
 | `__subclasses__()` can find types | Block dunder access |
 | `gc.get_objects()` can find objects | Block unsafe operations (default) |
 | `compile()` can create escape code | Block unsafe operations (default) |
+| `code.replace()` can spoof filename | Unconditionally blocked in scope |
+| `__del__` finalizers run outside scope | `__del__` definition blocked in scope |
 | File descriptors inherited from parent | Block I/O operations (default) |
 | Memory exhaustion before allocation limit | Use OS-level memory limits (ulimit, cgroups) |
 | CPU exhaustion before statement limit | Use OS-level CPU limits (timeout, cgroups) |
@@ -2250,6 +2263,10 @@ Common sandbox escape techniques and how to block them:
 | `ctypes.CDLL()` | Call arbitrary C code | Import restrictions |
 | `frame.f_back.f_locals` | Access parent frame | Frame access is blocked in scope |
 | `gen.gi_frame.f_locals` | Access generator frame | Frame access blocked |
+| `code.replace(co_filename=...)` | Scope escape via spoofed filename | Unconditionally blocked (SA-2026-0001) |
+| `types.CodeType(...)` | Create code objects with arbitrary filename | Unconditionally blocked (SA-2026-0001) |
+| `from X import *` on ancestor module | Import all names from partially-allowed module | Blocked for ancestor-only modules (SA-2026-0002) |
+| `class Evil: def __del__(self): ...` | Finalizer runs outside scope via GC | `__del__` definition unconditionally blocked (SA-2026-0004) |
 | Specialized opcode bypass (e.g., hot-loop `__class__` access) | PEP 659 specialized opcodes skip checks | `DEOPT_IF` in ceval.c (see RFC-006) |
 
 ### Recommended Minimal Configuration

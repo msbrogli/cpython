@@ -162,6 +162,19 @@ _PySandbox_CheckImport(PyObject *abs_name, PyObject *fromlist)
                 return -1;
             }
             if (strcmp(item_str, "*") == 0) {
+                /* For wildcard imports, only allow if base module is directly allowed */
+                PyObject *base_obj = PyUnicode_FromString(abs_str);
+                if (base_obj == NULL) {
+                    return -1;
+                }
+                int base_direct = PySet_Contains(sandbox->allowed_imports, base_obj);
+                Py_DECREF(base_obj);
+                if (base_direct < 0) {
+                    return -1;
+                }
+                if (!base_direct) {
+                    goto blocked;
+                }
                 continue;
             }
 

@@ -265,6 +265,101 @@ except SandboxOverflowError:
                         f"Test failed with stderr: {result.stderr}")
 
 
+class CodeObjectEscapeTests(ScopedFilenameTestCase):
+    """Test that code.replace() and code.__new__() are blocked in sandbox scope.
+
+    Security audit reference: SA-2026-0001
+    These methods allow creating code objects with spoofed co_filename,
+    enabling scope escape. They are unconditionally blocked in sandbox scope.
+    """
+
+    SCOPED_FILENAME = "<test_code_escape_scope>"
+
+    def test_code_replace_blocked_in_scope(self):
+        """code.replace() should be blocked in sandbox scope."""
+        sys.sandbox.set_config(
+            allow_dunder_access=1,
+            allow_unsafe=1,
+        )
+
+        with self.assertRaises(SandboxSecurityError):
+            self.run_scoped_code("""
+def dummy():
+    pass
+escaped = dummy.__code__.replace(co_filename="<ESCAPED>")
+""")
+
+    def test_code_replace_blocked_even_with_allow_unsafe(self):
+        """code.replace() should be blocked even when allow_unsafe=1.
+
+        Unlike compile()/eval(), code.replace() is a scope escape vector
+        that cannot be made safe, so it's unconditionally blocked.
+        """
+        sys.sandbox.set_config(
+            allow_dunder_access=1,
+            allow_unsafe=1,
+        )
+
+        with self.assertRaises(SandboxSecurityError):
+            self.run_scoped_code("""
+def dummy():
+    pass
+escaped = dummy.__code__.replace(co_filename="<ESCAPED>")
+""")
+
+    def test_code_replace_blocked_on_passed_in_object(self):
+        """code.replace() on a code object passed into scope should be blocked.
+
+        Even without dunder access (so __code__ is inaccessible), if a code
+        object reference is passed in, .replace() is a normal method call
+        that must still be blocked.
+        """
+        sys.sandbox.set_config(
+            allow_dunder_access=0,
+            allow_unsafe=0,
+        )
+
+        def helper():
+            pass
+
+        with self.assertRaises(SandboxSecurityError):
+            self.run_scoped_code(
+                "escaped = code_obj.replace(co_filename='<ESCAPED>')",
+                extra_globals={"code_obj": helper.__code__},
+            )
+
+    def test_code_new_blocked_in_scope(self):
+        """types.CodeType() should be blocked in sandbox scope."""
+        code = '''
+import sys
+import types
+sys.sandbox.set_config(
+    allow_dunder_access=1,
+    allow_unsafe=1,
+    import_restrict_mode=0,
+    module_access_restrict_mode=0,
+)
+sys.sandbox.enable()
+sys.sandbox.add_filename('<string>')
+try:
+    code = types.CodeType(0, 0, 0, 0, 0, 0, b'', (), (), (), '', '', '', 0, b'', b'', (), ())
+    print("FAIL")
+except SandboxSecurityError:
+    print("PASS")
+'''
+        result = _run_sandboxed_code(code)
+        self.assertIn("PASS", result.stdout,
+                       f"Output: {result.stdout}\nStderr: {result.stderr}")
+
+    def test_code_replace_allowed_outside_scope(self):
+        """code.replace() should work outside sandbox scope."""
+        # This runs in the test framework, not in sandbox scope
+        def dummy():
+            pass
+        new_code = dummy.__code__.replace(co_filename="<test>")
+        self.assertEqual(new_code.co_filename, "<test>")
+
+
 class FrameBasedScopeTests(unittest.TestCase):
     """Test add_frame() based scope management."""
 

@@ -277,6 +277,61 @@ class ImportSubmoduleTests(SandboxTestCase):
         # Should not raise
 
 
+class WildcardImportTests(SandboxTestCase):
+    """Test wildcard import restrictions.
+
+    Security audit reference: SA-2026-0002
+    'from X import *' should only work when X is directly in allowed_imports,
+    not when X is merely an ancestor of an allowed module.
+    """
+
+    def setUp(self):
+        super().setUp()
+        sys.sandbox.import_restrict_mode = True
+        sys.sandbox.module_access_restrict_mode = False
+
+    def test_wildcard_import_allowed_for_direct_module(self):
+        """'from json import *' should work when 'json' is directly allowed."""
+        sys.sandbox.allowed_imports = {"json"}
+        sys.sandbox.allow_unsafe = True
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        globs = _run_scoped("from json import *")
+        self.assertIn("dumps", globs)
+        self.assertIn("loads", globs)
+
+    def test_wildcard_import_blocked_for_ancestor_only(self):
+        """'from json import *' should be blocked when json is only an ancestor.
+
+        When only 'json.decoder' is in allowed_imports, 'json' is computed
+        as an ancestor. Wildcard import from an ancestor should be blocked
+        to prevent importing all names from the module.
+        """
+        sys.sandbox.allowed_imports = {"json.decoder"}
+        sys.sandbox.allow_unsafe = True
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        with self.assertRaises(SandboxImportError):
+            _run_scoped("from json import *")
+
+    def test_wildcard_import_non_star_still_works(self):
+        """'from json import decoder' should still work for allowed submodules."""
+        sys.sandbox.allowed_imports = {"json.decoder"}
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        _run_scoped("from json import decoder")
+        # Should not raise
+
+    def test_wildcard_import_blocked_for_deep_ancestor(self):
+        """'from xml import *' should be blocked when only xml.etree.ElementTree is allowed."""
+        sys.sandbox.allowed_imports = {"xml.etree.ElementTree"}
+        sys.sandbox.allow_unsafe = True
+        sys.sandbox.add_filename(SCOPED_FILENAME)
+
+        with self.assertRaises(SandboxImportError):
+            _run_scoped("from xml import *")
+
+
 class ImportSuspendedTests(SandboxTestCase):
     """Test import restrictions when sandbox is suspended."""
 

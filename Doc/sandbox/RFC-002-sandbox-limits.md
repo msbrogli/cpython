@@ -405,29 +405,41 @@ int
 _PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode)
 {
     /* ... get sandbox state ... */
-    if (sandbox->config.allow_dunder_access ||
-        sandbox->suppress_checks || sandbox->suspend_depth) {
-        return 0;
+
+    /* SA-2026-0004: Always block __del__ in class body.
+     * This check runs BEFORE the allow_dunder_access fast-path to ensure
+     * __del__ is blocked regardless of dunder access settings. */
+    int check_del = (class_body_mode == DUNDER_CLASS_ALL &&
+                     config->allow_class_creation &&
+                     is_dunder_name(name) &&
+                     _PyUnicode_EqualToASCIIString(name, "__del__"));
+
+    int check_iter = !config->allow_unsafe && is_iter_dunder(name);
+    int check_dunder = !config->allow_dunder_access && is_dunder_name(name);
+
+    if (!check_iter && !check_dunder && !check_del) {
+        return 0;  /* Fast path */
     }
 
-    if (!is_dunder_name(name)) {
-        return 0;
+    /* ... scope check ... */
+
+    /* Unconditionally block __del__ in class body */
+    if (check_del && (frame->f_code->co_flags & CO_CLASS_BODY)) {
+        goto blocked;
     }
 
-    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
-        return 0;
-    }
+    /* ... check_iter handling ... */
 
     /* Class body exception handling based on mode.
      * When allow_class_creation=1 and in a class body (CO_CLASS_BODY flag):
-     * - DUNDER_CLASS_ALL (2): Allow ALL dunders (STORE_NAME)
+     * - DUNDER_CLASS_ALL (2): Allow ALL dunders except __del__ (STORE_NAME)
      * - DUNDER_CLASS_WHITELIST (1): Allow whitelisted dunders (LOAD_NAME)
      * - DUNDER_CLASS_NEVER (0): No exceptions (LOAD_ATTR, etc.) */
-    if (sandbox->config.allow_class_creation) {
+    if (check_dunder && sandbox->config.allow_class_creation) {
         PyCodeObject *code = frame->f_code;
         if (code->co_flags & CO_CLASS_BODY) {
             if (class_body_mode == DUNDER_CLASS_ALL) {
-                return 0;  /* Allow ALL dunders (STORE_NAME) */
+                return 0;  /* Allow all dunders except __del__ */
             }
             if (class_body_mode == DUNDER_CLASS_WHITELIST) {
                 if (is_class_body_safe_dunder(name)) {
@@ -438,6 +450,12 @@ _PySandbox_CheckDunderAccess(PyObject *name, int class_body_mode)
         }
     }
 
+    if (check_dunder) {
+        goto blocked;
+    }
+    return 0;
+
+blocked:
     PyErr_Format(PyExc_SandboxAttributeError,
                  "dunder attribute access blocked in sandbox: '%U'", name);
     return -1;
@@ -518,6 +536,8 @@ class Point:
     def __init__(self):  # STORE_NAME __init__ - BLOCKED (not whitelisted)
         pass
 ```
+
+**`__del__` is always blocked (SA-2026-0004):** Defining `__del__` in a class body is unconditionally blocked in sandbox scope, regardless of `allow_dunder_access`, `allow_unsafe`, or `allow_magic_methods` settings. This is because `__del__` finalizers execute via garbage collection outside sandbox scope, enabling code created inside the sandbox to run after the sandbox is disabled. The check runs before the fast-path return in `_PySandbox_CheckDunderAccess()`, ensuring it cannot be bypassed.
 
 **Limitation:** The whitelist only applies during class body execution. Method dunders like `__init__` accessed as attributes (e.g., `super().__init__()`) are blocked. Use `allow_dunder_access=True` if such patterns are needed.
 
@@ -639,6 +659,34 @@ _PySandbox_CheckUnsafeBlocked(const char *operation)
 }
 ```
 
+## Unconditionally Blocked Operations (SA-2026-0001)
+
+Some operations are **always blocked** in sandbox scope, regardless of `allow_unsafe`. These are scope escape vectors that cannot be made safe:
+
+```c
+int
+_PySandbox_CheckAlwaysBlocked(const char *operation)
+{
+    /* ... get sandbox state ... */
+    /* NOTE: does NOT check allow_unsafe - always blocks in scope */
+
+    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+        return 0;
+    }
+
+    PyErr_Format(PyExc_SandboxSecurityError,
+                 "%s is not allowed in sandbox scope", operation);
+    return -1;
+}
+```
+
+| Operation | Risk | Why Always Blocked |
+|-----------|------|--------------------|
+| `code.replace()` | Scope escape | Creates code objects with spoofed `co_filename`, escaping scope tracking |
+| `code.__new__()` (types.CodeType) | Scope escape | Same as above - creates arbitrary code objects |
+
+These are blocked because they allow creating code objects whose `co_filename` is not registered in the sandbox, effectively escaping all scope-based enforcement (iteration limits, operation limits, dunder access blocks, import restrictions, etc.).
+
 ## I/O Operation Check
 
 ```c
@@ -740,6 +788,8 @@ Called from:
 | `Modules/_io/fileio.c` | `_io_FileIO___init___impl()` | `_PySandbox_CheckIOAllowed()` |
 | `Modules/socketmodule.c` | `sock_initobj_impl()` | `_PySandbox_CheckIOAllowed()` |
 | `Modules/posixmodule.c` | `os_open_impl()`, etc. | `_PySandbox_CheckIOAllowed()` |
+| `Objects/codeobject.c` | `code_new_impl()` | `_PySandbox_CheckAlwaysBlocked()` |
+| `Objects/codeobject.c` | `code_replace_impl()` | `_PySandbox_CheckAlwaysBlocked()` |
 
 ## Exception Types
 

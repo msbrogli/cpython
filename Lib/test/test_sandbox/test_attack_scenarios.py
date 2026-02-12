@@ -281,5 +281,111 @@ copied = large_set.copy()  # Should raise SandboxOverflowError
         self.assertIn("Sandbox", result.stderr)
 
 
+class FinalizerEscapeAttacks(unittest.TestCase):
+    """Test prevention of __del__ finalizer escape attacks.
+
+    Security audit reference: SA-2026-0004
+    __del__ finalizers run via GC outside sandbox scope, allowing code
+    created inside sandbox to execute after the sandbox is disabled.
+    Defining __del__ is now unconditionally blocked in sandbox scope.
+    """
+
+    def test_del_definition_blocked_default_settings(self):
+        """Defining __del__ should be blocked with default settings."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=0)
+sys.sandbox.enter_scope()
+class Evil:
+    def __del__(self):
+        pass
+'''
+        result = _run_sandboxed_code(code)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Sandbox", result.stderr)
+
+    def test_del_definition_blocked_with_dunder_access(self):
+        """Defining __del__ should be blocked even with allow_dunder_access=1.
+
+        __del__ is blocked unconditionally because finalizers execute outside
+        sandbox scope via GC, regardless of allow_unsafe or allow_dunder_access.
+        """
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=1, allow_unsafe=1)
+sys.sandbox.enter_scope()
+class Evil:
+    def __del__(self):
+        pass
+'''
+        result = _run_sandboxed_code(code)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Sandbox", result.stderr)
+
+    def test_del_definition_blocked_with_magic_methods(self):
+        """Defining __del__ should be blocked even with allow_magic_methods=1."""
+        code = '''
+import sys
+sys.sandbox.set_config(
+    allow_dunder_access=1,
+    allow_magic_methods=1,
+    allow_class_creation=1,
+)
+sys.sandbox.enter_scope()
+class Evil:
+    def __del__(self):
+        pass
+'''
+        result = _run_sandboxed_code(code)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Sandbox", result.stderr)
+
+    def test_other_dunders_still_allowed_in_class(self):
+        """Other dunder methods should still be allowed in class bodies.
+
+        Only __del__ is specifically blocked; __init__, __str__, etc.
+        should still work when allow_magic_methods=1.
+        """
+        code = '''
+import sys
+sys.sandbox.set_config(
+    allow_dunder_access=1,
+    allow_magic_methods=1,
+    allow_class_creation=1,
+)
+sys.sandbox.enter_scope()
+class Good:
+    def __init__(self):
+        self.x = 1
+    def __str__(self):
+        return "good"
+    def __repr__(self):
+        return "Good()"
+    def __eq__(self, other):
+        return True
+obj = Good()
+assert obj.x == 1
+print("PASS")
+'''
+        result = _run_sandboxed_code(code)
+        self.assertIn("PASS", result.stdout,
+                       f"Output: {result.stdout}\nStderr: {result.stderr}")
+
+    def test_del_not_blocked_outside_scope(self):
+        """__del__ should work outside sandbox scope."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=1)
+# Do NOT enter scope - this is outside sandbox scope
+class Normal:
+    def __del__(self):
+        pass
+print("PASS")
+'''
+        result = _run_sandboxed_code(code)
+        self.assertIn("PASS", result.stdout,
+                       f"Output: {result.stdout}\nStderr: {result.stderr}")
+
+
 if __name__ == '__main__':
     unittest.main()

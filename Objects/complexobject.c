@@ -10,6 +10,7 @@
 #include "pycore_long.h"          // _PyLong_GetZero()
 #include "pycore_object.h"        // _PyObject_Init()
 #include "pycore_pymath.h"        // _Py_ADJUST_ERANGE2()
+#include "pycore_sandbox.h"       // _PySandbox_CheckTypeAllowed()
 #include "structmember.h"         // PyMemberDef
 
 
@@ -227,6 +228,11 @@ complex_subtype_from_c_complex(PyTypeObject *type, Py_complex cval)
 PyObject *
 PyComplex_FromCComplex(Py_complex cval)
 {
+    /* Sandbox check: verify complex type is allowed */
+    if (_PySandbox_CheckTypeAllowed(&PyComplex_Type) < 0) {
+        return NULL;
+    }
+
     /* Inline PyObject_New */
     PyComplexObject *op = PyObject_Malloc(sizeof(PyComplexObject));
     if (op == NULL) {

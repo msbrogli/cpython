@@ -52,7 +52,9 @@ module Python
           | Pass | Break | Continue
 
           -- col_offset is the byte offset in the utf8 string the parser uses
-          attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset)
+          -- operations_count tracks how many operations were folded into this node
+          -- (used by SANDBOX_COUNT for deterministic counting across platforms)
+          attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset, int? operations_count)
 
           -- BoolOp() can use left & right?
     expr = BoolOp(boolop op, expr* values)
@@ -90,8 +92,7 @@ module Python
          -- can appear only in Subscript
          | Slice(expr? lower, expr? upper, expr? step)
 
-          -- col_offset is the byte offset in the utf8 string the parser uses
-          attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset)
+          attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset, int? operations_count)
 
     expr_context = Load | Store | Del
 
@@ -107,21 +108,21 @@ module Python
     comprehension = (expr target, expr iter, expr* ifs, int is_async)
 
     excepthandler = ExceptHandler(expr? type, identifier? name, stmt* body)
-                    attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset)
+                    attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset, int? operations_count)
 
     arguments = (arg* posonlyargs, arg* args, arg? vararg, arg* kwonlyargs,
                  expr* kw_defaults, arg? kwarg, expr* defaults)
 
     arg = (identifier arg, expr? annotation, string? type_comment)
-           attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset)
+           attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset, int? operations_count)
 
     -- keyword arguments supplied to call (NULL identifier for **kwargs)
     keyword = (identifier? arg, expr value)
-               attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset)
+               attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset, int? operations_count)
 
     -- import name with optional 'as' alias.
     alias = (identifier name, identifier? asname)
-             attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset)
+             attributes (int lineno, int col_offset, int? end_lineno, int? end_col_offset, int? operations_count)
 
     withitem = (expr context_expr, expr? optional_vars)
 
@@ -139,7 +140,7 @@ module Python
             | MatchAs(pattern? pattern, identifier? name)
             | MatchOr(pattern* patterns)
 
-             attributes (int lineno, int col_offset, int end_lineno, int end_col_offset)
+             attributes (int lineno, int col_offset, int end_lineno, int end_col_offset, int? operations_count)
 
     type_ignore = TypeIgnore(int lineno, string tag)
 }

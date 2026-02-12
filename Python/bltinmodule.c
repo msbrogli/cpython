@@ -10,6 +10,7 @@
 #include "pycore_pystate.h"       // _PyThreadState_GET()
 #include "pycore_tuple.h"         // _PyTuple_FromArray()
 #include "pycore_ceval.h"         // _PyEval_Vector()
+#include "pycore_sandbox.h"       // _PySandbox_CheckDunderAccess()
 
 #include "clinic/bltinmodule.c.h"
 
@@ -176,6 +177,14 @@ builtin___build_class__(PyObject *self, PyObject *const *args, Py_ssize_t nargs,
     }
     /* else: meta is not a class, so we cannot do the metaclass
        calculation, so we will use the explicitly given object as it is */
+
+    /* Sandbox check: block metaclass creation (subclassing type).
+     * Trusted metaclasses from outside sandbox are allowed.
+     * This replaces the previous overly-broad metaclass block. */
+    if (_PySandbox_CheckMetaclassAllowed(meta, bases) < 0) {
+        goto error;
+    }
+
     if (_PyObject_LookupAttr(meta, &_Py_ID(__prepare__), &prep) < 0) {
         ns = NULL;
     }
@@ -748,6 +757,10 @@ builtin_compile_impl(PyObject *module, PyObject *source, PyObject *filename,
     int start[] = {Py_file_input, Py_eval_input, Py_single_input, Py_func_type_input};
     PyObject *result;
 
+    if (_PySandbox_CheckUnsafeBlocked("compile") < 0) {
+        goto error;
+    }
+
     PyCompilerFlags cf = _PyCompilerFlags_INIT;
     cf.cf_flags = flags | PyCF_SOURCE_IS_UTF8;
     if (feature_version >= 0 && (flags & PyCF_ONLY_AST)) {
@@ -908,6 +921,12 @@ builtin_eval_impl(PyObject *module, PyObject *source, PyObject *globals,
     PyObject *result, *source_copy;
     const char *str;
 
+    /* Block eval() in sandbox scope when allow_unsafe=0.
+     * Both strings and code objects are blocked to prevent scope escape. */
+    if (_PySandbox_CheckUnsafeBlocked("eval") < 0) {
+        return NULL;
+    }
+
     if (locals != Py_None && !PyMapping_Check(locals)) {
         PyErr_SetString(PyExc_TypeError, "locals must be a mapping");
         return NULL;
@@ -999,6 +1018,12 @@ builtin_exec_impl(PyObject *module, PyObject *source, PyObject *globals,
 /*[clinic end generated code: output=7579eb4e7646743d input=f13a7e2b503d1d9a]*/
 {
     PyObject *v;
+
+    /* Block exec() in sandbox scope when allow_unsafe=0.
+     * Both strings and code objects are blocked to prevent scope escape. */
+    if (_PySandbox_CheckUnsafeBlocked("exec") < 0) {
+        return NULL;
+    }
 
     if (globals == Py_None) {
         globals = PyEval_GetGlobals();
@@ -1123,6 +1148,11 @@ builtin_getattr(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
 
     v = args[0];
     name = args[1];
+
+    if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
+        return NULL;
+    }
+
     if (nargs > 2) {
         if (_PyObject_LookupAttr(v, name, &result) == 0) {
             PyObject *dflt = args[2];
@@ -1182,6 +1212,10 @@ builtin_hasattr_impl(PyObject *module, PyObject *obj, PyObject *name)
 /*[clinic end generated code: output=a7aff2090a4151e5 input=0faec9787d979542]*/
 {
     PyObject *v;
+
+    if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
+        return NULL;
+    }
 
     if (_PyObject_LookupAttr(obj, name, &v) < 0) {
         return NULL;
@@ -2083,6 +2117,11 @@ static PyObject *
 builtin_input_impl(PyObject *module, PyObject *prompt)
 /*[clinic end generated code: output=83db5a191e7a0d60 input=159c46d4ae40977e]*/
 {
+    /* Sandbox check: block input() - causes DoS by blocking indefinitely */
+    if (_PySandbox_CheckUnsafeBlocked("input") < 0) {
+        return NULL;
+    }
+
     PyThreadState *tstate = _PyThreadState_GET();
     PyObject *fin = _PySys_GetAttr(
         tstate, &_Py_ID(stdin));

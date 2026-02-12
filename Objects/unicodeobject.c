@@ -54,6 +54,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
 #include "pycore_ucnhash.h"       // _PyUnicode_Name_CAPI
 #include "pycore_unicodeobject.h" // struct _Py_unicode_state
+#include "pycore_sandbox.h"       // _PySandbox_CheckStrLength()
 #include "stringlib/eq.h"         // unicode_eq()
 
 #ifdef MS_WINDOWS
@@ -1417,6 +1418,11 @@ PyUnicode_New(Py_ssize_t size, Py_UCS4 maxchar)
     }
     if (size > ((PY_SSIZE_T_MAX - struct_size) / char_size - 1))
         return PyErr_NoMemory();
+
+    /* Check sandbox limits before allocation */
+    if (_PySandbox_CheckStrLength(size) < 0) {
+        return NULL;
+    }
 
     /* Duplicated allocation code from _PyObject_New() instead of a call to
      * PyObject_New() so we are able to allocate space for the object and

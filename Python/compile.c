@@ -948,6 +948,7 @@ stack_effect(int opcode, int oparg, int jump)
         case EXTENDED_ARG:
         case RESUME:
         case CACHE:
+        case SANDBOX_COUNT:
             return 0;
 
         /* Stack manipulation */
@@ -1580,6 +1581,18 @@ compiler_addop_j_noline(struct compiler *c, int opcode, basicblock *b)
     if (!compiler_addop((C), (OP))) \
         return 0; \
 }
+
+/* ADDOP_SANDBOX_COUNT_N emits SANDBOX_COUNT with oparg N (operation count).
+ * N is typically 1 for single operations, or the accumulated operations_count
+ * from AST nodes that were folded during optimization. */
+#define ADDOP_SANDBOX_COUNT_N(C, N) { \
+    if ((C)->c_flags->cf_flags & PyCF_SANDBOX_COUNT && (N) > 0) { \
+        ADDOP_I((C), SANDBOX_COUNT, (N)); \
+    } \
+}
+
+/* Legacy macro for backwards compatibility - emits count=1 */
+#define ADDOP_SANDBOX_COUNT(C) ADDOP_SANDBOX_COUNT_N((C), 1)
 
 #define ADDOP_NOLINE(C, OP) { \
     if (!compiler_addop_noline((C), (OP))) \
@@ -2341,6 +2354,7 @@ compiler_apply_decorators(struct compiler *c, asdl_expr_seq* decos)
     int old_end_col_offset = c->u->u_end_col_offset;
     for (Py_ssize_t i = asdl_seq_LEN(decos) - 1; i > -1; i--) {
         SET_LOC(c, (expr_ty)asdl_seq_GET(decos, i));
+        ADDOP_SANDBOX_COUNT(c);
         ADDOP_I(c, PRECALL, 0);
         ADDOP_I(c, CALL, 0);
     }
@@ -2796,7 +2810,10 @@ compiler_class(struct compiler *c, stmt_ty s)
     /* 4. load class name */
     ADDOP_LOAD_CONST(c, s->v.ClassDef.name);
 
-    /* 5. generate the rest of the code for the call */
+    /* 5. generate the rest of the code for the call.
+     * This is an implicit __build_class__ call - count it separately from the
+     * ClassDef's operations_count which was already emitted in compiler_visit_stmt. */
+    ADDOP_SANDBOX_COUNT(c);
     if (!compiler_call_helper(c, 2, s->v.ClassDef.bases, s->v.ClassDef.keywords))
         return 0;
     /* 6. apply decorators */
@@ -4086,6 +4103,11 @@ compiler_visit_stmt(struct compiler *c, stmt_ty s)
     /* Always assign a lineno to the next instruction for a stmt. */
     SET_LOC(c, s);
 
+    /* Unified operation counting - emit if this node should count.
+     * The operations_count is set during parsing (1 for counting nodes,
+     * 0 for non-counting nodes like Global, Nonlocal, Expr). */
+    ADDOP_SANDBOX_COUNT_N(c, s->operations_count);
+
     switch (s->kind) {
     case FunctionDef_kind:
         return compiler_function(c, s, 0);
@@ -4891,6 +4913,9 @@ maybe_optimize_method_call(struct compiler *c, expr_ty e)
         }
     }
     /* Alright, we can optimize the code. */
+    /* Count the Attribute access (method lookup). The Call's operations_count
+     * was already emitted in compiler_visit_expr1 before entering here. */
+    ADDOP_SANDBOX_COUNT_N(c, meth->operations_count);
     VISIT(c, expr, meth->v.Attribute.value);
     SET_LOC(c, meth);
     update_start_location_to_match_attr(c, meth);
@@ -5144,6 +5169,9 @@ compiler_call_helper(struct compiler *c,
             return 0;
         };
     }
+    /* Note: SANDBOX_COUNT for Call is handled by the unified check in
+     * compiler_visit_expr1, not here. For implicit calls like __build_class__,
+     * the caller (e.g., compiler_class) emits the count separately. */
     ADDOP_I(c, PRECALL, n + nelts + nkwelts);
     ADDOP_I(c, CALL, n + nelts + nkwelts);
     return 1;
@@ -5201,6 +5229,8 @@ ex_call:
         }
         assert(have_dict);
     }
+    /* Note: SANDBOX_COUNT for Call is handled by the unified check in
+     * compiler_visit_expr1, not here. */
     ADDOP_I(c, CALL_FUNCTION_EX, nkwelts > 0);
     return 1;
 }
@@ -5827,6 +5857,13 @@ compiler_with(struct compiler *c, stmt_ty s, int pos)
 static int
 compiler_visit_expr1(struct compiler *c, expr_ty e)
 {
+    /* Unified operation counting - emit if this node should count.
+     * The operations_count is set during parsing (1 for counting nodes like
+     * BinOp, BoolOp, Compare, Call, etc., 0 for non-counting nodes like
+     * Name, Constant, Lambda). For folded constants, operations_count
+     * accumulates the count from the folded operations. */
+    ADDOP_SANDBOX_COUNT_N(c, e->operations_count);
+
     switch (e->kind) {
     case NamedExpr_kind:
         VISIT(c, expr, e->v.NamedExpr.value);
@@ -7887,6 +7924,11 @@ compute_code_flags(struct compiler *c)
             flags |= CO_VARARGS;
         if (ste->ste_varkeywords)
             flags |= CO_VARKEYWORDS;
+    }
+
+    /* Set CO_CLASS_BODY for class body code objects (used by sandbox whitelist) */
+    if (ste->ste_type == ClassBlock) {
+        flags |= CO_CLASS_BODY;
     }
 
     /* (Only) inherit compilerflags in PyCF_MASK */

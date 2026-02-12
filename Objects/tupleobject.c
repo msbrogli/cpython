@@ -6,6 +6,7 @@
 #include "pycore_gc.h"            // _PyObject_GC_IS_TRACKED()
 #include "pycore_initconfig.h"    // _PyStatus_OK()
 #include "pycore_object.h"        // _PyObject_GC_TRACK(), _Py_FatalRefcountError()
+#include "pycore_sandbox.h"       // _PySandbox_CheckTupleSize()
 
 /*[clinic input]
 class tuple "PyTupleObject *" "&PyTuple_Type"
@@ -39,6 +40,11 @@ tuple_alloc(Py_ssize_t size)
 #ifdef Py_DEBUG
     assert(size != 0);    // The empty tuple is statically allocated.
 #endif
+
+    /* Check sandbox limits before allocation */
+    if (_PySandbox_CheckTupleSize(size) < 0) {
+        return NULL;
+    }
 
     PyTupleObject *op = maybe_freelist_pop(size);
     if (op == NULL) {

@@ -10,6 +10,7 @@
 #include "pycore_pystate.h"       // _Py_IsMainInterpreter()
 #include "pycore_runtime.h"       // _PY_NSMALLPOSINTS
 #include "pycore_structseq.h"     // _PyStructSequence_FiniType()
+#include "pycore_sandbox.h"       // _PySandbox_CheckIntSize()
 
 #include <ctype.h>
 #include <float.h>
@@ -148,6 +149,10 @@ _PyLong_New(Py_ssize_t size)
     if (size > (Py_ssize_t)MAX_LONG_DIGITS) {
         PyErr_SetString(PyExc_OverflowError,
                         "too many digits in integer");
+        return NULL;
+    }
+    /* Check sandbox limits before allocation */
+    if (_PySandbox_CheckIntSize(size) < 0) {
         return NULL;
     }
     /* Fast operations for single digit integers (including zero)

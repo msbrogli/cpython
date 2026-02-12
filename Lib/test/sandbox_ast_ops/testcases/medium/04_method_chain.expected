@@ -1,0 +1,11 @@
+   2: L   3 SANDBOX_COUNT 1
+   0:       ---           Code: Foo
+  10: L   4 SANDBOX_COUNT 1
+   0:       ---           Code: bar
+   2: L   5 SANDBOX_COUNT 1
+  14: L   3 SANDBOX_COUNT 1
+  32: L   7 SANDBOX_COUNT 1
+  34: L   7 SANDBOX_COUNT 1
+  36: L   7 SANDBOX_COUNT 1
+  38: L   7 SANDBOX_COUNT 1
+  40: L   7 SANDBOX_COUNT 1

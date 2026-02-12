@@ -1,0 +1,343 @@
+"""Tests for dunder attribute blocking."""
+
+import sys
+import unittest
+
+from test.test_sandbox import _run_sandboxed_code, _get_settable_limits
+
+
+class DunderAccessBlockingTests(unittest.TestCase):
+    """Test dunder attribute blocking."""
+
+    def setUp(self):
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        sys.sandbox.set_config(**self.original_limits)
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+
+    def test_default_blocks_dunder(self):
+        """Default should block dunder access for security."""
+        limits = sys.sandbox.get_config()
+        self.assertFalse(limits['allow_dunder_access'])
+
+    def test_dunder_read_blocked(self):
+        """Reading dunder attributes blocked when configured."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False)
+sys.sandbox.enter_scope()
+x = {}
+try:
+    d = x.__class__
+    print("ERROR: should have raised")
+    sys.exit(1)
+except SandboxAttributeError as e:
+    print("OK:", e)
+    sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+        self.assertNotIn("ERROR:", result.stdout)
+
+    def test_dunder_write_blocked(self):
+        """Writing dunder attributes blocked when configured."""
+        code = '''
+import sys
+# Define class BEFORE entering sandbox scope
+class Foo:
+    pass
+sys.sandbox.set_config(allow_dunder_access=False)
+sys.sandbox.enter_scope()
+try:
+    Foo.__doc__ = "hacked"
+    print("ERROR: should have raised")
+    sys.exit(1)
+except SandboxAttributeError as e:
+    print("OK:", e)
+    sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+        self.assertNotIn("ERROR:", result.stdout)
+
+    def test_dunder_delete_blocked(self):
+        """Deleting dunder attributes blocked when configured."""
+        code = '''
+import sys
+# Define class BEFORE entering sandbox scope
+class Foo:
+    __doc__ = "test"
+sys.sandbox.set_config(allow_dunder_access=False)
+sys.sandbox.enter_scope()
+try:
+    del Foo.__doc__
+    print("ERROR: should have raised")
+    sys.exit(1)
+except SandboxAttributeError as e:
+    print("OK:", e)
+    sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+        self.assertNotIn("ERROR:", result.stdout)
+
+    def test_normal_attr_allowed(self):
+        """Normal attributes still allowed when dunder blocked."""
+        code = '''
+import sys
+# Define class BEFORE entering sandbox scope
+class Foo:
+    pass
+sys.sandbox.set_config(allow_dunder_access=False)
+sys.sandbox.enter_scope()
+Foo.bar = 42
+print("OK:", Foo.bar)
+sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK: 42", result.stdout)
+
+    def test_outside_scope_allowed(self):
+        """Dunder access allowed outside sandbox scope."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False)
+# NOT entering sandbox scope
+x = {}
+print("OK:", x.__class__.__name__)
+sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK: dict", result.stdout)
+
+    def test_dunder_blocked_with_filename_scope(self):
+        """Dunder blocking should work with filename-based scope tracking."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+x = {}
+d = x.__class__
+""", "<sandbox>", "exec"))
+    print("ERROR: should have raised")
+    sys.exit(1)
+except SandboxAttributeError as e:
+    print("OK:", e)
+    sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+        self.assertNotIn("ERROR:", result.stdout)
+
+    def test_dunder_allowed_when_enabled(self):
+        """Dunder access allowed when allow_dunder_access is True."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=True)
+sys.sandbox.enter_scope()
+x = {}
+print("OK:", x.__class__.__name__)
+sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK: dict", result.stdout)
+
+    def test_single_underscore_allowed(self):
+        """Single underscore attributes should still be allowed."""
+        code = '''
+import sys
+# Define class BEFORE entering sandbox scope
+class Foo:
+    pass
+sys.sandbox.set_config(allow_dunder_access=False)
+sys.sandbox.enter_scope()
+Foo._private = 42
+print("OK:", Foo._private)
+sys.exit(0)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK: 42", result.stdout)
+
+
+class ClassBodyWhitelistTests(unittest.TestCase):
+    """Test class body dunder whitelist with allow_class_creation=True."""
+
+    def setUp(self):
+        self.original_limits = _get_settable_limits()
+
+    def tearDown(self):
+        sys.sandbox.set_config(**self.original_limits)
+        try:
+            sys.sandbox.exit_scope()
+        except RuntimeError:
+            pass
+
+    def test_class_creation_allowed_with_whitelist(self):
+        """Class creation should work with allow_class_creation=True."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Foo:
+    x = 1
+    def method(self):
+        return self.x
+""", "<sandbox>", "exec"))
+    print("OK: class created")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_class_with_slots_allowed(self):
+        """Class with __slots__ should work."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Point:
+    __slots__ = ('x', 'y')
+""", "<sandbox>", "exec"))
+    print("OK: class with __slots__ created")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_class_with_annotations_allowed(self):
+        """Class with __annotations__ should work."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Config:
+    debug: bool = False
+    max_size: int = 100
+""", "<sandbox>", "exec"))
+    print("OK: class with annotations created")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_class_with_docstring_allowed(self):
+        """Class with __doc__ should work."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+class Documented:
+    "This class has a docstring."
+    pass
+""", "<sandbox>", "exec"))
+    print("OK: class with docstring created")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(1)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_introspection_dunder_still_blocked(self):
+        """Introspection dunders like __class__ should still be blocked."""
+        code = '''
+import sys
+sys.sandbox.set_config(allow_dunder_access=False, allow_class_creation=True)
+sys.sandbox.add_filename("<sandbox>")
+
+try:
+    exec(compile("""
+x = {}
+c = x.__class__
+""", "<sandbox>", "exec"))
+    print("ERROR: should have raised")
+    sys.exit(1)
+except SandboxAttributeError:
+    print("OK: __class__ blocked")
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: {type(e).__name__}: {e}")
+    sys.exit(2)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+    def test_allow_class_creation_property_exists(self):
+        """allow_class_creation property should exist on sys.sandbox."""
+        code = '''
+import sys
+# Check property exists and has correct default
+if hasattr(sys.sandbox, 'allow_class_creation'):
+    if sys.sandbox.allow_class_creation == True:  # Default is True
+        print("OK: property exists with correct default")
+        sys.exit(0)
+    else:
+        print("ERROR: wrong default value")
+        sys.exit(1)
+else:
+    print("ERROR: property does not exist")
+    sys.exit(2)
+'''
+        result = _run_sandboxed_code(code)
+        self.assertEqual(result.returncode, 0,
+                        f"Expected exit code 0, got {result.returncode}: {result.stderr}")
+        self.assertIn("OK:", result.stdout)
+
+
+if __name__ == '__main__':
+    unittest.main()

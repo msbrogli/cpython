@@ -13,6 +13,7 @@
 #include "pycore_pyerrors.h"      // _PyErr_Occurred()
 #include "pycore_pymem.h"         // _PyMem_IsPtrFreed()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckFrozen()
 #include "pycore_symtable.h"      // PySTEntry_Type
 #include "pycore_typeobject.h"    // _PyTypes_InitSlotDefs()
 #include "pycore_unionobject.h"   // _PyUnion_Type
@@ -1015,6 +1016,11 @@ PyObject_SetAttr(PyObject *v, PyObject *name, PyObject *value)
     PyTypeObject *tp = Py_TYPE(v);
     int err;
 
+    /* Check sandbox frozen state */
+    if (_PySandbox_CheckFrozen(v) < 0) {
+        return -1;
+    }
+
     if (!PyUnicode_Check(name)) {
         PyErr_Format(PyExc_TypeError,
                      "attribute name must be string, not '%.200s'",
@@ -1376,6 +1382,11 @@ _PyObject_GenericSetAttrWithDict(PyObject *obj, PyObject *name,
     PyObject *descr;
     descrsetfunc f;
     int res = -1;
+
+    /* Check sandbox frozen state */
+    if (_PySandbox_CheckFrozen(obj) < 0) {
+        return -1;
+    }
 
     if (!PyUnicode_Check(name)){
         PyErr_Format(PyExc_TypeError,

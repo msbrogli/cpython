@@ -108,6 +108,7 @@ Local naming conventions:
 #define PY_SSIZE_T_CLEAN
 #include "Python.h"
 #include "pycore_fileutils.h"     // _Py_set_inheritable()
+#include "pycore_sandbox.h"       // _PySandbox_CheckIOAllowed()
 #include "structmember.h"         // PyMemberDef
 
 #ifdef _Py_MEMORY_SANITIZER
@@ -5186,6 +5187,10 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
                   PyObject *fdobj)
 /*[clinic end generated code: output=d114d026b9a9a810 input=04cfc32953f5cc25]*/
 {
+    /* Sandbox I/O check */
+    if (_PySandbox_CheckIOAllowed("socket") < 0) {
+        return -1;
+    }
 
     SOCKET_T fd = INVALID_SOCKET;
 

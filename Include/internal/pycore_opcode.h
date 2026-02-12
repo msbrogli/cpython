@@ -202,6 +202,7 @@ const uint8_t _PyOpcode_Deopt[256] = {
     [RESUME_QUICK] = RESUME,
     [RETURN_GENERATOR] = RETURN_GENERATOR,
     [RETURN_VALUE] = RETURN_VALUE,
+    [SANDBOX_COUNT] = SANDBOX_COUNT,
     [SEND] = SEND,
     [SETUP_ANNOTATIONS] = SETUP_ANNOTATIONS,
     [SET_ADD] = SET_ADD,
@@ -420,7 +421,7 @@ static const char *const _PyOpcode_OpName[256] = {
     [UNPACK_SEQUENCE_LIST] = "UNPACK_SEQUENCE_LIST",
     [UNPACK_SEQUENCE_TUPLE] = "UNPACK_SEQUENCE_TUPLE",
     [UNPACK_SEQUENCE_TWO_TUPLE] = "UNPACK_SEQUENCE_TWO_TUPLE",
-    [181] = "<181>",
+    [SANDBOX_COUNT] = "SANDBOX_COUNT",
     [182] = "<182>",
     [183] = "<183>",
     [184] = "<184>",
@@ -499,7 +500,6 @@ static const char *const _PyOpcode_OpName[256] = {
 #endif
 
 #define EXTRA_CASES \
-    case 181: \
     case 182: \
     case 183: \
     case 184: \

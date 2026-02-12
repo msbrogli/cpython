@@ -137,9 +137,13 @@ PyAPI_FUNC(void) _PyThreadState_DeleteExcept(
 static inline void
 _PyThreadState_UpdateTracingState(PyThreadState *tstate)
 {
+    /* Enable tracing if:
+     * 1. Not currently in tracing mode, AND
+     * 2. A trace/profile function is set */
     bool use_tracing =
         (tstate->tracing == 0) &&
-        (tstate->c_tracefunc != NULL || tstate->c_profilefunc != NULL);
+        (tstate->c_tracefunc != NULL ||
+         tstate->c_profilefunc != NULL);
     tstate->cframe->use_tracing = (use_tracing ? 255 : 0);
 }
 

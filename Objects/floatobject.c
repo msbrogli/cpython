@@ -12,6 +12,7 @@
 #include "pycore_object.h"        // _PyObject_Init()
 #include "pycore_pymath.h"        // _PY_SHORT_FLOAT_REPR
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckTypeAllowed()
 #include "pycore_structseq.h"     // _PyStructSequence_FiniType()
 
 #include <ctype.h>
@@ -135,6 +136,11 @@ PyFloat_GetInfo(void)
 PyObject *
 PyFloat_FromDouble(double fval)
 {
+    /* Sandbox check: verify float type is allowed */
+    if (_PySandbox_CheckTypeAllowed(&PyFloat_Type) < 0) {
+        return NULL;
+    }
+
     PyFloatObject *op;
 #if PyFloat_MAXFREELIST > 0
     struct _Py_float_state *state = get_float_state();
@@ -1703,6 +1709,11 @@ static PyObject *
 float_vectorcall(PyObject *type, PyObject * const*args,
                  size_t nargsf, PyObject *kwnames)
 {
+    /* Check if float type is allowed by sandbox */
+    if (_PySandbox_CheckTypeAllowed((PyTypeObject *)type) < 0) {
+        return NULL;
+    }
+
     if (!_PyArg_NoKwnames("float", kwnames)) {
         return NULL;
     }

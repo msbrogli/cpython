@@ -99,10 +99,21 @@ typedef struct {
 
 void _PyCode_Quicken(PyCodeObject *code);
 
+/* Check if specialization should be disabled for a code object (defined in sandbox_core.c).
+ * Used by _PyCode_Warmup to disable specialization for sandboxed code.
+ * Returns 1 if specialization should be disabled, 0 otherwise. */
+extern int _PySandbox_ShouldDisableSpecialization(PyObject *filename);
+
 static inline void
 _PyCode_Warmup(PyCodeObject *code)
 {
     if (code->co_warmup != 0) {
+        /* Skip warmup for sandboxed code - they use generic opcodes with security checks.
+         * Setting co_warmup = 0 permanently disables specialization for this code object. */
+        if (_PySandbox_ShouldDisableSpecialization(code->co_filename)) {
+            code->co_warmup = 0;
+            return;
+        }
         code->co_warmup++;
         if (code->co_warmup == 0) {
             _PyCode_Quicken(code);

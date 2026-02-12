@@ -1,0 +1,367 @@
+/* Sandbox implementation helpers - shared across sandbox_*.c files
+ *
+ * This header contains static inline helpers and macros used by multiple
+ * sandbox source files. It is NOT part of the public API.
+ */
+
+#ifndef Py_INTERNAL_SANDBOX_IMPL_H
+#define Py_INTERNAL_SANDBOX_IMPL_H
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifndef Py_BUILD_CORE
+#  error "this header requires Py_BUILD_CORE define"
+#endif
+
+#include "Python.h"
+#include "pycore_frame.h"
+#include "pycore_interp.h"
+#include "pycore_pystate.h"
+#include "pycore_sandbox.h"
+
+/* ============ Thread-safe counter macros ============
+ *
+ * For GIL-enabled builds (default): use regular increments, protected by the GIL.
+ * For free-threading builds (Py_GIL_DISABLED): use atomic operations.
+ *
+ * Performance notes:
+ * - GIL-enabled: zero overhead (plain ++counter)
+ * - Free-threading: ~5-10ns overhead per atomic increment (uncontended)
+ * This overhead is negligible compared to Python bytecode dispatch (~50-100ns).
+ */
+#ifdef Py_GIL_DISABLED
+/* Free-threading build: use atomic operations */
+#  ifdef HAVE_BUILTIN_ATOMIC
+#    define _PySandbox_CounterIncrement(counter) \
+         __atomic_add_fetch(&(counter), 1, __ATOMIC_RELAXED)
+#    define _PySandbox_CounterAdd(counter, n) \
+         __atomic_add_fetch(&(counter), (n), __ATOMIC_RELAXED)
+#    define _PySandbox_CounterLoad(counter) \
+         __atomic_load_n(&(counter), __ATOMIC_RELAXED)
+#  elif defined(_MSC_VER)
+#    include <intrin.h>
+#    define _PySandbox_CounterIncrement(counter) \
+         _InterlockedIncrement64((__int64*)&(counter))
+#    define _PySandbox_CounterAdd(counter, n) \
+         _InterlockedExchangeAdd64((__int64*)&(counter), (n))
+#    define _PySandbox_CounterLoad(counter) \
+         _InterlockedCompareExchange64((__int64*)&(counter), 0, 0)
+#  else
+/* Fallback: volatile operations (not truly atomic but better than nothing) */
+#    define _PySandbox_CounterIncrement(counter) \
+         (++*((volatile uint64_t*)&(counter)))
+#    define _PySandbox_CounterAdd(counter, n) \
+         (*((volatile uint64_t*)&(counter)) += (n))
+#    define _PySandbox_CounterLoad(counter) \
+         (*((volatile uint64_t*)&(counter)))
+#  endif
+#else
+/* GIL-enabled build: GIL provides synchronization, use plain operations */
+#define _PySandbox_CounterIncrement(counter) (++(counter))
+#define _PySandbox_CounterAdd(counter, n) ((counter) += (n))
+#define _PySandbox_CounterLoad(counter) (counter)
+#endif
+
+/* Safe counter addition with overflow and limit checks.
+ * Returns: 0 on success, -1 on error (exception set)
+ *
+ * Checks:
+ * 1. Overflow: would adding `amount` exceed UINT64_MAX?
+ * 2. Limit: after adding, does counter exceed max_limit? (if max_limit > 0)
+ */
+static inline int
+_PySandbox_CounterSafeAdd(uint64_t *counter, uint64_t amount,
+                          uint64_t max_limit, const char *counter_name)
+{
+    if (amount == 0) {
+        return 0;
+    }
+
+    uint64_t old_val = _PySandbox_CounterLoad(*counter);
+
+    /* Overflow check before adding */
+    if (amount > UINT64_MAX - old_val) {
+        PyErr_Format(PyExc_SandboxOverflowError,
+                     "%s would overflow", counter_name);
+        return -1;
+    }
+
+    _PySandbox_CounterAdd(*counter, amount);
+
+    /* Check against limit AFTER incrementing */
+    if (max_limit > 0 && _PySandbox_CounterLoad(*counter) > max_limit) {
+        PyErr_Format(PyExc_SandboxOverflowError,
+                     "%s exceeds sandbox limit", counter_name);
+        return -1;
+    }
+
+    return 0;
+}
+
+/* Maximum allowed value for uint64_t limits to prevent overflow when doing
+ * comparisons like `count == max + 1`. We use UINT64_MAX - 1000 as the safe maximum. */
+#define SANDBOX_MAX_LIMIT (UINT64_MAX - 1000)
+
+/* ============ Inline Helpers ============ */
+
+/* Check if sandbox enforcement is active.
+ * Returns true when:
+ * - enabled=1 (sandbox is turned on)
+ * - suppress_checks=0 (not in recursive error handling)
+ * - suspend_depth=0 (not temporarily bypassed)
+ *
+ * Check flow:
+ *   enabled=0?  ──YES──> BYPASSED (sandbox off)
+ *       │
+ *      NO
+ *       │
+ *   suppress_checks || suspend_depth>0?  ──YES──> BYPASSED (temporary)
+ *       │
+ *      NO
+ *       │
+ *   ENFORCED (proceed with limit/scope checks)
+ */
+#define _PySandbox_IsEnforced(sandbox) \
+    ((sandbox)->enabled && \
+     !(sandbox)->suppress_checks && \
+     (sandbox)->suspend_depth == 0)
+
+/* Helper to get current interpreter's sandbox state */
+static inline _PySandboxState *
+get_sandbox_state(void)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return NULL;
+    }
+    return &interp->sandbox;
+}
+
+/* Get the current interpreter frame.
+ * If tstate is NULL, fetches it via _PyThreadState_GET(). */
+static inline _PyInterpreterFrame *
+get_current_iframe(PyThreadState *tstate)
+{
+    if (tstate == NULL) {
+        tstate = _PyThreadState_GET();
+    }
+    if (tstate == NULL || tstate->cframe == NULL) {
+        return NULL;
+    }
+    _PyInterpreterFrame *frame = tstate->cframe->current_frame;
+    while (frame && _PyFrame_IsIncomplete(frame)) {
+        frame = frame->previous;
+    }
+    return frame;
+}
+
+/* Check if a filename is in the registered set.
+ * Uses Python set for O(1) lookup. NULL-safe.
+ * Returns: 1 if registered, 0 if not registered, -1 on error (exception set). */
+static inline int
+filename_is_registered(PyObject *set, PyObject *filename)
+{
+    if (set == NULL || filename == NULL) {
+        return 0;
+    }
+    /* PySet_Contains returns 1 if found, 0 if not found, -1 on error */
+    return PySet_Contains(set, filename);
+}
+
+/* Check if current frame is in sandbox scope.
+ * A frame is in scope if its co_filename is in the registered set.
+ * Returns: 1 if in scope, 0 if not in scope, -1 on error (exception set). */
+static inline int
+frame_in_sandbox_scope(PyObject *set, _PyInterpreterFrame *frame)
+{
+    if (set == NULL || PySet_GET_SIZE(set) == 0 || frame == NULL) {
+        return 0;
+    }
+
+    /* Skip incomplete frames to get the actual executing frame */
+    while (frame && _PyFrame_IsIncomplete(frame)) {
+        frame = frame->previous;
+    }
+    if (frame == NULL) {
+        return 0;
+    }
+
+    /* Check if current frame's filename is registered */
+    return filename_is_registered(set, frame->f_code->co_filename);
+}
+
+/* Helper for scoped counter checks. Performs all early-exit checks:
+ * - Thread/interpreter state availability
+ * - Sandbox enforcement active (enabled, not suspended, not suppressed)
+ * - Whether the specific limit is set (max_limit parameter)
+ * - Registered filenames and scope check
+ *
+ * Returns:
+ *   1 = proceed with check (sandbox/limits set via out params)
+ *   0 = skip check (not in scope, not enforced, no limit, etc.)
+ *  -1 = error (exception set)
+ */
+static inline int
+sandbox_scope_check_prologue(PyThreadState *tstate,
+                             uint64_t max_limit,
+                             _PySandboxState **sandbox_out,
+                             _PySandboxConfig **config_out)
+{
+    if (tstate == NULL || tstate->interp == NULL) {
+        return 0;
+    }
+
+    _PySandboxState *sandbox = &tstate->interp->sandbox;
+    _PySandboxConfig *config = &sandbox->config;
+
+    /* Fast exit if sandbox not enforced (disabled, suspended, or suppressed) */
+    if (!_PySandbox_IsEnforced(sandbox)) {
+        return 0;
+    }
+    if (max_limit == 0) {
+        return 0;
+    }
+    if (sandbox->registered_filenames == NULL) {
+        return 0;
+    }
+
+    _PyInterpreterFrame *frame = get_current_iframe(tstate);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;
+    }
+    if (!in_scope) {
+        return 0;
+    }
+
+    *sandbox_out = sandbox;
+    *config_out = config;
+    return 1;
+}
+
+/* Macro to reduce boilerplate in _PySandbox_Check* functions.
+ * Returns 0 (allow) early if:
+ * - No interpreter state available
+ * - Sandbox not enforced (disabled, suspended, or suppressed)
+ * - The specific limit is not set (0)
+ * - No filenames registered (not in any scope)
+ * - Current frame is not in sandbox scope
+ *
+ * Optimized to fetch thread state only once.
+ */
+#define _PYSANDBOX_CHECK_PROLOGUE(config_field) \
+    PyThreadState *_prologue_tstate = _PyThreadState_GET(); \
+    if (_prologue_tstate == NULL || _prologue_tstate->interp == NULL) { return 0; } \
+    _PySandboxState *sandbox = &_prologue_tstate->interp->sandbox; \
+    _PySandboxConfig *config = &sandbox->config; \
+    /* Fast exit if sandbox not enforced */ \
+    if (!_PySandbox_IsEnforced(sandbox)) { return 0; } \
+    if (config->config_field == 0) { \
+        return 0; \
+    } \
+    if (sandbox->registered_filenames == NULL) { \
+        return 0; \
+    } \
+    { \
+        _PyInterpreterFrame *_prologue_frame = get_current_iframe(_prologue_tstate); \
+        int _in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, _prologue_frame); \
+        if (_in_scope < 0) { return -1; } \
+        if (!_in_scope) { return 0; } \
+    }
+
+/* sandbox_check_iteration - Combined iteration + optional operation check
+ *
+ * This static inline merges the iteration-limit check and the optional
+ * count_iterations_as_operations flag into a single pass so that state
+ * loading and scope checking happen only once.  It is inlined into
+ * sandbox_iter_wrapper_iternext (the hot path) to eliminate function-call
+ * overhead.
+ *
+ * Called from PyIter_Next() (via the exported wrapper) and from
+ * sandbox_iter_wrapper_iternext (inlined).
+ *
+ * Returns: 0 if OK, -1 if limit exceeded (SandboxRuntimeError set)
+ */
+static inline int
+sandbox_check_iteration(void)
+{
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL || tstate->interp == NULL) {
+        return 0;
+    }
+
+    _PySandboxState *sandbox = &tstate->interp->sandbox;
+    _PySandboxConfig *config = &sandbox->config;
+
+    /* Fast exit if sandbox not enforced (disabled, suspended, or suppressed) */
+    if (!_PySandbox_IsEnforced(sandbox)) {
+        return 0;
+    }
+
+    int check_iters = (config->max_iterations > 0);
+    int check_ops = (config->count_iterations_as_operations
+                     && config->max_operations > 0);
+
+    /* Fast exit: nothing to check */
+    if (!check_iters && !check_ops) {
+        return 0;
+    }
+
+    /* Scope check (shared - done once for both counters) */
+    if (sandbox->registered_filenames == NULL) {
+        return 0;
+    }
+    _PyInterpreterFrame *frame = get_current_iframe(tstate);
+    int in_scope = frame_in_sandbox_scope(sandbox->registered_filenames, frame);
+    if (in_scope < 0) {
+        return -1;
+    }
+    if (!in_scope) {
+        return 0;
+    }
+
+    /* Iteration counter */
+    if (check_iters) {
+        _PySandbox_CounterIncrement(sandbox->counters.iteration_count);
+        if (_PySandbox_CounterLoad(sandbox->counters.iteration_count) >= config->max_iterations + 1) {
+            sandbox->suppress_checks = 1;
+            PyErr_SetString(PyExc_SandboxRuntimeError,
+                            "Sandbox iteration limit exceeded");
+            sandbox->suppress_checks = 0;
+            return -1;
+        }
+    }
+
+    /* Operation counter (optional, piggybacks on same scope check) */
+    if (check_ops) {
+        _PySandbox_CounterIncrement(sandbox->counters.operation_count);
+        if (_PySandbox_CounterLoad(sandbox->counters.operation_count) >= config->max_operations + 1) {
+            sandbox->suppress_checks = 1;
+            PyErr_SetString(PyExc_SandboxRuntimeError,
+                            "Sandbox operation limit exceeded");
+            sandbox->suppress_checks = 0;
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+/* ============ Forward Declarations ============ */
+
+/* Filename set operations (defined in sandbox_core.c) */
+extern int add_filename_to_set(PyObject **setp, PyObject *filename);
+extern int remove_filename_from_set(PyObject *set, PyObject *filename);
+extern void clear_filenames(PyObject *set);
+extern void free_filenames(PyObject **setp);
+
+/* Check if specialization should be disabled for a code object (defined in sandbox_core.c).
+ * Used by _PyCode_Warmup to disable specialization for sandboxed code.
+ * Returns 1 if specialization should be disabled, 0 otherwise. */
+extern int _PySandbox_ShouldDisableSpecialization(PyObject *filename);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* !Py_INTERNAL_SANDBOX_IMPL_H */

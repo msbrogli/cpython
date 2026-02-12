@@ -4,6 +4,7 @@
 #include "pycore_ceval.h"         // _Py_EnterRecursiveCallTstate()
 #include "pycore_object.h"        // _PyObject_GC_UNTRACK()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckFrozen()
 #include "pycore_tuple.h"         // _PyTuple_ITEMS()
 #include "structmember.h"         // PyMemberDef
 
@@ -242,6 +243,10 @@ member_set(PyMemberDescrObject *descr, PyObject *obj, PyObject *value)
     if (descr_setcheck((PyDescrObject *)descr, obj, value) < 0) {
         return -1;
     }
+    /* Check sandbox frozen state */
+    if (_PySandbox_CheckFrozen(obj) < 0) {
+        return -1;
+    }
     return PyMember_SetOne((char *)obj, descr->d_member, value);
 }
 
@@ -249,6 +254,10 @@ static int
 getset_set(PyGetSetDescrObject *descr, PyObject *obj, PyObject *value)
 {
     if (descr_setcheck((PyDescrObject *)descr, obj, value) < 0) {
+        return -1;
+    }
+    /* Check sandbox frozen state */
+    if (_PySandbox_CheckFrozen(obj) < 0) {
         return -1;
     }
     if (descr->d_getset->set != NULL) {
@@ -1635,6 +1644,10 @@ property_descr_set(PyObject *self, PyObject *obj, PyObject *value)
 {
     propertyobject *gs = (propertyobject *)self;
     PyObject *func, *res;
+
+    if (_PySandbox_CheckFrozen(obj) < 0) {
+        return -1;
+    }
 
     if (value == NULL) {
         func = gs->prop_del;

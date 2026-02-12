@@ -184,6 +184,11 @@ struct _ts {
     PyObject **datastack_limit;
     /* XXX signal handlers should also be here */
 
+    /* Sandbox recursion depth: count of sandbox-scoped frames in call stack.
+       Placed here (before exc_state) to maintain ABI compatibility with v3.11.14 -
+       all fields above retain their original offsets. */
+    uint64_t sandbox_recursion_depth;
+
     /* The following fields are here to avoid allocation during init.
        The data is exposed through PyThreadState pointer fields.
        These fields should not be accessed directly outside of init.

@@ -1,0 +1,573 @@
+- Feature Name: sandbox-opcodes
+- Start Date: 2025-01-29
+- RFC PR: (leave this empty)
+- Hathor Issue: (leave this empty)
+- Author: Hathor Team
+
+# Summary
+[summary]: #summary
+
+The sandbox opcodes module provides bytecode-level operation restriction through a bitmap of allowed opcodes. When enabled, any attempt to execute an opcode not in the allowed set from sandbox scope raises `SandboxRuntimeError`. This allows fine-grained control over what operations sandboxed code can perform using an allowlist model.
+
+# Motivation
+[motivation]: #motivation
+
+Some Python operations are dangerous regardless of the values involved:
+
+1. **Imports**: `IMPORT_NAME`, `IMPORT_FROM`, `IMPORT_STAR` can load arbitrary code
+2. **Attribute access**: `LOAD_ATTR`, `STORE_ATTR` can access dangerous attributes
+3. **Global access**: `LOAD_GLOBAL`, `STORE_GLOBAL` can modify shared state
+4. **Calls**: `CALL_FUNCTION` can invoke dangerous callables
+
+While other sandbox features (import restrictions, frozen mode) address some concerns, opcode restriction provides defense-in-depth at the bytecode level. If sandboxed code somehow bypasses higher-level checks, opcode restriction provides a final barrier.
+
+# Guide-level explanation
+[guide-level-explanation]: #guide-level-explanation
+
+## Enabling Opcode Restrictions
+
+The opcode restriction system uses an allowlist model: you specify which opcodes ARE permitted, and any opcode not in the allowed set will raise an error when executed in sandbox scope.
+
+```python
+import sys
+import opcode
+
+# Set allowed opcodes (all opcodes 0-255 EXCEPT imports)
+ALL_OPCODES = set(range(256))
+IMPORT_OPCODES = {
+    opcode.opmap['IMPORT_NAME'],
+    opcode.opmap['IMPORT_FROM'],
+    opcode.opmap['IMPORT_STAR'],
+}
+
+sys.sandbox.allowed_opcodes = ALL_OPCODES - IMPORT_OPCODES
+
+# Enable opcode restriction mode
+sys.sandbox.opcode_restrict_mode = True
+
+sys.sandbox.add_filename("<sandbox>")
+
+code = compile("import os", "<sandbox>", "exec")
+
+try:
+    exec(code)
+except SandboxRuntimeError as e:
+    print(e)  # "Opcode 108 is not allowed in sandbox scope"
+```
+
+## Common Opcode Sets
+
+### Block All Imports
+
+```python
+import opcode
+
+ALL_OPCODES = set(range(256))
+IMPORT_OPCODES = {
+    opcode.opmap['IMPORT_NAME'],
+    opcode.opmap['IMPORT_FROM'],
+    opcode.opmap['IMPORT_STAR'],
+}
+
+sys.sandbox.allowed_opcodes = ALL_OPCODES - IMPORT_OPCODES
+sys.sandbox.opcode_restrict_mode = True
+```
+
+### Block Attribute Mutation
+
+```python
+ALL_OPCODES = set(range(256))
+ATTR_MUTATION_OPCODES = {
+    opcode.opmap['STORE_ATTR'],
+    opcode.opmap['DELETE_ATTR'],
+}
+
+sys.sandbox.allowed_opcodes = ALL_OPCODES - ATTR_MUTATION_OPCODES
+```
+
+### Block Global Mutation
+
+```python
+ALL_OPCODES = set(range(256))
+GLOBAL_MUTATION_OPCODES = {
+    opcode.opmap['STORE_GLOBAL'],
+    opcode.opmap['DELETE_GLOBAL'],
+    opcode.opmap['STORE_NAME'],
+    opcode.opmap['DELETE_NAME'],
+}
+
+sys.sandbox.allowed_opcodes = ALL_OPCODES - GLOBAL_MUTATION_OPCODES
+```
+
+## Checking Current Configuration
+
+```python
+# Get allowed opcodes
+allowed = sys.sandbox.allowed_opcodes
+print(allowed)  # frozenset({0, 1, 2, ..., 255} - blocked opcodes)
+
+# Check if mode is active
+print(sys.sandbox.opcode_restrict_mode)  # True/False
+```
+
+## Combining with Other Restrictions
+
+Opcode restrictions work alongside other sandbox features:
+
+```python
+import sys
+import opcode
+
+ALL_OPCODES = set(range(256))
+
+# Multi-layered protection
+sys.sandbox.set_config(
+    max_operations=10000,
+    allow_dunder_access=False,
+)
+
+sys.sandbox.allowed_opcodes = ALL_OPCODES - {opcode.opmap['IMPORT_NAME']}
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.frozen_mode = True
+
+# Now sandboxed code cannot:
+# - Execute more than 10000 operations (with PyCF_SANDBOX_COUNT flag)
+# - Access __dunder__ attributes
+# - Use IMPORT_NAME opcode
+# - Modify any attributes
+```
+
+# Reference-level explanation
+[reference-level-explanation]: #reference-level-explanation
+
+## Data Structures
+
+### Opcode Bitmap
+
+256-bit bitmap for O(1) opcode lookup:
+
+```c
+typedef struct {
+    uint32_t bits[8];  /* 8 * 32 = 256 bits */
+} _PySandboxOpcodeSet;
+
+#define _PySandbox_OpcodeSet_HAS(set, op) \
+    ((set)->bits[(op) >> 5] & (1U << ((op) & 31)))
+
+#define _PySandbox_OpcodeSet_SET(set, op) \
+    ((set)->bits[(op) >> 5] |= (1U << ((op) & 31)))
+
+#define _PySandbox_OpcodeSet_CLEAR(set, op) \
+    ((set)->bits[(op) >> 5] &= ~(1U << ((op) & 31)))
+
+#define _PySandbox_OpcodeSet_ZERO(set) \
+    memset((set)->bits, 0, sizeof((set)->bits))
+```
+
+### State Storage
+
+```c
+typedef struct {
+    /* ... other fields ... */
+    int opcode_restrict_mode;            /* 1 = active, 0 = off */
+    int allow_specialized_opcodes;       /* 1 = allow specialized, 0 = block (default) */
+    _PySandboxOpcodeSet allowed_opcodes;  /* Bitmap of allowed opcodes */
+    /* ... */
+} _PySandboxState;
+```
+
+## Opcode Check Function
+
+```c
+int
+_PySandbox_CheckOpcode(int opcode)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL) {
+        return 0;
+    }
+
+    _PySandboxState *sandbox = &interp->sandbox;
+
+    /* Fast exit: mode not active */
+    if (!sandbox->opcode_restrict_mode) {
+        return 0;
+    }
+
+    /* Fast exit: suspended or in recursive check */
+    if (sandbox->suspend_depth || sandbox->suppress_checks) {
+        return 0;
+    }
+
+    /* Fast exit: opcode is allowed (bitmap check) */
+    if (_PySandbox_OpcodeSet_HAS(&sandbox->allowed_opcodes, opcode)) {
+        return 0;
+    }
+
+    /* Check if in sandbox scope */
+    _PyInterpreterFrame *frame = get_current_interpreter_frame();
+    if (!frame_in_sandbox_scope(sandbox->registered_filenames, frame)) {
+        return 0;
+    }
+
+    /* Disallowed opcode in sandbox scope - raise error */
+    sandbox->suppress_checks = 1;
+    PyErr_Format(PyExc_SandboxRuntimeError,
+                 "Opcode %d is not allowed in sandbox scope", opcode);
+    sandbox->suppress_checks = 0;
+    return -1;
+}
+```
+
+## Opcode Dispatch Check
+
+Called from `Python/ceval.c` in the opcode dispatch loop:
+
+```c
+/* In ceval.c tracing/dispatch section */
+static inline int
+_PySandbox_CheckOpcodeDispatch(int opcode)
+{
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    if (interp == NULL || !interp->sandbox.opcode_restrict_mode) {
+        return 0;  /* Fast path when disabled */
+    }
+    return _PySandbox_CheckOpcode(opcode);
+}
+```
+
+The check is called before each opcode execution when tracing is active:
+
+```c
+TARGET(IMPORT_NAME) {
+    /* Check runs via DO_TRACING or dedicated check */
+    if (_PySandbox_CheckOpcodeDispatch(IMPORT_NAME) < 0) {
+        goto error;
+    }
+    /* ... normal opcode implementation ... */
+}
+```
+
+## C API
+
+```c
+/* Enable/disable opcode restriction mode */
+void PySandbox_SetOpcodeRestrictMode(int mode);
+int PySandbox_GetOpcodeRestrictMode(void);
+
+/* Set allowed opcodes from Python set of integers (or NULL to clear) */
+int PySandbox_SetAllowedOpcodes(PyObject *opcode_set);
+
+/* Get allowed opcodes as frozenset */
+PyObject *PySandbox_GetAllowedOpcodes(void);
+
+/* Check if opcode is allowed (called from ceval.c) */
+int _PySandbox_CheckOpcode(int opcode);
+```
+
+## Python API
+
+### Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `opcode_restrict_mode` | bool | False | Enable opcode checking |
+| `allow_specialized_opcodes` | bool | False | Allow specialized opcodes when opcode_restrict_mode=True |
+| `allowed_opcodes` | frozenset | empty | Set of allowed opcode integers |
+
+### Setting Allowed Opcodes
+
+```python
+# Allow all opcodes except specific ones
+ALL_OPCODES = set(range(256))
+
+# From set subtraction
+sys.sandbox.allowed_opcodes = ALL_OPCODES - {108, 109, 84}
+
+# From opcode module
+import opcode
+sys.sandbox.allowed_opcodes = ALL_OPCODES - {opcode.opmap['IMPORT_NAME']}
+
+# Clear (no opcodes allowed when mode is active)
+sys.sandbox.allowed_opcodes = None
+```
+
+## Performance
+
+### Fast Exits
+
+The check function has multiple fast exits to minimize overhead:
+
+1. **Mode off**: Single pointer dereference + comparison
+2. **Suspended**: Single comparison
+3. **Opcode is allowed**: Single bitmap lookup (O(1))
+4. **Out of scope**: Set lookup (O(1) average)
+
+### Bitmap Efficiency
+
+The 256-bit bitmap allows O(1) opcode checking:
+- 8 `uint32_t` values = 32 bytes
+- Bit test: `bits[op >> 5] & (1 << (op & 31))`
+- No memory allocation, no hash computation
+
+## Common Opcodes Reference
+
+| Opcode | Name | Purpose |
+|--------|------|---------|
+| 108 | `IMPORT_NAME` | Import a module |
+| 109 | `IMPORT_FROM` | Import a name from module |
+| 84 | `IMPORT_STAR` | Import all names (`from X import *`) |
+| 95 | `STORE_ATTR` | Set attribute |
+| 96 | `DELETE_ATTR` | Delete attribute |
+| 116 | `LOAD_GLOBAL` | Load global variable |
+| 117 | `STORE_GLOBAL` | Set global variable |
+| 118 | `DELETE_GLOBAL` | Delete global variable |
+
+Use `opcode.opmap` to get current Python version's opcode numbers.
+
+## Exception Type
+
+`SandboxRuntimeError` is raised for banned opcodes:
+
+```
+SandboxRuntimeError: Opcode 108 is not allowed in sandbox scope
+```
+
+# Security Considerations
+[security-considerations]: #security-considerations
+
+## Specialized Opcode Handling (P0 Critical)
+
+CPython's adaptive interpreter (PEP 659) creates specialized variants of opcodes
+for performance. Each generic opcode (e.g., `LOAD_ATTR`) has multiple specialized
+forms (e.g., `LOAD_ATTR_INSTANCE_VALUE`, `LOAD_ATTR_SLOT`).
+
+**Security Requirement:** Specialized opcodes skip security checks present in
+generic opcodes. For example, `LOAD_ATTR_INSTANCE_VALUE` bypasses the dunder
+access check in `LOAD_ATTR`.
+
+### Solution: Disable Specialization at Warmup Time
+
+The sandbox disables specialization for sandboxed code by setting `co_warmup = 0`
+when a code object's filename is registered in sandbox scope.
+
+#### How Specialization Works in CPython
+
+1. Code object created → `co_warmup = -8` (QUICKENING_INITIAL_WARMUP_VALUE)
+2. Each execution → `_PyCode_Warmup()` increments counter
+3. After 8 executions → Counter reaches 0 → `_PyCode_Quicken()` called
+4. `_PyCode_Quicken()` converts adaptive opcodes to specialized forms
+
+**Key insight:** `_PyCode_Warmup()` checks `if (code->co_warmup != 0)` before
+incrementing. Setting `co_warmup = 0` permanently disables specialization.
+
+#### Implementation
+
+In `Include/internal/pycore_code.h`, `_PyCode_Warmup()` checks if specialization
+should be disabled for the code object:
+
+```c
+static inline void
+_PyCode_Warmup(PyCodeObject *code)
+{
+    if (code->co_warmup != 0) {
+        /* Skip warmup for sandboxed code - they use generic opcodes with security checks */
+        if (_PySandbox_ShouldDisableSpecialization(code->co_filename)) {
+            code->co_warmup = 0;  /* Permanently disable specialization */
+            return;
+        }
+        code->co_warmup++;
+        if (code->co_warmup == 0) {
+            _PyCode_Quicken(code);
+        }
+    }
+}
+```
+
+The helper function `_PySandbox_ShouldDisableSpecialization()` in `Python/sandbox_core.c`
+returns 1 (disable specialization) when:
+
+1. Sandbox is enforced (`_PySandbox_IsEnforced()` returns true: enabled, not suspended, not suppressed) AND
+2. Security-sensitive settings are active (`allow_dunder_access=0` or `allow_unsafe=0`) OR
+3. The filename is registered in sandbox scope
+
+Note: When sandbox is suspended (via `suspend()`/`resume()`) or suppressed (during error handling),
+specialization is allowed to proceed normally.
+
+### Affected Opcode Families
+
+| Generic Opcode | Specialized Variants |
+|----------------|---------------------|
+| `LOAD_ATTR` | 4 specialized variants: `LOAD_ATTR_INSTANCE_VALUE`, `LOAD_ATTR_MODULE`, `LOAD_ATTR_WITH_HINT`, `LOAD_ATTR_SLOT` |
+| `STORE_ATTR` | 3 specialized variants: `STORE_ATTR_INSTANCE_VALUE`, `STORE_ATTR_WITH_HINT`, `STORE_ATTR_SLOT` |
+| `LOAD_METHOD` | 5 specialized variants: `LOAD_METHOD_WITH_VALUES`, `LOAD_METHOD_WITH_DICT`, `LOAD_METHOD_NO_DICT`, `LOAD_METHOD_MODULE`, `LOAD_METHOD_CLASS` |
+| `BINARY_SUBSCR` | 4 specialized variants |
+| `STORE_SUBSCR` | 2 specialized variants |
+| `LOAD_GLOBAL` | 2 specialized variants |
+| `COMPARE_OP` | 3 specialized variants |
+| `CALL/PRECALL` | 13+ specialized variants |
+
+### Mapping Location
+
+`Python/specialize.c` line 20-32 defines `_PyOpcode_Adaptive[]` which maps generic
+opcodes to their adaptive entry points. The actual specialization functions are
+`_Py_Specialize_*()` in the same file.
+
+### Why Disable Specialization at Warmup Time
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Option 1:** Add security checks to each specialized opcode | Fine-grained control | Must modify 15+ opcodes, maintenance burden, easy to miss one |
+| **Option 2:** DEOPT_IF in each specialized opcode | Simple pattern | Still 15+ modifications, runtime check on every execution |
+| **Option 3:** Disable specialization at warmup (IMPLEMENTED) | Single point of control, future-proof, no runtime overhead per opcode | Performance penalty for sandboxed code (acceptable trade-off) |
+
+The implemented approach (Option 3) provides:
+- **Single point of control**: All security is enforced in one location (`_PyCode_Warmup`)
+- **Future-proof**: New specialized opcodes are automatically handled
+- **No per-opcode overhead**: The check happens once at warmup, not on every execution
+- **Audit-friendly**: Easy to verify that sandboxed code uses generic opcodes
+
+### Runtime Specialized Opcode Blocking (`allow_specialized_opcodes`)
+
+In addition to disabling specialization at warmup time, the sandbox provides a runtime
+check via the `allow_specialized_opcodes` flag. When `opcode_restrict_mode=True` and
+`allow_specialized_opcodes=False` (the default), any specialized opcode that attempts
+to execute in sandbox scope will be blocked with `SandboxRuntimeError`.
+
+This provides defense-in-depth for scenarios where:
+1. Code was specialized before entering sandbox scope (warm functions)
+2. Code was imported from outside the sandbox with pre-specialized bytecode
+3. Future CPython changes modify when/how specialization occurs
+
+#### How It Works
+
+The `_PySandbox_CheckOpcodeDispatch()` function in `ceval.c` uses `_PyOpcode_Deopt[]`
+to detect specialized opcodes:
+
+```c
+int deopt = _PyOpcode_Deopt[opcode];
+
+/* Block specialized opcodes unless explicitly allowed */
+if (!sandbox->allow_specialized_opcodes && opcode != deopt) {
+    return _PySandbox_CheckOpcode(opcode);  /* Will raise error if in scope */
+}
+```
+
+If `opcode != deopt`, the opcode is specialized (e.g., `BINARY_OP_ADD_INT` vs `BINARY_OP`),
+and it will be rejected if `allow_specialized_opcodes=False`. The specialized opcode
+will not be in the `allowed_opcodes` bitmap (which only contains base opcodes), so
+`_PySandbox_CheckOpcode` will raise an error when in sandbox scope.
+
+#### Example
+
+```python
+import sys
+
+# Function gets specialized before sandbox is active
+def hot_add(a, b):
+    return a + b
+
+for _ in range(100):
+    hot_add(1, 2)  # Triggers specialization
+
+# Enable sandbox with opcode restriction
+sys.sandbox.enable()
+sys.sandbox.allowed_opcodes = set(range(256))  # Allow all base opcodes
+sys.sandbox.opcode_restrict_mode = True
+sys.sandbox.allow_specialized_opcodes = False  # Block specialized (default)
+
+sys.sandbox.add_filename(hot_add.__code__.co_filename)
+
+try:
+    hot_add(1, 2)  # Uses BINARY_OP_ADD_INT (specialized)
+except SandboxRuntimeError as e:
+    print(e)  # "Specialized opcode 5 is not allowed in sandbox scope"
+```
+
+#### When to Allow Specialized Opcodes
+
+Set `allow_specialized_opcodes=True` if:
+- You trust that specialized opcodes don't bypass security checks (they may in some cases)
+- Performance is critical and you've verified the specific opcodes are safe
+- You're using opcode restriction primarily for feature blocking, not security
+
+Keep `allow_specialized_opcodes=False` (default) for maximum security.
+
+# Drawbacks
+[drawbacks]: #drawbacks
+
+1. **Version Dependency**: Opcode numbers change between Python versions. Code using raw numbers is not portable.
+
+2. **Tracing Overhead**: When enabled, opcode checking adds overhead to every instruction dispatch.
+
+3. **Coarse Granularity**: Can only ban opcodes entirely, not based on operands (e.g., can't allow `LOAD_ATTR` for some attributes but not others).
+
+4. **Defense in Depth Only**: Opcode restriction alone is insufficient; should be combined with other protections.
+
+# Rationale and alternatives
+[rationale-and-alternatives]: #rationale-and-alternatives
+
+## Why Bitmap vs. Set?
+
+**Set approach**:
+```c
+PyObject *allowed_opcodes;  /* Python set */
+int is_allowed = PySet_Contains(allowed_opcodes, PyLong_FromLong(opcode));
+```
+- Rejected: Memory allocation, hash computation, GIL considerations per check.
+
+**Bitmap approach** (chosen):
+```c
+uint32_t bits[8];
+int is_allowed = bits[op >> 5] & (1U << (op & 31));
+```
+- O(1) constant time
+- No memory allocation
+- Single memory read
+- Cache-friendly
+
+## Why 256 Bits?
+
+Python opcodes are single bytes (0-255). 256 bits covers all possible opcodes with minimal space (32 bytes).
+
+## Why Separate Mode Flag?
+
+```c
+if (!sandbox->opcode_restrict_mode) return 0;  /* Fast exit */
+```
+
+Could check `allowed_opcodes == full`, but separate flag allows:
+- Faster check (no bitmap scan)
+- Clear enable/disable semantics
+- Prepare allowed list before enabling
+
+# Prior art
+[prior-art]: #prior-art
+
+1. **Java Bytecode Verifier**: Validates bytecode before execution; similar concept of instruction-level security.
+
+2. **WebAssembly**: Has a strict set of allowed instructions; sandboxed by design.
+
+3. **eBPF Verifier**: Linux kernel verifies BPF bytecode before execution.
+
+4. **Seccomp-BPF**: Linux syscall filtering using BPF; similar bitmap-based filtering.
+
+# Unresolved questions
+[unresolved-questions]: #unresolved-questions
+
+1. Should there be a "safe opcode set" preset for common use cases?
+
+2. How to handle opcode number changes across Python versions?
+
+3. Should extended opcodes (with `EXTENDED_ARG`) be handled specially?
+
+# Future possibilities
+[future-possibilities]: #future-possibilities
+
+1. **Opcode Argument Filtering**: Ban opcodes only for specific arguments (e.g., `LOAD_ATTR` only for certain attribute names).
+
+2. **Opcode Quotas**: Limit how many times certain opcodes can execute.
+
+3. **Opcode Replacement**: Replace banned opcodes with safe alternatives at load time.
+
+4. **JIT Integration**: Integrate with JIT compilers to enforce restrictions in compiled code.

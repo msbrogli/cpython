@@ -219,6 +219,7 @@ struct ast_state {
     PyObject *names;
     PyObject *op;
     PyObject *operand;
+    PyObject *operations_count;
     PyObject *operator_type;
     PyObject *ops;
     PyObject *optional_vars;

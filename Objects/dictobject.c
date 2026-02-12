@@ -121,6 +121,7 @@ As a consequence of this, split keys have a maximum size of 16.
 #include "pycore_object.h"        // _PyObject_GC_TRACK()
 #include "pycore_pyerrors.h"      // _PyErr_Fetch()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckDictSize()
 #include "stringlib/eq.h"         // unicode_eq()
 
 #include <stdbool.h>
@@ -1244,6 +1245,10 @@ insertdict(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value)
 
     if (ix == DKIX_EMPTY) {
         /* Insert into new slot. */
+        /* Check sandbox limits before insertion */
+        if (_PySandbox_CheckDictSize(mp->ma_used + 1) < 0) {
+            goto Fail;
+        }
         mp->ma_keys->dk_version = 0;
         assert(old_value == NULL);
         if (mp->ma_keys->dk_usable <= 0) {
@@ -1289,6 +1294,10 @@ insertdict(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value)
         if (_PyDict_HasSplitTable(mp)) {
             mp->ma_values->values[ix] = value;
             if (old_value == NULL) {
+                /* Check sandbox limits before adding to split table */
+                if (_PySandbox_CheckDictSize(mp->ma_used + 1) < 0) {
+                    goto Fail;
+                }
                 _PyDictValues_AddToInsertionOrder(mp->ma_values, ix);
                 mp->ma_used++;
             }
@@ -2837,6 +2846,13 @@ dict_merge(PyObject *a, PyObject *b, int override)
         if (other == mp || other->ma_used == 0)
             /* a.update(a) or a.update({}); nothing to do */
             return 0;
+
+        /* Sandbox check: verify final size is within limits.
+         * This is an upper bound - actual size may be smaller due to overlapping keys. */
+        if (_PySandbox_CheckDictSize(mp->ma_used + other->ma_used) < 0) {
+            return -1;
+        }
+
         if (mp->ma_used == 0) {
             /* Since the target dict is empty, PyDict_GetItem()
              * always returns NULL.  Setting override to 1
@@ -3028,6 +3044,11 @@ PyDict_Copy(PyObject *o)
     if (mp->ma_used == 0) {
         /* The dict is empty; just return a new dict. */
         return PyDict_New();
+    }
+
+    /* Sandbox check: verify copy size is within limits */
+    if (_PySandbox_CheckDictSize(mp->ma_used) < 0) {
+        return NULL;
     }
 
     if (_PyDict_HasSplitTable(mp)) {
@@ -5435,6 +5456,10 @@ int
 _PyObject_StoreInstanceAttribute(PyObject *obj, PyDictValues *values,
                               PyObject *name, PyObject *value)
 {
+    /* Check sandbox frozen state */
+    if (_PySandbox_CheckFrozen(obj) < 0) {
+        return -1;
+    }
     PyDictKeysObject *keys = CACHED_KEYS(Py_TYPE(obj));
     assert(keys != NULL);
     assert(values != NULL);

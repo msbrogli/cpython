@@ -14,6 +14,7 @@
 #include "pycore_pyerrors.h"      // _PyErr_Fetch()
 #include "pycore_pymem.h"         // _PyMem_IsPtrFreed()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_IsInScope()
 #include "pycore_traceback.h"     // EXCEPTION_TB_HEADER
 
 #include "../Parser/pegen.h"      // _PyPegen_byte_offset_to_character_offset()
@@ -172,18 +173,33 @@ tb_next_set(PyTracebackObject *self, PyObject *new_next, void *Py_UNUSED(_))
 }
 
 
+static PyObject *
+tb_get_frame(PyTracebackObject *tb, void *Py_UNUSED(closure))
+{
+    /* Block from within sandbox scope. */
+    if (_PySandbox_IsInScope()) {
+        PyErr_SetString(PyExc_SandboxSecurityError,
+            "traceback frame access is blocked in sandbox scope");
+        return NULL;
+    }
+    if (PySys_Audit("object.__getattr__", "Os", tb, "tb_frame") < 0) {
+        return NULL;
+    }
+    return Py_NewRef(tb->tb_frame);
+}
+
 static PyMethodDef tb_methods[] = {
    {"__dir__", _PyCFunction_CAST(tb_dir), METH_NOARGS},
    {NULL, NULL, 0, NULL},
 };
 
 static PyMemberDef tb_memberlist[] = {
-    {"tb_frame",        T_OBJECT,       OFF(tb_frame),  READONLY|PY_AUDIT_READ},
     {"tb_lasti",        T_INT,          OFF(tb_lasti),  READONLY},
     {NULL}      /* Sentinel */
 };
 
 static PyGetSetDef tb_getsetters[] = {
+    {"tb_frame", (getter)tb_get_frame, NULL, NULL, NULL},
     {"tb_next", (getter)tb_next_get, (setter)tb_next_set, NULL, NULL},
     {"tb_lineno", (getter)tb_lineno_get, NULL, NULL, NULL},
     {NULL}      /* Sentinel */

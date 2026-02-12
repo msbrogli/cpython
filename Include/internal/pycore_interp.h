@@ -25,6 +25,7 @@ extern "C" {
 #include "pycore_typeobject.h"    // struct type_cache
 #include "pycore_unicodeobject.h" // struct _Py_unicode_state
 #include "pycore_warnings.h"      // struct _warnings_runtime_state
+#include "pycore_sandbox.h"       // _PySandboxState
 
 struct _pending_calls {
     PyThread_type_lock lock;
@@ -192,6 +193,11 @@ struct _is {
 
     /* the initial PyInterpreterState.threads.head */
     PyThreadState _initial_thread;
+
+    /* Sandbox state: resource limits and object creation hooks.
+       Placed at end of struct to maintain ABI compatibility with v3.11.14 -
+       all fields above retain their original offsets. */
+    _PySandboxState sandbox;
 };
 
 

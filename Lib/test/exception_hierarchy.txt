@@ -41,6 +41,15 @@ BaseException
       ├── RuntimeError
       │    ├── NotImplementedError
       │    └── RecursionError
+      ├── SandboxError
+      │    ├── SandboxAttributeError
+      │    ├── SandboxImportError
+      │    ├── SandboxMemoryError
+      │    ├── SandboxOverflowError
+      │    ├── SandboxRecursionError
+      │    ├── SandboxRuntimeError
+      │    ├── SandboxSecurityError
+      │    └── SandboxTypeError
       ├── StopAsyncIteration
       ├── StopIteration
       ├── SyntaxError

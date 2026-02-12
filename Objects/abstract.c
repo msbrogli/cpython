@@ -7,6 +7,7 @@
 #include "pycore_object.h"        // _Py_CheckSlotResult()
 #include "pycore_pyerrors.h"      // _PyErr_Occurred()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckIteration()
 #include "pycore_unionobject.h"   // _PyUnion_Check()
 #include <ctype.h>
 #include <stddef.h>               // offsetof()
@@ -2795,8 +2796,16 @@ PyObject_GetIter(PyObject *o)
 
     f = t->tp_iter;
     if (f == NULL) {
-        if (PySequence_Check(o))
-            return PySeqIter_New(o);
+        if (PySequence_Check(o)) {
+            PyObject *iter = PySeqIter_New(o);
+            if (iter == NULL) {
+                return NULL;
+            }
+            /* Wrap iterator if in sandbox scope */
+            PyObject *wrapped = _PySandbox_WrapIterator(iter);
+            Py_DECREF(iter);
+            return wrapped;
+        }
         return type_error("'%.200s' object is not iterable", o);
     }
     else {
@@ -2808,6 +2817,12 @@ PyObject_GetIter(PyObject *o)
                          Py_TYPE(res)->tp_name);
             Py_DECREF(res);
             res = NULL;
+        }
+        if (res != NULL) {
+            /* Wrap iterator if in sandbox scope */
+            PyObject *wrapped = _PySandbox_WrapIterator(res);
+            Py_DECREF(res);
+            res = wrapped;
         }
         return res;
     }
@@ -2860,6 +2875,11 @@ PyAIter_Check(PyObject *obj)
 PyObject *
 PyIter_Next(PyObject *iter)
 {
+    /* Check iteration limits */
+    if (_PySandbox_CheckIteration() < 0) {
+        return NULL;
+    }
+
     PyObject *result;
     result = (*Py_TYPE(iter)->tp_iternext)(iter);
     if (result == NULL) {

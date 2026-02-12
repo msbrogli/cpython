@@ -578,7 +578,7 @@ _PyPegen_name_from_token(Parser *p, Token* t)
         return NULL;
     }
     return _PyAST_Name(id, Load, t->lineno, t->col_offset, t->end_lineno,
-                       t->end_col_offset, p->arena);
+                       t->end_col_offset, 0, p->arena);
 }
 
 expr_ty
@@ -739,7 +739,7 @@ _PyPegen_number_token(Parser *p)
     }
 
     return _PyAST_Constant(c, NULL, t->lineno, t->col_offset, t->end_lineno,
-                           t->end_col_offset, p->arena);
+                           t->end_col_offset, 0, p->arena);
 }
 
 /* Check that the source for a single input statement really is a single

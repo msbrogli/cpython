@@ -7,6 +7,7 @@
 #include "pycore_object.h"        // _PyType_AllocNoTrack
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
 #include "pycore_moduleobject.h"  // _PyModule_GetDef()
+#include "pycore_sandbox.h"       // _PySandbox_CheckModuleAccess()
 #include "structmember.h"         // PyMemberDef
 
 static Py_ssize_t max_module_number;
@@ -757,6 +758,11 @@ _PyModuleSpec_IsUninitializedSubmodule(PyObject *spec, PyObject *name)
 static PyObject*
 module_getattro(PyModuleObject *m, PyObject *name)
 {
+    /* Check if this module is blocked in sandbox scope */
+    if (_PySandbox_CheckModuleAccess((PyObject *)m) < 0) {
+        return NULL;
+    }
+
     PyObject *attr, *mod_name, *getattr;
     attr = PyObject_GenericGetAttr((PyObject *)m, name);
     if (attr || !PyErr_ExceptionMatches(PyExc_AttributeError)) {

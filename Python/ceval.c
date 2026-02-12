@@ -23,6 +23,7 @@
 #include "pycore_sysmodule.h"     // _PySys_Audit()
 #include "pycore_tuple.h"         // _PyTuple_ITEMS()
 #include "pycore_emscripten_signal.h"  // _Py_CHECK_EMSCRIPTEN_SIGNALS
+#include "pycore_sandbox.h"            // _PySandbox_* functions
 
 #include "pycore_dict.h"
 #include "dictobject.h"
@@ -1322,11 +1323,93 @@ eval_frame_handle_pending(PyThreadState *tstate)
 #endif
 
 
+/* Branch prediction hints for sandbox checks (matches obmalloc.c pattern) */
+#if defined(__GNUC__) && (__GNUC__ > 2) && defined(__OPTIMIZE__)
+#  define _PY_SANDBOX_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#  define _PY_SANDBOX_LIKELY(x)   __builtin_expect(!!(x), 1)
+#else
+#  define _PY_SANDBOX_UNLIKELY(x) (x)
+#  define _PY_SANDBOX_LIKELY(x)   (x)
+#endif
+
+/* Inline sandbox opcode restriction check for DISPATCH().
+ * Returns 0 if allowed, -1 if not allowed (error already set).
+ * Fast path: check enabled flag first (sandbox usually disabled). */
+static inline int
+_PySandbox_CheckOpcodeDispatch(int opcode, PyInterpreterState *interp)
+{
+    _PySandboxState *sandbox = &interp->sandbox;
+
+    /* Fast exit: sandbox disabled (most common case) */
+    if (_PY_SANDBOX_LIKELY(!sandbox->enabled)) {
+        return 0;
+    }
+
+    /* Fast exit: opcode restriction mode not active */
+    if (_PY_SANDBOX_LIKELY(!sandbox->opcode_restrict_mode)) {
+        return 0;
+    }
+
+    /* Fast exit: sandbox suspended or in error handling */
+    if (_PY_SANDBOX_UNLIKELY(sandbox->suspend_depth || sandbox->suppress_checks)) {
+        return 0;
+    }
+
+    /* De-optimize specialized opcodes to base form for bitmap check */
+    int deopt = _PyOpcode_Deopt[opcode];
+
+    /* Security: block specialized opcodes unless explicitly allowed */
+    if (!sandbox->allow_specialized_opcodes && opcode != deopt) {
+        return _PySandbox_BlockSpecializedOpcode(opcode);  /* Will raise error if in scope */
+    }
+
+    /* Fast exit: opcode in allowed set */
+    if (_PY_SANDBOX_LIKELY(_PySandbox_OpcodeSet_HAS(&sandbox->allowed_opcodes, deopt))) {
+        return 0;
+    }
+
+    /* Slow path: scope check + error */
+    return _PySandbox_CheckOpcode(deopt);
+}
+
+
+/* Check sandbox limits for constant values loaded from code object.
+ * Returns 0 if OK, -1 if limit exceeded (exception set). */
+static inline int
+_PySandbox_CheckLoadConst(PyObject *value)
+{
+    if (PyFloat_Check(value)) {
+        return _PySandbox_CheckTypeAllowed(&PyFloat_Type);
+    }
+    else if (PyComplex_Check(value)) {
+        return _PySandbox_CheckTypeAllowed(&PyComplex_Type);
+    }
+    else if (PyUnicode_Check(value)) {
+        return _PySandbox_CheckStrLength(PyUnicode_GET_LENGTH(value));
+    }
+    else if (PyBytes_Check(value)) {
+        return _PySandbox_CheckBytesLength(PyBytes_GET_SIZE(value));
+    }
+    else if (PyTuple_Check(value)) {
+        return _PySandbox_CheckTupleSize(PyTuple_GET_SIZE(value));
+    }
+    else if (PyLong_Check(value)) {
+        return _PySandbox_CheckIntSize(Py_ABS(Py_SIZE(value)));
+    }
+    return 0;
+}
+
+
 /* Do interpreter dispatch accounting for tracing and instrumentation */
 #define DISPATCH() \
     { \
         NEXTOPARG(); \
         PRE_DISPATCH_GOTO(); \
+        if (_PySandbox_CheckOpcodeDispatch(opcode, tstate->interp) < 0) { \
+            frame->prev_instr = next_instr; \
+            next_instr++; \
+            goto error; \
+        } \
         assert(cframe.use_tracing == 0 || cframe.use_tracing == 255); \
         opcode |= cframe.use_tracing OR_DTRACE_LINE; \
         DISPATCH_GOTO(); \
@@ -1712,6 +1795,9 @@ start_frame:
         tstate->recursion_remaining--;
         goto exit_unwind;
     }
+    if (_PySandbox_EnterFrame(frame) < 0) {
+        goto exit_unwind;
+    }
 
 resume_frame:
     SET_LOCALS_FROM_FRAME();
@@ -1767,6 +1853,17 @@ handle_eval_breaker:
             DISPATCH();
         }
 
+        TARGET(SANDBOX_COUNT) {
+            /* oparg contains the operation count (from AST folding).
+             * If oparg is 0 (legacy), treat as count=1 for backwards compatibility.
+             * Otherwise, use oparg as the count of folded operations. */
+            int count = oparg ? oparg : 1;
+            if (_PySandbox_CheckScopeOperationN(count) < 0) {
+                goto error;
+            }
+            DISPATCH();
+        }
+
         TARGET(RESUME) {
             _PyCode_Warmup(frame->f_code);
             JUMP_TO_INSTRUCTION(RESUME_QUICK);
@@ -1806,6 +1903,11 @@ handle_eval_breaker:
         TARGET(LOAD_CONST) {
             PREDICTED(LOAD_CONST);
             PyObject *value = GETITEM(consts, oparg);
+
+            if (_PySandbox_CheckLoadConst(value) < 0) {
+                goto error;
+            }
+
             Py_INCREF(value);
             PUSH(value);
             DISPATCH();
@@ -1846,6 +1948,11 @@ handle_eval_breaker:
             Py_INCREF(value);
             PUSH(value);
             value = GETITEM(consts, oparg);
+
+            if (_PySandbox_CheckLoadConst(value) < 0) {
+                goto error;
+            }
+
             Py_INCREF(value);
             PUSH(value);
             DISPATCH();
@@ -1877,6 +1984,11 @@ handle_eval_breaker:
 
         TARGET(LOAD_CONST__LOAD_FAST) {
             PyObject *value = GETITEM(consts, oparg);
+
+            if (_PySandbox_CheckLoadConst(value) < 0) {
+                goto error;
+            }
+
             NEXTOPARG();
             next_instr++;
             Py_INCREF(value);
@@ -2432,10 +2544,12 @@ handle_eval_breaker:
                 // GH-99729: We need to unlink the frame *before* clearing it:
                 _PyInterpreterFrame *dying = frame;
                 frame = cframe.current_frame = dying->previous;
+                _PySandbox_ExitFrame(dying);
                 _PyEvalFrameClearAndPop(tstate, dying);
                 _PyFrame_StackPush(frame, retval);
                 goto resume_frame;
             }
+            _PySandbox_ExitFrame(frame);
             /* Restore previous cframe and return. */
             tstate->cframe = cframe.previous;
             tstate->cframe->use_tracing = cframe.use_tracing;
@@ -2643,6 +2757,7 @@ handle_eval_breaker:
             TRACE_FUNCTION_EXIT();
             DTRACE_FUNCTION_EXIT();
             _Py_LeaveRecursiveCallTstate(tstate);
+            _PySandbox_ExitFrame(frame);
             /* Restore previous cframe and return. */
             tstate->cframe = cframe.previous;
             tstate->cframe->use_tracing = cframe.use_tracing;
@@ -2750,6 +2865,18 @@ handle_eval_breaker:
         TARGET(STORE_NAME) {
             PyObject *name = GETITEM(names, oparg);
             PyObject *v = POP();
+
+            /* Sandbox check: block dunder stores outside class body.
+             * Mode depends on allow_magic_methods config:
+             * - True: DUNDER_CLASS_ALL (allow all dunders in class body)
+             * - False: DUNDER_CLASS_WHITELIST (only whitelisted dunders) */
+            int mode = tstate->interp->sandbox.config.allow_magic_methods
+                       ? DUNDER_CLASS_ALL : DUNDER_CLASS_WHITELIST;
+            if (_PySandbox_CheckDunderAccess(name, mode) < 0) {
+                Py_DECREF(v);
+                goto error;
+            }
+
             PyObject *ns = LOCALS();
             int err;
             if (ns == NULL) {
@@ -2878,6 +3005,13 @@ handle_eval_breaker:
             PyObject *owner = TOP();
             PyObject *v = SECOND();
             int err;
+            /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
+            if (!tstate->interp->sandbox.config.allow_dunder_access ||
+                !tstate->interp->sandbox.config.allow_unsafe) {
+                if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
+                    goto error;
+                }
+            }
             STACK_SHRINK(2);
             err = PyObject_SetAttr(owner, name, v);
             Py_DECREF(v);
@@ -2893,6 +3027,14 @@ handle_eval_breaker:
             PyObject *name = GETITEM(names, oparg);
             PyObject *owner = POP();
             int err;
+            /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
+            if (!tstate->interp->sandbox.config.allow_dunder_access ||
+                !tstate->interp->sandbox.config.allow_unsafe) {
+                if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
+                    Py_DECREF(owner);
+                    goto error;
+                }
+            }
             err = PyObject_SetAttr(owner, name, (PyObject *)NULL);
             Py_DECREF(owner);
             if (err != 0)
@@ -2927,6 +3069,13 @@ handle_eval_breaker:
 
         TARGET(LOAD_NAME) {
             PyObject *name = GETITEM(names, oparg);
+
+            /* Sandbox check: block dunder variable names (e.g., __builtins__)
+             * Use DUNDER_CLASS_WHITELIST to allow class body dunders */
+            if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_WHITELIST) < 0) {
+                goto error;
+            }
+
             PyObject *locals = LOCALS();
             PyObject *v;
             if (locals == NULL) {
@@ -2994,6 +3143,12 @@ handle_eval_breaker:
             int push_null = oparg & 1;
             PEEK(0) = NULL;
             PyObject *name = GETITEM(names, oparg>>1);
+
+            /* Sandbox check: block dunder variable names (e.g., __builtins__) */
+            if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
+                goto error;
+            }
+
             PyObject *v;
             if (PyDict_CheckExact(GLOBALS())
                 && PyDict_CheckExact(BUILTINS()))
@@ -3458,6 +3613,13 @@ handle_eval_breaker:
             PREDICTED(LOAD_ATTR);
             PyObject *name = GETITEM(names, oparg);
             PyObject *owner = TOP();
+            /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
+            if (!tstate->interp->sandbox.config.allow_dunder_access ||
+                !tstate->interp->sandbox.config.allow_unsafe) {
+                if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
+                    goto error;
+                }
+            }
             PyObject *res = PyObject_GetAttr(owner, name);
             if (res == NULL) {
                 goto error;
@@ -3601,6 +3763,10 @@ handle_eval_breaker:
         TARGET(STORE_ATTR_INSTANCE_VALUE) {
             assert(cframe.use_tracing == 0);
             PyObject *owner = TOP();
+            /* Check sandbox frozen state - must deopt if frozen to allow error */
+            if (_PySandbox_CheckFrozen(owner) < 0) {
+                goto error;
+            }
             PyTypeObject *tp = Py_TYPE(owner);
             _PyAttrCache *cache = (_PyAttrCache *)next_instr;
             uint32_t type_version = read_u32(cache->version);
@@ -3629,6 +3795,10 @@ handle_eval_breaker:
         TARGET(STORE_ATTR_WITH_HINT) {
             assert(cframe.use_tracing == 0);
             PyObject *owner = TOP();
+            /* Check sandbox frozen state - must deopt if frozen to allow error */
+            if (_PySandbox_CheckFrozen(owner) < 0) {
+                goto error;
+            }
             PyTypeObject *tp = Py_TYPE(owner);
             _PyAttrCache *cache = (_PyAttrCache *)next_instr;
             uint32_t type_version = read_u32(cache->version);
@@ -3676,6 +3846,10 @@ handle_eval_breaker:
         TARGET(STORE_ATTR_SLOT) {
             assert(cframe.use_tracing == 0);
             PyObject *owner = TOP();
+            /* Check sandbox frozen state - must deopt if frozen to allow error */
+            if (_PySandbox_CheckFrozen(owner) < 0) {
+                goto error;
+            }
             PyTypeObject *tp = Py_TYPE(owner);
             _PyAttrCache *cache = (_PyAttrCache *)next_instr;
             uint32_t type_version = read_u32(cache->version);
@@ -4483,6 +4657,14 @@ handle_eval_breaker:
             PyObject *name = GETITEM(names, oparg);
             PyObject *obj = TOP();
             PyObject *meth = NULL;
+
+            /* Check for __iter__ when allow_unsafe=0, or dunders when allow_dunder_access=0 */
+            if (!tstate->interp->sandbox.config.allow_dunder_access ||
+                !tstate->interp->sandbox.config.allow_unsafe) {
+                if (_PySandbox_CheckDunderAccess(name, DUNDER_CLASS_NEVER) < 0) {
+                    goto error;
+                }
+            }
 
             int meth_found = _PyObject_GetMethod(obj, name, &meth);
 
@@ -5415,6 +5597,9 @@ handle_eval_breaker:
                 func->func_defaults = POP();
             }
 
+            /* Auto-mutable: mark function if in sandbox scope */
+            _PySandbox_MaybeMarkMutable((PyObject *)func);
+
             PUSH((PyObject *)func);
             DISPATCH();
         }
@@ -5633,6 +5818,7 @@ handle_eval_breaker:
             }
             else {
                 /* line-by-line tracing support */
+
                 if (PyDTrace_LINE_ENABLED()) {
                     maybe_dtrace_line(frame, &tstate->trace_info, instr_prev);
                 }
@@ -5819,6 +6005,7 @@ exit_unwind:
     assert(_PyErr_Occurred(tstate));
     _Py_LeaveRecursiveCallTstate(tstate);
     if (frame->is_entry) {
+        _PySandbox_ExitFrame(frame);
         /* Restore previous cframe and exit */
         tstate->cframe = cframe.previous;
         tstate->cframe->use_tracing = cframe.use_tracing;
@@ -5828,6 +6015,7 @@ exit_unwind:
     // GH-99729: We need to unlink the frame *before* clearing it:
     _PyInterpreterFrame *dying = frame;
     frame = cframe.current_frame = dying->previous;
+    _PySandbox_ExitFrame(dying);
     _PyEvalFrameClearAndPop(tstate, dying);
 
 resume_with_error:

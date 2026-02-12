@@ -11,6 +11,7 @@
 #include "pycore_pylifecycle.h"
 #include "pycore_pymem.h"         // _PyMem_SetDefaultAllocator()
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
+#include "pycore_sandbox.h"       // _PySandbox_CheckImport()
 #include "pycore_sysmodule.h"     // _PySys_Audit()
 #include "marshal.h"              // PyMarshal_ReadObjectFromString()
 #include "importdl.h"             // _PyImport_DynLoadFiletab
@@ -1830,6 +1831,11 @@ PyImport_ImportModuleLevelObject(PyObject *name, PyObject *globals,
         }
         abs_name = name;
         Py_INCREF(abs_name);
+    }
+
+    /* Sandbox import restriction check */
+    if (_PySandbox_CheckImport(abs_name, fromlist) < 0) {
+        goto error;
     }
 
     mod = import_get_module(tstate, abs_name);

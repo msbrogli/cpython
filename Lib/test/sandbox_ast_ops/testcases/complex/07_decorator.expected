@@ -1,0 +1,13 @@
+   2: L   3 SANDBOX_COUNT 1
+   0:       ---           Code: decorator
+   4: L   4 SANDBOX_COUNT 1
+   0:       ---           Code: wrapper
+   4: L   5 SANDBOX_COUNT 1
+   6: L   5 SANDBOX_COUNT 1
+  16: L   6 SANDBOX_COUNT 1
+  10: L   9 SANDBOX_COUNT 1
+   0:       ---           Code: foo
+   2: L  10 SANDBOX_COUNT 1
+   4: L  10 SANDBOX_COUNT 1
+  18: L   8 SANDBOX_COUNT 1
+  36: L  12 SANDBOX_COUNT 1

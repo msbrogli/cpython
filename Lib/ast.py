@@ -152,6 +152,9 @@ def dump(node, annotate_fields=True, include_attributes=False, *, indent=None):
                     args.append(value)
             if include_attributes and node._attributes:
                 for name in node._attributes:
+                    # Skip internal sandbox-related attributes
+                    if name == 'operations_count':
+                        continue
                     try:
                         value = getattr(node, name)
                     except AttributeError:

@@ -442,9 +442,22 @@ class CompatPickleTests(unittest.TestCase):
                     self.assertEqual(IMPORT_MAPPING[module2], module3)
 
     def test_name_mapping(self):
+        # Sandbox exceptions are Python 3 only - they all inherit from SandboxError
+        # which inherits from Exception. They map to closest Py2 equivalents.
+        sandbox_exceptions = {
+            'SandboxError', 'SandboxAttributeError', 'SandboxImportError',
+            'SandboxMemoryError', 'SandboxOverflowError', 'SandboxRecursionError',
+            'SandboxRuntimeError', 'SandboxSecurityError', 'SandboxTypeError',
+        }
         for (module3, name3), (module2, name2) in REVERSE_NAME_MAPPING.items():
             with self.subTest(((module3, name3), (module2, name2))):
-                if (module2, name2) == ('exceptions', 'OSError'):
+                if name3 in sandbox_exceptions:
+                    # Sandbox exceptions only exist in Python 3, they all inherit
+                    # from SandboxError (which inherits from Exception).
+                    # Check this case first before OSError/ImportError checks.
+                    attr = getattribute(module3, name3)
+                    self.assertTrue(issubclass(attr, builtins.SandboxError))
+                elif (module2, name2) == ('exceptions', 'OSError'):
                     attr = getattribute(module3, name3)
                     self.assertTrue(issubclass(attr, OSError))
                 elif (module2, name2) == ('exceptions', 'ImportError'):
@@ -506,6 +519,15 @@ class CompatPickleTests(unittest.TestCase):
         self.assertEqual(reverse_mapping('builtins', 'OSError'),
                          ('exceptions', 'OSError'))
 
+        # Sandbox exceptions are Python 3 only, they don't exist in Python 2
+        sandbox_exceptions = {
+            builtins.SandboxError, builtins.SandboxAttributeError,
+            builtins.SandboxImportError, builtins.SandboxMemoryError,
+            builtins.SandboxOverflowError, builtins.SandboxRecursionError,
+            builtins.SandboxRuntimeError, builtins.SandboxSecurityError,
+            builtins.SandboxTypeError,
+        }
+
         for name, exc in get_exceptions(builtins):
             with self.subTest(name):
                 if exc in (BlockingIOError,
@@ -515,6 +537,9 @@ class CompatPickleTests(unittest.TestCase):
                            EncodingWarning,
                            BaseExceptionGroup,
                            ExceptionGroup):
+                    continue
+                # Skip sandbox exceptions - they're Python 3 only
+                if exc in sandbox_exceptions:
                     continue
                 if exc is not OSError and issubclass(exc, OSError):
                     self.assertEqual(reverse_mapping('builtins', name),

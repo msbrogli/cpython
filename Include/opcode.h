@@ -119,6 +119,7 @@ extern "C" {
 #define POP_JUMP_BACKWARD_IF_NONE              174
 #define POP_JUMP_BACKWARD_IF_FALSE             175
 #define POP_JUMP_BACKWARD_IF_TRUE              176
+#define SANDBOX_COUNT                          181
 #define BINARY_OP_ADAPTIVE                       3
 #define BINARY_OP_ADD_FLOAT                      4
 #define BINARY_OP_ADD_INT                        5
